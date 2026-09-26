@@ -14,8 +14,26 @@ function showFatal(msg: string) {
   console.error(msg);
 }
 
-window.addEventListener('error', (e) => showFatal(String(e.error ?? e.message)));
-window.addEventListener('unhandledrejection', (e) => showFatal(String(e.reason)));
+/** 运行期错误：状态提示 + 继续运行（不杀死应用）；同一消息 5 秊内不重复 */
+let lastNoticeAt = 0;
+let lastNoticeMsg = '';
+function showNonFatal(msg: string) {
+  console.error(msg);
+  const now = Date.now();
+  if (msg === lastNoticeMsg && now - lastNoticeAt < 5000) return;
+  lastNoticeAt = now;
+  lastNoticeMsg = msg;
+  import('./app/store.svelte')
+    .then((m) => {
+      m.editor.status = `⚠️ 运行错误（已忽略）：${String(msg).slice(0, 120)}`;
+      m.editor.touchView();
+    })
+    .catch(() => {});
+}
+
+// 挂载失败才是致命错误；运行期错误走状态提示
+window.addEventListener('error', (e) => showNonFatal(String(e.error ?? e.message)));
+window.addEventListener('unhandledrejection', (e) => showNonFatal(String(e.reason)));
 
 try {
   mount(App, { target });

@@ -584,21 +584,22 @@ export const elementsLayer: RenderLayer = {
         const rid = dp.regionId;
         const sel = dp.regionSelected || highlightRegionId === rid;
         const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, `piece:${dp.key}`);
-        // 跳过判定必须考虑世界副本：元素可经 k±1 副本平移后落入窗口（平移循环/跨缝），
-        // 未平移包围盒不相交 ≠ 不可见。
-        if (env.dirtyBoxes?.length) {
+        // 跳过判定（仅对有环元素）：
+        // 1) 无环片（整框底色等）无包围盒语义，永不跳过；
+        // 2) 有环片按**周期相交**判定——元素可经 k 个世界副本平移后落入窗口，
+        //    取所有使 [b + k·per] 与脏区相交的 k（精确解，不设固定 ±2 上限）。
+        if (env.dirtyBoxes?.length && entry.rings.length) {
           const b = entry.bbox;
           const per = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
           let hits = false;
-          for (let k = -2; k <= 2 && !hits; k++) {
-            const sft = k * per;
-            hits = env.dirtyBoxes.some(
-              (r) =>
-                b.maxX + sft >= r.minX &&
-                b.minX + sft <= r.maxX &&
-                b.maxY >= r.minY &&
-                b.minY <= r.maxY,
-            );
+          for (const r of env.dirtyBoxes) {
+            if (b.maxY < r.minY || b.minY > r.maxY) continue;
+            const kMin = Math.ceil((r.minX - b.maxX) / per);
+            const kMax = Math.floor((r.maxX - b.minX) / per);
+            if (kMin <= kMax) {
+              hits = true;
+              break;
+            }
           }
           if (!hits) continue;
         }
