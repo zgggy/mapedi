@@ -215,10 +215,12 @@ export function drawPeriodicStatic(
   const MARGIN = 0.3;
   const vpPixelW = Math.min(8192, Math.round(w * env.dpr * (1 + MARGIN * 2)));
   const vpPixelH = Math.min(8192, Math.round(h * env.dpr * (1 + MARGIN * 2)));
+  // 视口模式覆盖的是「可见内容窗口」：中心 = cam.x − 内容偏移（右键平移窗口随内容滑动）
+  const viewCenterX = env.cam.x - (env.contentOffsetX ?? 0);
   // 相机位置分桶：余量内平移不失效
   const bucketSizeX = Math.max(1, w * MARGIN);
   const bucketSizeY = Math.max(1, h * MARGIN);
-  const camBucketX = Math.round(env.cam.x / bucketSizeX);
+  const camBucketX = Math.round(viewCenterX / bucketSizeX);
   const camBucketY = Math.round(env.cam.y / bucketSizeY);
 
   const usePeriod = periodFits;
@@ -250,7 +252,7 @@ export function drawPeriodicStatic(
       // period 模式：x=0 画整周期，靠平铺显示；viewport 模式：x=cam.x 画视口窗口
       cam: usePeriod
         ? { x: 0, y: env.cam.y, scale: TEX_SCALE }
-        : { x: env.cam.x, y: env.cam.y, scale: TEX_SCALE },
+        : { x: viewCenterX, y: env.cam.y, scale: TEX_SCALE },
       w: pixelW / env.dpr,
       h: proxyH,
       contentOffsetX: 0,
@@ -277,7 +279,7 @@ export function drawPeriodicStatic(
         c.restore();
       }
     }
-    state = { key, proxyX: env.cam.x, proxyY: env.cam.y, canvas: surf.canvas };
+    state = { key, proxyX: usePeriod ? env.cam.x : viewCenterX, proxyY: env.cam.y, canvas: surf.canvas };
     stateMap.set(key, state);
     if (stateMap.size > 4) {
       const firstKey = stateMap.keys().next().value;
@@ -296,8 +298,8 @@ export function drawPeriodicStatic(
     // viewport 模式：贴图对应视口+余量窗口，按相机偏移滑动
     const texDisplayW = (state.canvas.width / env.dpr) * zoom;
     const texDisplayH = (state.canvas.height / env.dpr) * zoom;
-    // 贴图中心对齐烘焙时的 proxy 相机位置
-    const xOff = w / 2 + (state.proxyX - env.cam.x) * env.cam.scale - texDisplayW / 2;
+    // 贴图中心对齐烘焙时的可见内容窗口中心（含内容偏移）
+    const xOff = w / 2 + (state.proxyX - viewCenterX) * env.cam.scale - texDisplayW / 2;
     const yOff = h / 2 + (env.cam.y - state.proxyY) * env.cam.scale - texDisplayH / 2;
     out.drawImage(state.canvas, xOff, yOff, texDisplayW, texDisplayH);
     out.restore();

@@ -797,6 +797,8 @@ export const decorationsLayer: RenderLayer = {
     const font = style.labels.default;
     beginWorld(ctx, env);
     clipToMapFrame(ctx, env);
+    // 屏幕空间文字的坐标换算：与 beginWorld 同一 MapTransform（含内容偏移，唯一换算点）
+    const tScreen = new MapTransform(cam, w, h, env.drawDx ?? env.contentOffsetX ?? 0);
 
     for (const layer of world.layers) {
       const labelMode = layer.labelMode ?? 'none';
@@ -828,11 +830,8 @@ export const decorationsLayer: RenderLayer = {
         const place = (bx: number, by: number, bw: number, bh: number) => {
           occupied.push({ x: bx, y: by, w: bw, h: bh });
         };
-        /** 屏幕坐标投影（用户空间 → 屏幕） */
-        const toScreen = (x: number, y: number) => ({
-          sx: (x - cam.x) * cam.scale + w / 2,
-          sy: -(y - cam.y) * cam.scale + h / 2,
-        });
+        /** 屏幕坐标投影（走统一 MapTransform，标签随内容平移） */
+        const toScreen = (x: number, y: number) => tScreen.worldToScreen(x, y);
         const regionCenter = (cells: number[]): { x: number; y: number } | null => {
           if (!cells.length) return null;
           let sx = pcache.centers[cells[0] * 2];
@@ -914,7 +913,7 @@ export const decorationsLayer: RenderLayer = {
             const x = pcache.centers[id * 2];
             const y = pcache.centers[id * 2 + 1];
             const label = cellMarker === 'id' ? String(id) : String(Math.round(cell.height));
-            const sp = { sx: (x - cam.x) * cam.scale + w / 2, sy: -(y - cam.y) * cam.scale + h / 2 };
+            const sp = tScreen.worldToScreen(x, y);
             if (sp.sx < -20 || sp.sx > w + 20 || sp.sy < -20 || sp.sy > h + 20) continue;
             ctx.fillStyle = 'rgba(255,255,255,0.7)';
             ctx.fillText(label, sp.sx, sp.sy);

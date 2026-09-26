@@ -16,7 +16,7 @@ export function builtinLayers(): LayerDef[] {
       kind: 'custom',
       modeDefault: 'view',
       baseMesh: true,
-      cellMarker: 'id',
+      cellMarker: 'none',
       allowOverlap: true,
       requireAdjacency: false,
       requireCenter: false,
@@ -231,6 +231,11 @@ export function ensureBuiltinLayers(world: World): World {
       // 修复缺失/错误的内置元数据（如 river 曾从 layers 里消失）
       if (cur.kind !== b.kind && !cur.id.startsWith('custom-')) {
         cur.kind = b.kind;
+        changed = true;
+      }
+      // cellMarker 'id' 是旧的调试默认值（无 UI 入口），同步回默认
+      if (cur.cellMarker !== b.cellMarker && b.cellMarker === 'none' && !cur.id.startsWith('custom-')) {
+        cur.cellMarker = 'none';
         changed = true;
       }
     }
