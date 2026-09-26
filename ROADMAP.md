@@ -72,7 +72,7 @@
 | **100k 级 cell 目标** | CPU 侧交互（平移/绘制/选中/悬停）已按 100k 优化；**缩放动画达标唯一路径 = GPU 后端** | GPU 后端设计（RegionMesh/WebGL）待与用户敲定后立项 |
 | **笔刷区间重建** | `flushHeightRegions` 拓扑变化时 `rebuildLandSeaRegions` 全量；非拓扑走 `updateHeightIntervalElements` 增量 ✓ | 归入卡顿包 2（脏矩形重烘焙）一并处理 |
 | **getProjCache 首次重建** | 已改 key 失效 ✓；端点拖动反复触发已消除（包 1）✓；首次 O(N) 30000 cell ≈ 591ms（100k ~2s，一次性） | 可 Worker 化 |
-| **GPU 后端** | 离屏填充通道接线已通（map2d 转发补全），但 `ensureGpuFill` 现有 `return null` 测量门（先量 Canvas2D 基线）；架构不对 | **升级为 100k 达标路径**：RegionMesh（三角化缓存 + per-vertex 属性）→ WebGL 批量；填充/描边/阴影全走 GPU，保 RENDER_LOGIC z 序 |
+| **GPU 后端** | ✅ 第一版已落地（`a7d184b`）：WebGL2 RegionMesh 元素渲染（填充 stencil 奇偶/阴影纹理 blur/描边四边形），显示面板可切换，像素级对齐 Canvas（×1/×6 对照 0 差异） | 用户验收后默认切 GPU → 100k 压测 → 视需要烘焙期 GL 直渲纹理 |
 
 ### P1 — 架构一致性
 
