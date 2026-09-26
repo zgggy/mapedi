@@ -278,8 +278,6 @@ export interface World {
   sharedEdges?: Map<string, [LonLat, LonLat]>;
   /** 逐层渲染配置 */
   layerRenderConfig?: Map<LayerId, LayerRenderConfig>;
-  /** 逐层特参（高度层 fillMode 等，与三通道样式分开） */
-  layerRenderParams?: Map<LayerId, import('./layer/config').LayerExtraParams>;
   /** 恒星系统 / 本星轨道与卫星（球面 3D 可视化） */
   astro?: StarSystem;
 }

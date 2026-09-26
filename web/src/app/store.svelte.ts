@@ -39,7 +39,7 @@ import {
 import { buildRoadSegments, dragRoadEndpoint, roadComponentCount } from '../core/draw/roads';
 import { computeClimate } from '../core/climate';
 import { generateBiomes } from '../core/biomes';
-import { rebuildHeightRegions, absorbLandCell, releaseOceanCell, heightTopologyChanged } from '../core/heightRegions';
+import { absorbLandCell, releaseOceanCell, heightTopologyChanged } from '../core/heightRegions';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { rebuildHeightIntervalElements, updateHeightIntervalElements } from '../core/layer/heightElements';
 import {
@@ -68,7 +68,7 @@ import {
   type ElementStyle,
   type ElementStylePatch,
 } from '../core/layer/style';
-import { resolveLayerStyle, resolveLayerParams, type LayerExtraParams } from '../core/layer/config';
+import { resolveLayerStyle } from '../core/layer/config';
 import {
   heightDrawStroke,
   type HeightDrawInput,
@@ -396,7 +396,7 @@ export class EditorStore {
     for (const r of world.regions) {
       if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
     }
-    rebuildHeightRegions(world);
+    rebuildLandSeaRegions(world);
     world.astro = defaultStarSystem(seed, world.climate);
     this.replaceWorld(world);
     this.status = `${world.cells.length} 地块 · Worker`;
@@ -418,7 +418,7 @@ export class EditorStore {
     for (const r of world.regions) {
       if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
     }
-    rebuildHeightRegions(world);
+    rebuildLandSeaRegions(world);
     if (seq !== this.generationSeq) return;
     this.replaceWorld(world);
     const ms = Math.round(performance.now() - t0);
@@ -522,7 +522,7 @@ export class EditorStore {
     const w = deserializeWorld(json);
     ensureBuiltinLayers(w);
     if (!w.astro) w.astro = defaultStarSystem(w.meta.seed, w.climate);
-    rebuildHeightRegions(w);
+    rebuildLandSeaRegions(w);
     this.replaceWorld(w);
     this.status = `已从浏览器恢复 · ${w.cells.length} 地块`;
     return true;
@@ -627,20 +627,6 @@ export class EditorStore {
   /** 图层显示样式（DisplayStyle 面板） */
   layerStyleConfig(id: string): ElementStyle {
     return resolveLayerStyle(this.world, id);
-  }
-
-  /** 图层特参（高度层 fillMode 等） */
-  layerExtraParams(id: string): LayerExtraParams {
-    return resolveLayerParams(this.world, id);
-  }
-
-  setLayerExtraParams(id: string, patch: LayerExtraParams) {
-    if (!this.world) return;
-    const map = this.world.layerRenderParams ?? new Map();
-    const cur = resolveLayerParams(this.world, id);
-    map.set(id, { ...cur, ...patch });
-    this.world.layerRenderParams = map;
-    this.touchRegions();
   }
 
   setLayerStyle(id: string, patch: ElementStylePatch) {
@@ -1288,7 +1274,7 @@ export class EditorStore {
       const w = await importProjectFile(file);
       if (seq !== this.generationSeq) return;
       ensureBuiltinLayers(w);
-      rebuildHeightRegions(w);
+      rebuildLandSeaRegions(w);
       this.replaceWorld(w);
       this.status = `已导入 ${w.cells.length} 地块`;
     } catch (e) {

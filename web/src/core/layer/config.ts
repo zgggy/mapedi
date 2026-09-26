@@ -17,19 +17,6 @@ export type SplitPolicy = 'newElement' | 'keepEnclave' | 'reject';
 export type LandSeaRule = 'landOnly' | 'oceanOnly' | 'any' | 'noCrossLandSea';
 export type ElementSource = 'explicit' | 'derivedFromHeight' | 'derivedFromLandSea' | 'onePerCell';
 
-/**
- * 图层特参：只给需要独立参数的层用（与 ElementStyle 三通道分开）。
- * 高度层：等高线（12 档嵌套）/ 连续色带（边界内渐变）。
- */
-export interface LayerExtraParams {
-  heightFillMode?: 'contour' | 'continuous';
-}
-
-export function defaultExtraParams(id: LayerId): LayerExtraParams {
-  if (id === 'height') return { heightFillMode: 'contour' };
-  return {};
-}
-
 export interface PlacementRule {
   landSea: LandSeaRule;
   heightMin?: number;
@@ -58,8 +45,6 @@ export interface LayerConfig {
   placement: PlacementRule;
   gen: LayerGenParams;
   style: ElementStyle;
-  /** 图层特参（仅特殊层用；高度层 fillMode 等） */
-  extra?: LayerExtraParams;
   workspace: {
     listElements: boolean;
   };
@@ -301,16 +286,6 @@ export function resolveLayerStyle(
   const stored = world?.layerRenderConfig?.get(id);
   if (!stored) return base;
   return patchElementStyle(base, normalizeStyle(stored) as ElementStylePatch);
-}
-
-/** 图层特参（渲染模式类开关，与三通道样式分开） */
-export function resolveLayerParams(
-  world: { layerRenderParams?: Map<string, LayerExtraParams> } | null | undefined,
-  id: LayerId,
-): LayerExtraParams {
-  const base = defaultExtraParams(id);
-  const stored = world?.layerRenderParams?.get(id);
-  return stored ? { ...base, ...stored } : base;
 }
 
 /** placement 闸门：绘制/生成能否落在该 cell */

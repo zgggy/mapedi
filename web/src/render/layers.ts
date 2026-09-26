@@ -37,7 +37,6 @@ import { ringPath2D, cellPolyPath2D } from '../core/ring/path2d';
 import { poleSideForRing } from '../core/ring/normalize';
 import type { DisplayPiece } from '../core/displayCompose';
 import { isLayerShown } from '../core/displayCompose';
-import { heightGradientColor, heightToLevel, levelToColor, HEIGHT_COLOR_STOPS } from '../core/heightRegions';
 import { dataRev } from '../core/rev';
 
 export interface RenderEnv {

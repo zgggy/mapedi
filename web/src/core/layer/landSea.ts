@@ -342,17 +342,4 @@ export function continentCellGroups(world: World): CellId[][] {
     .map((r) => r.cells);
 }
 
-/** 兼容旧名 */
-export function rebuildHeightRegions(world: World, dirty?: Iterable<CellId> | null): void {
-  rebuildLandSeaRegions(world, dirty);
-}
-
-export function heightKindOf(r: { attributes?: Record<string, unknown> }): LandSeaKind {
-  return landSeaKindOf(r);
-}
-
-export function heightKindEmoji(kind: LandSeaKind): string {
-  return kind === 'lake' ? '💧' : kind === 'ocean' ? '🌊' : '⛰️';
-}
-
 export { lakeMaxCells };
