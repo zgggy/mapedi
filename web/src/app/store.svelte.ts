@@ -86,7 +86,7 @@ import { applyHeightmapFile } from '../core/heightmap';
 import { fixIssue, validateWorld, type ValidateIssue } from '../core/validate';
 import { defaultClimate, type ClimateParams, type LonLat, type World } from '../core/types';
 import { idbLoad, idbSave } from '../persist/storage';
-import { SOFT_MAX_DENSITY } from '../core/world';
+import { SOFT_MAX_DENSITY, HARD_MAX_DENSITY } from '../core/world';
 import {
   cascadeEnabled,
   defaultProfiles,
@@ -387,7 +387,8 @@ export class EditorStore {
 
   async generate(seed: number, count: number) {
     const seq = ++this.generationSeq;
-    const n = Math.max(100, Math.min(count, 50000));
+    // 硬上限唯一钳制点（core/world.HARD_MAX_DENSITY）；软上限解锁是 UI 策略，不在生成链
+    const n = Math.max(100, Math.min(count, HARD_MAX_DENSITY));
     this.generating = true;
     this.genProgress = 0;
     this.status = `生成中… ${n} 地块`;

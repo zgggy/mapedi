@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SOFT_MAX_DENSITY } from '../../core/world';
+  import { SOFT_MAX_DENSITY, HARD_MAX_DENSITY } from '../../core/world';
 
   let {
     seedInput = $bindable(''),
@@ -45,7 +45,7 @@
     <input
       type="number"
       min="100"
-      max="100000"
+      max={HARD_MAX_DENSITY}
       value={densityInput}
       onblur={(e) => {
         densityInput = checkUnlock(Number(e.currentTarget.value) || densityInput);

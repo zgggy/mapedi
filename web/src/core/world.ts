@@ -6,7 +6,10 @@ import { migrateToPathFeature } from './paths';
 import { getCellGrid, invalidateCellGrid } from './index/cellGrid';
 
 export const DEFAULT_DENSITY = 30000;
+/** 软上限：超过需用户确认解锁（GenDock）；不是生成链的钳制 */
 export const SOFT_MAX_DENSITY = 100000;
+/** 硬上限：生成链唯一钳制点（store.generate）；UI 输入框 max 与此一致 */
+export const HARD_MAX_DENSITY = 200000;
 
 export function builtinLayers(): LayerDef[] {
   return [

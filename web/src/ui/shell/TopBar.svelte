@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ViewMode } from './shell';
+  import { HARD_MAX_DENSITY } from '../../core/world';
 
   let {
     open = $bindable(false),
@@ -104,7 +105,7 @@
               <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
                 <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
               </label>
-              <label>地块 <input type="number" min="100" max="200000" value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
+              <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
               <button type="button" class="primary" disabled={generating} onclick={() => onGenerate(Number(seedInput) || 1, densityInput)}>🎲 生成</button>
             </div>
             {#if generating}
