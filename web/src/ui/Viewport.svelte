@@ -738,6 +738,7 @@
     void projParams;
     void styleId;
     void cam.scale;
+    void renderBackend; // 切换渲染后端必须触发重烘焙
     onzoom?.(cam.scale / 180);
     requestRender();
     requestOverlay();

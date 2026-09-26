@@ -329,8 +329,9 @@ export class GpuElementsRenderer {
         for (const dx of s.copies) {
           gl.uniform1f(this.locColor.uDx, dx);
           for (const fp of fills) {
-            this.uploadVerts(fanFrom(refX, refY, fp));
-            gl.drawArrays(gl.TRIANGLES, 0, fp.length);
+            const fan = fanFrom(refX, refY, fp);
+            this.uploadVerts(fan);
+            gl.drawArrays(gl.TRIANGLES, 0, fan.length / 2);
           }
         }
 
@@ -340,6 +341,7 @@ export class GpuElementsRenderer {
         gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
         if (fillRgb && s.fill) {
           const alpha = Math.max(0, Math.min(1, s.fill.alpha));
+          gl.uniform1f(this.locColor.uDx, 0);
           gl.uniform4f(this.locColor.uColor, fillRgb[0] / 255, fillRgb[1] / 255, fillRgb[2] / 255, alpha);
           this.uploadVerts(quad(minX - span, minY - span, maxX + span, maxY + span));
           gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -392,9 +394,19 @@ export class GpuElementsRenderer {
       target.setTransform(dpr, 0, 0, dpr, 0, 0);
       target.drawImage(this.canvas, 0, 0, env.w, env.h);
       target.restore();
+      // 运行计数：外部可验证 GPU 通道确实在跑（避免比对到 Canvas 兜底而不自知）
+      if (typeof window !== 'undefined') {
+        const g = window as unknown as { __gpuRan?: number };
+        g.__gpuRan = (g.__gpuRan ?? 0) + 1;
+      }
       return true;
     } catch (e) {
       console.error('[gpuElements] 渲染失败，回退 Canvas2D：', e);
+      if (typeof window !== 'undefined') {
+        (window as unknown as Record<string, unknown>).__gpuErr = String(
+          e instanceof Error ? e.stack || e.message : e,
+        );
+      }
       return false;
     }
   }
@@ -467,6 +479,7 @@ export class GpuElementsRenderer {
     const blurPass = (src: { tex: WebGLTexture }, dst: { fb: WebGLFramebuffer }, dirX: number, dirY: number): void => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
       gl.viewport(0, 0, this.rtW, this.rtH);
+      gl.disable(gl.BLEND); // blur 是覆盖写，混合会让结果被旧底调制
       gl.useProgram(this.progBlur);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, src.tex);
@@ -480,6 +493,7 @@ export class GpuElementsRenderer {
     };
     blurPass(rt, rt2, 1, 0);
     blurPass(rt2, rt, 0, 1);
+    gl.enable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this.rtW, this.rtH);
   }
