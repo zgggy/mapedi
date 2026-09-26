@@ -1,7 +1,7 @@
 /** 圆柱投影的静态层只合成一个周期；平移仅平铺已合成的像素。 */
 import { dataRev } from '../core/rev';
 import type { RenderEnv, RenderLayer } from './layers.js';
-import { MapTransform } from './space.js';
+import { MapTransform, worldCopyDxs } from './space.js';
 
 type PeriodicState = {
   key: string;
@@ -217,11 +217,11 @@ export function drawPeriodicStatic(
   const vpPixelH = Math.min(8192, Math.round(h * env.dpr * (1 + MARGIN * 2)));
   // 视口模式覆盖的是「可见内容窗口」：中心 = cam.x − 内容偏移（右键平移窗口随内容滑动）
   const viewCenterX = env.cam.x - (env.contentOffsetX ?? 0);
-  // 相机位置分桶：余量内平移不失效
-  const bucketSizeX = Math.max(1, w * MARGIN);
-  const bucketSizeY = Math.max(1, h * MARGIN);
-  const camBucketX = Math.round(viewCenterX / bucketSizeX);
-  const camBucketY = Math.round(env.cam.y / bucketSizeY);
+  // 分桶按屏幕像素（内容坐标×比例换算，勿混用单位）；桶宽 = 2×余量 → 滑动出余量必换桶重烘
+  const bucketSizeX = Math.max(1, 2 * MARGIN * w);
+  const bucketSizeY = Math.max(1, 2 * MARGIN * h);
+  const camBucketX = Math.round((viewCenterX * env.cam.scale) / bucketSizeX);
+  const camBucketY = Math.round((env.cam.y * env.cam.scale) / bucketSizeY);
 
   const usePeriod = periodFits;
   const pixelW = usePeriod ? periodPixelW : vpPixelW;
@@ -257,7 +257,15 @@ export function drawPeriodicStatic(
       h: proxyH,
       contentOffsetX: 0,
       drawDx: 0,
-      worldDxs: usePeriod ? [-period, 0, period] : [0],
+      worldDxs: usePeriod
+        ? [-period, 0, period]
+        : worldCopyDxs(
+            0,
+            { x: viewCenterX, y: env.cam.y, scale: TEX_SCALE },
+            pixelW / env.dpr,
+            period,
+            env.pcache.worldBBox,
+          ),
       periodicTilePadX: pad / TEX_SCALE,
       isDragging: false,
     };

@@ -87,6 +87,14 @@ export function drawWorld(
 ): void {
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
+  // 每帧先清屏铺海色底：贴图/图层未覆盖处不得留上一帧残影
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
+  const style = styleById(opts?.styleId ?? 'dark');
+  ctx.fillStyle = style.ocean;
+  ctx.fillRect(0, 0, w, h);
   const proj = opts?.projection ?? 'mercator';
   const pp = opts?.projParams ?? defaultProjParams();
   const contentOffsetX = opts?.contentOffsetX ?? 0;
@@ -124,7 +132,7 @@ export function drawWorld(
     dpr,
     w,
     h,
-    style: styleById(opts?.styleId ?? 'dark'),
+    style,
     focus: opts?.focusLayer ?? 'height',
     proj,
     pp,
