@@ -10,7 +10,17 @@
 
 ## 当前状态（截至交接）
 
-**本轮已处理（2026-09-26，第十二次）— 测试修复整包 + 卡顿全盘分析设计**
+**本轮已处理（2026-09-26，第十三次）— 显示修复 ×2 + 卡顿包 1 + 100k 可行性**
+
+- **显示修复（`13d0bc2`，用户实测报的两个 bug）**：
+  - 标签随右键平移不动 → decorations 的标签/cellMarker 文本手算屏幕坐标漏了内容偏移（违反 MapTransform 唯一换算点契约）；已统一走 MapTransform。
+  - 放大过阈值后元素闪回到标签位置 → 静态贴图 viewport 模式定位漏 contentOffsetX 且取景窗口没按"可见内容窗口"（cam.x−内容偏移）；已统一 viewCenterX 口径，period/viewport 两模式一致。
+  - 地块全显 cell id → builtinLayers 的 `cellMarker:'id'` 调试遗留默认值；改 'none' + ensureBuiltinLayers 同步修复旧档。
+- **卡顿包 1（`91135dc`）**：失效域拆分落地——geomRev 分域、pairEdgeCache 只订几何域、ensureRev 去 world 引用判断、环缓存键补内容指纹（setKey 可选）、端点拖动 move 阶段不再 touchWorld（projCache 591ms 级重建消除）。
+- **100k 可行性结论**（详见「最近在处理的问题 0」）：平移/绘制/选中/悬停/编辑 CPU 侧包 1-4 可达标；**缩放动画达标依赖 GPU 后端**（RegionMesh/WebGL）；"手势期瞬态"方案按用户"不打折"约束**作废**。
+- `npm run build` 通过；147/147 测试通过。
+
+**上一轮已处理（2026-09-26，第十二次）— 测试修复整包 + 卡顿全盘分析设计**
 
 - **测试修复包（`b0bbafa`）：147/147 全绿**（此前 7 红含 2 文件收集失败）。修根因不改规则：
   - 真 bug ×3：① `landSea` claimId/pickOld **双重占位**（preferred 分支不可达 → 每次重建 ID 漂移，选中/名字样式丢失）→ claimId 唯一占位点；② `heightToMeters` 浮点高度时代映射（整数模型下珠峰=38 万米、赤道均温 -619°C）→ 整数域映射（陆 0..8848 / 海 0..-11000）；③ `unified generateFromLayer` 分组失败吞源省 → 孤儿省，收尾挂接（共享邻接边最多的新元素，覆盖旧档残留 parentId）。
@@ -195,12 +205,17 @@
    5. 显示不打折：不抽稀、不关阴影、不降 smooth、终态 1:1。
 
    **分包规划**（每包独立验收 + §7.2 反例清单；顺序 1→2→3→4）：
-   - **包 1 失效域拆分 + 键去引用化**：rev 分域（geom/data/style/view）；borderCache/pairEdgeCache/静态 key 全部改 rev 订阅；`endpoint` 拖动改 regions 域轻量失效。验收：30k 世界拖道路端点全程不掉帧；点选元素不触发全量重烘。
-   - **包 2 烘焙增量 + 手势延迟**：笔刷提交 `markDirtyCells(受影响 cell)` + 脏矩形重烘（computeDirtyRects 接线）；滚轮/平移手势期 blit 旧贴图、`zoomEndTimer` 停手全质量重烘；选中高亮不进烘焙 key（改 overlay 或实时画）。验收：连续笔刷提交无顿挫；滚轮缩放流畅、停手即清晰 1:1。
-   - **包 3 实时层降本**：paths poly 投影空间缓存；装饰 viewIndex 裁剪；标签 measureText/regionCenter 记忆化。验收：植被层放大平移不掉帧；多路径平移不掉帧。
-   - **包 4（可选）hover 只刷 overlay**：hover 高亮挪 overlay，空划不触发地图管线。验收：无按键划过地图不重绘地图管线。
+   - **包 1 失效域拆分 + 键去引用化** ✅ 已完成（2026-09-26 `91135dc`）：geomRev 分域；pairEdgeCache 只订几何域；ensureRev 去 world 引用判断；环缓存键补内容指纹（长度/和/FNV，setKey 可选）；端点拖动 move 阶段 touchWorld→touchPaint。验收：30k 拖道路端点不再全量重建 projCache/环/贴图。
+   - **包 2 烘焙增量（无折扣部分）**：笔刷提交 `markDirtyCells(受影响 cell)` + 脏矩形重烘（computeDirtyRects 接线）；选中高亮挪出烘焙 key（改实时画，像素不变）。验收：连续笔刷提交无顿挫；点选不触发全量重烘。
+   - **包 3 实时层降本**：paths poly 投影空间缓存（points rev+proj 失效）；装饰 viewIndex 视口裁剪（视口外不画 ≠ 抽稀）；标签 measureText/regionCenter 记忆化。验收：植被层放大平移不掉帧；多路径平移不掉帧。
+   - **包 4（可选）hover 只刷 overlay**：hover 高亮挪 overlay，空划不触发地图管线。
+   - ~~手势期瞬态（缩放缓冲贴图/渐进分辨率）~~ **已否决**（用户 2026-09-26 约束：即使为性能也不许显示打折）：缩放维持逐格全质量烘焙，达标依赖 GPU 后端（见下）。
 
-   **待用户拍板的设计点**：手势期间（滚轮/平移）瞬态显示策略——(a) blit 缩放旧贴图（最快，瞬态略糊，停手 1:1）；(b) 瞬态渐进分辨率烘焙（第五轮验证过的路线，停手 1:1）；(c) 维持每 tick 全质量烘焙（现状，慢但始终清晰）。推荐 (b)：与"笔刷期光标反馈、commit 后定稿"同一瞬态模式，终态 1:1 不打折。
+   **100k 级 cell 可行性（用户要求评估；约束：不卡顿 + 零显示打折）**：
+   - **可达成**（CPU 侧包 1-4 落地后）：平移（period blit 与 cell 数无关）、笔刷绘制/提交（命中查询 + 脏矩形增量）、选中/工作区、悬停（包 4 后走 overlay）、编辑操作。30k→100k 下这些路径的成本随**视口内** cell 数增长，不随总数增长。
+   - **缩放动画是唯一卡点**：全质量约束下每格需全量重光栅；CPU Canvas2D 单次全图烘焙 100k 量级数百 ms（30k 已 ~100ms 级），逐格执行必掉帧。**唯一达标路径 = GPU 后端**（ROADMAP P0 的 RegionMesh/WebGL：填充/描边/阴影走 GPU，100k 全图重光栅 ≈ 数 ms，缩放 60fps 全质量）。CPU 缓解（非达标）：visited-scale LRU（复访即时）、烘焙移 Worker（主线程不卡、动画仍受限吞吐）。
+   - 初次生成/加载：生成已走 Worker；projCache 首建 ~2s@100k（一次性，可 Worker 化）；首次烘焙一次性。
+   - **结论**：目标可达，路线 = CPU 包 1-4（本轮起）+ **GPU 后端立项**（下一轮出 RegionMesh/WebGL 设计：三角化缓存 + per-vertex 属性 + 保 RENDER_LOGIC z 序的合成序）。GPU 落地前缩放维持现状（慢但不糊）。
 
 1. ~~**应邻接的 cell 顶点仍可能不重合**~~ **已做：生成侧全局顶点表**  
    - 根因：凸包对偶近重合外心 + per-cell first-wins 去重 → 同一角两个坐标  
