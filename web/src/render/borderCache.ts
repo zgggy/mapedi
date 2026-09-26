@@ -44,9 +44,8 @@ export function invalidateBorderCache(): void {
 
 function ensureRev(world: World): string {
   const rev = dataRev();
-  // 只按内容 rev 失效；不按 world 对象引用（store 每次 touch 浅拷贝会链式误伤）
+  // continentCenters 随内容 rev 失效；环缓存按内容指纹命中，这里不清（见 ringCacheKey）
   if (rev !== baseRev) {
-    ringsCache = new Map();
     continentCentersCache = null;
     baseRev = rev;
     cachedWorld = world;
@@ -60,15 +59,17 @@ function ensureRev(world: World): string {
   return rev;
 }
 
-/** 键 = 调用方提示 + 内容指纹（长度/和/FNV）：同一 rev 周期内不同 cell 集绝不串缓存 */
-function ringCacheKey(setKey: string, projKey: string, rev: string, cellIds: CellId[]): string {
+/** 键 = 调用方提示 + 内容指纹（长度/和/FNV）+ 几何域：
+ *  不含 dataRev——未变化的 cell 集跨修订号命中（提交只重链变化的元素）；
+ *  几何域变（重生/导入）则全部重链。 */
+function ringCacheKey(setKey: string, projKey: string, cellIds: CellId[]): string {
   let h = 2166136261;
   let sum = 0;
   for (const id of cellIds) {
     h = Math.imul(h ^ id, 16777619);
     sum += id;
   }
-  return `${setKey}|${projKey}|${rev}|${cellIds.length}|${sum}|${h >>> 0}`;
+  return `${setKey}|${projKey}|${geomRev()}|${cellIds.length}|${sum}|${h >>> 0}`;
 }
 
 export function getCellSetRingsCached(
@@ -78,10 +79,17 @@ export function getCellSetRingsCached(
   projKey: ProjectionId,
   setKey = '',
 ): Entry {
-  const rev = ensureRev(world);
-  const key = ringCacheKey(setKey, projKey, rev, cellIds);
+  ensureRev(world);
+  const key = ringCacheKey(setKey, projKey, cellIds);
   const hit = ringsCache.get(key);
   if (hit) return hit;
+  // 有界增长：按插入序淘汰最旧（变化元素每修订只新增少量条目）
+  if (ringsCache.size > 256) {
+    for (const k of ringsCache.keys()) {
+      ringsCache.delete(k);
+      if (ringsCache.size <= 128) break;
+    }
+  }
   if (!pairEdgeCache) {
     pairEdgeCache = indexEdgesByPair(world);
   }

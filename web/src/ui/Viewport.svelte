@@ -365,6 +365,13 @@
       dirty = false;
       render();
     });
+    // 兜底：rAF 被浏览器丢弃/深度节流（后台标签等）时渲染不得永久停摆
+    setTimeout(() => {
+      if (dirty) {
+        dirty = false;
+        render();
+      }
+    }, 250);
   }
 
   function resize() {
@@ -388,6 +395,12 @@
       overlayDirty = false;
       renderOverlay();
     });
+    setTimeout(() => {
+      if (overlayDirty) {
+        overlayDirty = false;
+        renderOverlay();
+      }
+    }, 250);
   }
 
   function brushRadiusPx(): number {

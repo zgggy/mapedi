@@ -38,7 +38,7 @@ export function getDirtyCells(): Set<number> {
   return dirtyCells;
 }
 
-/** 脏矩形（纹理坐标） */
+/** 脏矩形（纹理坐标）。window = 纹理覆盖的内容窗口（period 模式=世界跨度，viewport 模式=取景窗口） */
 export type DirtyRect = { x: number; y: number; w: number; h: number };
 
 /**
@@ -53,16 +53,21 @@ export function computeDirtyRects(
   pcache: { polys: Float64Array[]; worldBBox: { minX: number; maxX: number; minY: number; maxY: number } },
   texW: number,
   texH: number,
+  window?: { minX: number; maxX: number; minY: number; maxY: number },
 ): DirtyRect[] {
   // 全量重绘标记
   if (dirtyCells.has(-1)) {
     return [{ x: 0, y: 0, w: texW, h: texH }];
   }
 
-  const bb = pcache.worldBBox;
-  const padX = Math.PI;
-  const minX = bb.minX - padX;
-  const maxX = bb.maxX + padX;
+  const bb = window ?? {
+    minX: pcache.worldBBox.minX - Math.PI,
+    maxX: pcache.worldBBox.maxX + Math.PI,
+    minY: pcache.worldBBox.minY,
+    maxY: pcache.worldBBox.maxY,
+  };
+  const minX = bb.minX;
+  const maxX = bb.maxX;
   const minY = bb.minY;
   const maxY = bb.maxY;
   const spanX = maxX - minX;
@@ -238,32 +243,44 @@ export function drawPeriodicStatic(
   const dirty = getDirtyCells();
   const needRebake = !state || (dirty.size > 0 && !env.isDragging);
   if (needRebake) {
+    // 增量底图：同布局旧贴图。**有底图才做脏矩形重绘**，并沿用底图的取景锚点
+    // （像素坐标系一致；换锚拷贝会让整张贴图错位）。无底图 → 全量重绘。
+    let src: PeriodicState | null = null;
+    if (dirty.size > 0) {
+      for (const s of stateMap.values()) {
+        if (s.layoutSig === layoutSig && s.canvas.width === pixelW && s.canvas.height === pixelH) {
+          src = s;
+          break;
+        }
+      }
+    }
+    const anchorX = usePeriod ? 0 : src ? src.proxyX : viewCenterX;
+    const anchorY = src ? src.proxyY : env.cam.y;
     const surf = makeSurface(pixelW, pixelH);
     if (!surf.ctx) return false;
     const c = surf.ctx;
     c.setTransform(env.dpr, 0, 0, env.dpr, 0, 0);
     const proxyH = pixelH / env.dpr;
-    // 计算脏矩形（环形拆分）
-    const dirtyRects = dirty.size > 0
-      ? computeDirtyRects(env.world, env.pcache, pixelW, pixelH)
+    // 脏矩形按纹理实际覆盖窗口映射（viewport 是取景窗口，period 是世界跨度）
+    const halfW = pixelW / env.dpr / 2 / Math.max(TEX_SCALE, 1e-6);
+    const halfH = proxyH / 2 / Math.max(TEX_SCALE, 1e-6);
+    const win = {
+      minX: anchorX - halfW,
+      maxX: anchorX + halfW,
+      minY: anchorY - halfH,
+      maxY: anchorY + halfH,
+    };
+    const dirtyRects = src
+      ? computeDirtyRects(env.world, env.pcache, pixelW, pixelH, win)
       : [{ x: 0, y: 0, w: pixelW, h: pixelH }];
-    // 增量：同布局旧贴图作底，脏区外像素原样保留（内容/选中变化不全量重烘）
-    if (dirty.size > 0) {
-      for (const s of stateMap.values()) {
-        if (s.layoutSig === layoutSig && s.canvas.width === pixelW && s.canvas.height === pixelH) {
-          c.drawImage(s.canvas, 0, 0);
-          break;
-        }
-      }
-    }
-    // 只重绘脏矩形内的元素
+    if (src) c.drawImage(src.canvas, 0, 0);
     const proxy: RenderEnv = {
       ...env,
       ctx: c,
-      // period 模式：x=0 画整周期，靠平铺显示；viewport 模式：x=cam.x 画视口窗口
+      // period 模式：x=0 画整周期，靠平铺显示；viewport 模式：画取景窗口
       cam: usePeriod
-        ? { x: 0, y: env.cam.y, scale: TEX_SCALE }
-        : { x: viewCenterX, y: env.cam.y, scale: TEX_SCALE },
+        ? { x: 0, y: anchorY, scale: TEX_SCALE }
+        : { x: anchorX, y: anchorY, scale: TEX_SCALE },
       w: pixelW / env.dpr,
       h: proxyH,
       contentOffsetX: 0,
@@ -272,7 +289,7 @@ export function drawPeriodicStatic(
         ? [-period, 0, period]
         : worldCopyDxs(
             0,
-            { x: viewCenterX, y: env.cam.y, scale: TEX_SCALE },
+            { x: anchorX, y: anchorY, scale: TEX_SCALE },
             pixelW / env.dpr,
             period,
             env.pcache.worldBBox,
@@ -298,7 +315,7 @@ export function drawPeriodicStatic(
         c.restore();
       }
     }
-    state = { key, layoutSig, proxyX: usePeriod ? env.cam.x : viewCenterX, proxyY: env.cam.y, canvas: surf.canvas };
+    state = { key, layoutSig, proxyX: usePeriod ? env.cam.x : anchorX, proxyY: anchorY, canvas: surf.canvas };
     stateMap.set(key, state);
     if (stateMap.size > 4) {
       const firstKey = stateMap.keys().next().value;
