@@ -25,6 +25,10 @@ export function bumpAllRev(): void {
 export function dataRev(): string {
   return `${geom}:${height}:${regions}`;
 }
+/** 纯几何域（cell.polygon / sharedEdges / neighbors）——几何缓存只订阅它 */
+export function geomRev(): number {
+  return geom;
+}
 export function resetDataRev(): void {
   geom = 1;
   height = 1;

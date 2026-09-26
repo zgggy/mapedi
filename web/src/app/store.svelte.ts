@@ -1115,7 +1115,8 @@ export class EditorStore {
       const cell = this.world.cells[cellId];
       if (cell && pointInPolygon(lon, lat, cell.polygon)) {
         dragRoadEndpoint(this.world, region, cellId, lon, lat, cellId, true);
-        this.touchWorld();
+        // 端点拖动只改 endpointOverrides（regions 域渲染提示）：不炸几何/投影缓存
+        this.touchPaint();
       }
       return;
     }
@@ -1123,7 +1124,7 @@ export class EditorStore {
     const inside = cell ? pointInPolygon(lon, lat, cell.polygon) : false;
     const hit = cellAtPoint(this.world, lon, lat);
     const result = dragRoadEndpoint(this.world, region, cellId, lon, lat, hit, inside);
-    this.touchWorld();
+    this.touchRegions();
     if (result === 'transfer') this.status = '端点已拖出：原地块取消道路，目标地块纳入道路';
     else if (result === 'override') this.status = '端点已微调（多边形内）';
   }

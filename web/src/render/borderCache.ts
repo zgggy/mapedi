@@ -12,7 +12,7 @@ import {
 import type { MidRing } from '../core/ring/displayRing';
 import type { Pt } from '../render/space';
 import type { ProjCache } from './projCache';
-import { dataRev } from '../core/rev';
+import { dataRev, geomRev } from '../core/rev';
 import { landSeaKindOf } from '../core/layer/landSea';
 import { projectionWorldPeriod, type ProjectionId } from '../core/project/projections';
 import { polarCellIds } from '../core/voronoi';
@@ -28,7 +28,7 @@ type Entry = {
 
 let ringsCache = new Map<string, Entry>();
 let pairEdgeCache: Map<string, BoundEdge> | null = null;
-let pairEdgeWorld: World | null = null;
+let pairEdgeGeomRev = -1;
 let continentCentersCache: { sig: string; centers: { x: number; y: number }[] } | null = null;
 let baseRev = '';
 let cachedWorld: World | null = null;
@@ -36,7 +36,7 @@ let cachedWorld: World | null = null;
 export function invalidateBorderCache(): void {
   ringsCache = new Map();
   pairEdgeCache = null;
-  pairEdgeWorld = null;
+  pairEdgeGeomRev = -1;
   continentCentersCache = null;
   baseRev = '';
   cachedWorld = null;
@@ -44,18 +44,31 @@ export function invalidateBorderCache(): void {
 
 function ensureRev(world: World): string {
   const rev = dataRev();
-  if (rev !== baseRev || world !== cachedWorld) {
+  // 只按内容 rev 失效；不按 world 对象引用（store 每次 touch 浅拷贝会链式误伤）
+  if (rev !== baseRev) {
     ringsCache = new Map();
     continentCentersCache = null;
     baseRev = rev;
     cachedWorld = world;
   }
-  // pairEdgeCache 是纯几何边表：只在 world 对象变化时失效，不随 height/regions rev 清空
-  if (!pairEdgeCache || pairEdgeWorld !== world) {
+  // pairEdgeCache 是纯几何边表：只随几何域失效，不随 height/regions rev 清空
+  const g = geomRev();
+  if (!pairEdgeCache || pairEdgeGeomRev !== g) {
     pairEdgeCache = null;
-    pairEdgeWorld = null;
+    pairEdgeGeomRev = g;
   }
   return rev;
+}
+
+/** 键 = 调用方提示 + 内容指纹（长度/和/FNV）：同一 rev 周期内不同 cell 集绝不串缓存 */
+function ringCacheKey(setKey: string, projKey: string, rev: string, cellIds: CellId[]): string {
+  let h = 2166136261;
+  let sum = 0;
+  for (const id of cellIds) {
+    h = Math.imul(h ^ id, 16777619);
+    sum += id;
+  }
+  return `${setKey}|${projKey}|${rev}|${cellIds.length}|${sum}|${h >>> 0}`;
 }
 
 export function getCellSetRingsCached(
@@ -63,15 +76,14 @@ export function getCellSetRingsCached(
   cellIds: CellId[],
   project: (ll: { lon: number; lat: number }) => Pt,
   projKey: ProjectionId,
-  setKey: string,
+  setKey = '',
 ): Entry {
   const rev = ensureRev(world);
-  const key = `${setKey}:${projKey}:${rev}`;
+  const key = ringCacheKey(setKey, projKey, rev, cellIds);
   const hit = ringsCache.get(key);
   if (hit) return hit;
   if (!pairEdgeCache) {
     pairEdgeCache = indexEdgesByPair(world);
-    pairEdgeWorld = world;
   }
   const edges = cellSetBoundaryEdges(world, cellIds, pairEdgeCache);
   const rings = cellSetBoundaryRings(
