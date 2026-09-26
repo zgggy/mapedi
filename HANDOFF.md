@@ -10,7 +10,17 @@
 
 ## 当前状态（截至交接）
 
-**本轮已处理（2026-09-26，第二十一次）— GPU 后端第一版（`a7d184b`）**
+**本轮已处理（2026-09-26，第二十二次）— GPU 显示错乱修复（`fb13239`）**
+
+- **用户实测 GPU 后端错乱（斜线/斜色块/光斑）**。根因三连：① 扇形 `drawArrays` 的 count 传了"点数"（应 3×）→ 只画 1/3 扇形 → stencil 奇偶错乱 = 斜线斜色块；② blur pass 未关混合 → 光斑；③ Viewport effect 依赖缺 `renderBackend` → 切换后端不触发重烘。另修：填充罩色 quad 曾带副本偏移。
+- **验证方法教训（重要，防再犯）**：
+  1. 动态 `import('/src/app/store.svelte')` 在 Vite HMR 后与应用实际模块**不是同一实例**（`?t=` 版本化 URL）——通过它调 store 是"幻影操作"，此前 A/B 的"0 差异"其实是两个 Canvas 的对比；
+  2. 两次渲染的画布分辨率会翻转（1280/2560），采样必须按**相对坐标**或固定 `setViewportSize`；
+  3. 可信验证锚点 = **应用代码内的计数器**（`window.__gpuRan`）+ localStorage 切后端 + 重载。
+- **最终验证**（固定视口 1280×720，GPU 计数确认激活）：结构性大差异 0.2%（曲线边缘 AA），小差异 58% 集中于阴影渐变/描边羽化带（= 用户已接受的纹理 blur 近似）；Canvas 对照组噪声底 0。
+- `npm run build` 通过；147/147 测试通过。**待用户目视验收 GPU 渲染**（斜线/色块/光斑应消失）。
+
+**上一轮已处理（2026-09-26，第二十一次）— GPU 后端第一版（`a7d184b`）**
 
 - **WebGL2 RegionMesh 元素渲染器落地**（`render/gpu/gpuElements.ts`）：填充=Hermite 环三角扇+stencil 奇偶（= evenodd 含副本）、内阴影=描边纹理 blur（可分离高斯，σ 自适应抽样）按填充 stencil 合成、描边=细长四边形（端头外延）。平滑曲线仍由 `core/ring/hermite` 唯一采样（smooth 同源）。
 - **elementsLayer**：GPU 优先 + 逐件 Canvas2D 回退闭包（显示不降级）；宽度/alpha 口径与 `drawPreparedElement` 一致。
