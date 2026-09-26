@@ -243,6 +243,12 @@ export function drawPeriodicStatic(
   const dirty = getDirtyCells();
   const needRebake = !state || (dirty.size > 0 && !env.isDragging);
   if (needRebake) {
+    const bakeT0 = performance.now();
+    const bakeEnd = (): void => {
+      if (typeof window !== 'undefined') {
+        (window as unknown as { __bakeMs?: number }).__bakeMs = performance.now() - bakeT0;
+      }
+    };
     // 增量底图：同布局旧贴图。**有底图才做脏矩形重绘**，并沿用底图的取景锚点
     // （像素坐标系一致；换锚拷贝会让整张贴图错位）。无底图 → 全量重绘。
     let src: PeriodicState | null = null;
@@ -340,6 +346,7 @@ export function drawPeriodicStatic(
       if (firstKey && firstKey !== key) stateMap.delete(firstKey);
     }
     clearDirtyCells();
+    bakeEnd();
   }
 
   if (!state) return false;

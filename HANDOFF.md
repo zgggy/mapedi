@@ -10,7 +10,21 @@
 
 ## 当前状态（截至交接）
 
-**本轮已处理（2026-09-26，第二十三次）— GPU 横线/缩放卡顿：闭合语义 + 预乘 + 热路径重设计**
+**本轮已处理（2026-09-27，第二十四次）— GPU 缩放性能追平 Canvas（用户实测 20fps→修复）**
+
+- **用户实测**：Canvas 无阴影 110fps / 带阴影 30-80fps；GPU 无阴影 20fps / 带阴影个位数 → "走错路还是没做好？"。**结论：路没走错，是三个执行层浪费 + 一次测量教训**。
+- **诊断教训**：此前我的"受控 A/B"用低频 wheel（120ms 间隔）+ rAF 垫片，测到的多是缓存命中帧——**没复现用户的高速连续缩放**。本轮起 `staticLayerCache` 常驻 `window.__bakeMs`（烘焙耗时）、gpuElements 常驻 `__gpuMs/__gpuBlurMs`，用 40ms 间隔来回缩放 burst 测真实重烘路径。渲染器确认为 Apple M4 Metal（非软渲染）。
+- **根因三连（ bake 内 GPU 侧浪费）**：
+  1. **每件全画布 stencil 清零**：12 件 × 15M px × 4×MSAA ≈ 每 bake 7 亿次 sample 清写 → 改为**件盒 scissor 清零**（画前清，读写都在件盒内，正确性不变）；
+  2. **逐帧 realloc 尖峰**：period 模式贴图宽随 TEX_SCALE 每 tick 涨数百 px → 256px 分桶每 tick 跨桶 → MSAA 画布 + 2 RT 重建 = 500-1400ms 尖峰 → 改**1024px 只增不缩**（缩到一半以下才收缩）；
+  3. **阴影全屏 blur**：旧版无 scissor 时逐件两次全屏 9 抽头；新版已在条带盒内，再按 σ 自适应降清（σ≥10px→1/4、≥5px→1/2，低清渲条带+blur、全清 stencil 裁剪+线性上采样；σ/k≥2.5 保证 spacing≥1）→ 对齐 Skia 金字塔 blur 成本。
+  另加**副本出窗裁剪**（±period 平移后与窗口不相交的副本扇形/条带整体不画）与**初始清屏 scissor 到联合盒**。
+- **结果**（40ms 间隔来回缩放 burst，M4）：gpuElements.render 中位 10.9→**5.8ms**、p90 47→**11.4ms**、max 590→**15.4ms**；bake 尖峰 1417→**207ms**。同起点受控 A/B（阴影 24px）：**GPU bake 中位 33.9ms ≈ Canvas 33ms**，尖峰 GPU（1138ms）还优于 Canvas（1339ms）——剩余尖峰为两侧共享的 Canvas 侧烘焙成本。
+- **视觉回归**：横线扫描（默认/缩放平移）0；平坦区比色 maxDiff≤1；大阴影（k=4 低清链）全画布网格比对 >8/255 差异 **1.11%**（均分 1.39/255，集中在阴影渐变带，优于旧版全清链的已接受口径）。
+- **中途坑**：HMR 会命中中间版本模块（`it.copyMinX is not a function`）→ 浏览器验证前必须确认 `__gpuErr` 为空；GPU render 失败会**静默回退 Canvas**（`__gpuRan=0` 即没在跑 GPU）。
+- **下一步**：① 用户复测两后端缩放手感 → 确认后默认切 GPU；② 100k 压测；③ 剩余尖峰在 Canvas 侧烘焙（makeSurface 每 tick 新建大画布），若仍感知卡顿再开增量优化。
+
+**上一轮已处理（2026-09-26，第二十三次）— GPU 横线/缩放卡顿：闭合语义 + 预乘 + 热路径重设计**
 
 - **用户报告两问题**：① 高度图约 -36° 纬度一条横线（GPU 独有）；② GPU 缩放比 Canvas 更卡（"切换 GPU 但很多东西没好好设计"）。
 - **横线根因（第 5 层渲染临时几何）**：`gpuElements` 的条带拼接强制 `closed=true`，而 `hermite.appendMidRing` 的 closePath 条件是 `closed && (mode==='fill' || virtualFrom===undefined)`——outline 模式遇 `virtualFrom`（跨界尾巴）是**开环**，强制闭合把首尾连成横跨地图的直线段，描边色 = `darkenHex(region.color, 0.7)`（实测线色 rgb(58,111,142) = 0.7×海域蓝，吻合）。**修复 = 闭合语义单源**：条带闭合只取 hermite 的 closePath 条件，禁止在拼接处另立规则。高度图的海域条带恰好在 -36° 附近有跨界环 → 只有高度图看得到。
