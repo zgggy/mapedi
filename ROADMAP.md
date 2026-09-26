@@ -68,19 +68,15 @@
 
 | 项 | 现状 | 目标 |
 |---|---|---|
+| **拖动 / 绘制卡顿（失效链）** | `touchWorld/touchRegions/touchHeight` 全部 `invalidateBorderCache + invalidateStaticLayer`；`pairEdgeCache`（纯几何）随任何 rev 清空属过度失效；笔刷期间全量重求环 + 重烘焙 | 失效按域拆分（pairEdgeCache 只随 geom）、笔刷增量/延迟重烘焙、displayPieces 记忆化补每帧重建漏洞。见 HANDOFF「最近在处理的问题 0」 |
 | **阴影 8 遍描边** | `drawPreparedElement` 用 8 次 `ctx.stroke` 模拟内阴影渐变 | 换 SDF 或单遍渐变环；单元素最大 CPU 项。**不得关阴影**，只换算法 |
 | **笔刷大范围失效** | `flushHeightRegions` 每次 `rebuildHeightIntervalElements` 全量重建 12 个区间 | 只重建受影响区间的 cell 集 |
 | **getProjCache 首次重建** | 已改 key 失效 ✓；首次 O(N) 30000 cell ≈ 591ms | 增量更新或 Worker |
-| **GPU 后端** | 接线已修但架构不对 | RegionMesh（三角化缓存 + per-vertex 属性）→ WebGL 批量；当前对「少量复杂环」无收益 |
+| **GPU 后端** | 离屏填充通道已接通（map2d 转发补全后真正激活），但架构不对 | RegionMesh（三角化缓存 + per-vertex 属性）→ WebGL 批量；当前对「少量复杂环」无收益。**浏览器验收**：GPU 填充边缘应与 Canvas2D 兜底一致；回退杠杆 = Viewport 去掉 gpuFill 传参 |
 
 ### P1 — 架构一致性
 
-| 项 | 现状 | 目标 |
-|---|---|---|
-| **`world.continents` 第二真相** | `CellId[][]` 从 continent Regions 派生但 `height.ts` 也写；`borderCache`/validate/UI 还在消费 | 改成派生缓存（`rev` 失效）或删掉只读 Region |
-| **`layer.ts` barrel** | re-export + `type LayerElement = Region` 别名 + `GenConfig` | 删别名；`GenConfig` 移到 `layer/genTypes.ts` |
-| **`heightRegions.ts` 常量** | `heightToLevel` 写死 `-63..64` | 引用 `HEIGHT_MIN/MAX` |
-| **TS 18 个既有错误** | 类型比较、导入路径、泛型参数 | 逐个修 |
+**已全部清完（2026-09-26）**：`world.continents` 第二真相已删（真相 = landsea continent Region.cells）；`layer.ts` 的 GenConfig 移入 `layer/genTypes.ts`、别名已删；heightRegions 三表并入 heightIntervals 单源；TS 存量错误清零（svelte-check / tsc 均 0 errors）。细节见 HANDOFF 第十一次。
 
 ---
 
@@ -91,6 +87,7 @@
 | 缩放重烘焙顿挫 | 约 100ms 量级；**暂接受**。viewport 模式已减小烘焙面积，阴影算法是下一个瓶颈 |
 | 深海/远海配色 | 深海（-63~-55）= 最暗 ✅ 已确认正确 |
 | 测试覆盖 | 2731 行 / 28 测试文件，覆盖跨日界线/极区反例；**无 UI/渲染集成测试** |
+| **两份测试已陈旧（待拍板）** | `heightRegions.test.ts` / `hierarchy.test.ts` 用 `layerId === 'height'` 期望海陆元素，自「海陆层独立」（landsea 层）后应为 `'landsea'`——属旧架构残留，规则本身仍有效；改测试需用户点头（AGENTS.md 测试纪律）。本轮按纪律未跑测试 |
 
 ---
 

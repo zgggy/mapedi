@@ -10,7 +10,20 @@
 
 ## 当前状态（截至交接）
 
-**本轮已处理（2026-09-25，第十次）— 渲染统一 + 过度设计清理 + 架构修复**
+**本轮已处理（2026-09-26，第十一次）— 技术债务整批清理（5 个整包）**
+
+- **git 仓库建立**：基线提交（214 文件）+ `.gitignore`（node_modules/dist/dev.log/target/.DS_Store）；后续每包独立提交（共 7 个 commit）。
+- **文档修正**：`RENDER_LOGIC.md` 模块表补 `path2d.ts`、删已不存在的 `ownerPolygon.ts` 行（`defaultExclusiveColor` 现居 `layer/style.ts`）；`DESIGN_ENTITIES.md` 配套引用改指现行契约（旧 REQUIREMENTS/DESIGN_SPEC 已归档）。
+- **死代码清理**：`ui/chrome/` 并入 `ui/shell/`（GenDock/ProjectPanel/ViewDock/ValidatorPanel 迁移，引用改相对路径；无引用的 BrushHud/LayerList/StatusStrip 删除）；删 `FloatingPanel.svelte`+`panelStore.ts`（旧悬浮面板壳，零引用）、脚手架残留（`lib/Counter`、`assets/*`）、**`wasm-core/` 空壳**（16 行，与「明确不做 WASM」一致）、`web/scripts/` 19 个历轮 diag/patch 一次性脚本、`dev.log`、`dist/`。
+- **`world.continents` 第二真相删除**（架构债）：大陆分组唯一真相 = landsea 层 continent `Region.cells`。删 `World.continents` 字段与序列化往返、死算法 `computeContinents`（与 `cellGraph.landContinentsCSR` 重复且零调用）；新增派生访问器 `landSea.continentCellGroups(world)`（顺序与 `cell.continentId` 一致）；`cell.continentId` 保留为笔刷多数票缓存（assignContinents 生成期 / rebuild 改归属后同步）；`borderCache` 大陆中心的 kind 判定统一走 `landSeaKindOf`。测试引用迁移：`w.continents` → `landContinentsCSR` / `continentCellGroups`（断言语义不变；`displayCompose.test` 移除已删 API `effectiveRegionCells` 的残留断言，同规则已由 `materializeParentCells` 的 `A.cells` 断言覆盖）。**旧档 JSON 的 `continents` 字段读取时忽略，无需迁移。**
+- **一处实现：高度 12 档单源化**（架构债）：heightRegions 的 HEIGHT_BINS/LEVEL_NAMES/色表与 `layer/heightIntervals` 逐值重复、`heightToLevel ≡ heightToIntervalIndex` 重复算法——现全部从 `HEIGHT_INTERVALS` 派生（heightRegions 176→71 行，显示语义不变）。**连续渐变时代死配置链整链删除**：`heightFillMode`/`LayerExtraParams`/`defaultExtraParams`/`resolveLayerParams`/`LayerConfig.extra`/`World.layerRenderParams`/store 的 `layerExtraParams`/`setLayerExtraParams`（零读者、不进序列化、UI 无入口）。双份兼容别名收敛：`rebuildHeightRegions`/`heightKindOf` 只留 heightRegions 一份（tests 在用），store 改用真名 `rebuildLandSeaRegions`；死导出清除（heightRampColor/heightRampGradient/HEIGHT_COLOR_STOPS/heightColor/LAND_BASE_COLOR/levelTo* 等）。
+- **layer.ts barrel**（架构债）：`GenConfig` 形状移入 `layer/genTypes.ts`（与枚举单源）；layer.ts 只留各层默认值；不留 re-export 门面。
+- **TS 存量错误清零**（架构债）：svelte-check **23 → 0 errors**（4 条 svelte runes 提示保留）、tsc 1 → 0。其中**两个是被类型暴露的真 bug**：① `map2d.drawWorld` opts 缺 `gpuFill` 字段 → GPU 离屏填充通道从未激活（env 恒 undefined），补全转发后按设计工作（Canvas2D evenodd 兜底不变）；② `catmullRomPolyline` 丢 z → GlobeView 球面路径 hypot(NaN) **实际不可见**，现按同一公式插值 z（2D 输出形状不变，paths.test 的 toEqual 不受影响）。另修复：WorkspaceDrawer/ProjectPanel 解构漏声明回调（外交按钮附庸/敌/盟、高程图导入**此前断线**）；WorkbenchHost 重复 `onApplyPreset` ×2；`num()` 接受 input 的 string 值；App 对 TopBar 不存在的 `settingsOpen` 绑定 + `shell.settingsOpen` 死状态删除；Sheets `onGenerate` 补 `Number()` 解析；**孤儿组件 `SettingsDrawer.svelte` 删除**（零引用，被 Sheets 取代）；vite.config 改用 `vitest/config` 的 defineConfig。
+- `npm run build` 通过；`npm run check` 0 errors。**按纪律未跑测试**。
+- **需用户目视验收**：① GPU 填充边缘 vs Canvas2D 兜底一致性（回退杠杆：Viewport 去掉 `gpuFill` 传参一处即回退）② 球面视图路径/航路（此前 NaN 不可见，现应显示）③ 外交按钮（附庸/敌/盟）④ 高程图导入按钮。
+- **两份测试已陈旧**（待用户拍板再改）：`heightRegions.test.ts`/`hierarchy.test.ts` 用 `layerId === 'height'` 期望海陆元素，海陆层独立后应在 `'landsea'`——规则仍有效，改 filter 即恢复。
+
+**上一轮已处理（2026-09-25，第十次）— 渲染统一 + 过度设计清理 + 架构修复**
 
 - **渲染统一（单一路径）**：删除 `drawHeightRegions`（每帧从 `cell.height` 临时重算 12 档）、`coastRingsFromHeight`（第二套海岸求环）、`isHollowRegion`（湖泊特判）。所有图层（含高度/海陆/湖泊）走同一 `Region.cells → cellSetBoundaryRings → drawPreparedElement`（fill→shadow→stroke）。高度区间本来就是 Region（`rebuildHeightIntervalElements` 造的 12 个嵌套 `cells`+`color`），不再特殊处理。
 - **符号参数化**：`LayerDef.coreSymbol: 'star'|'square'|'circle'|'none'` + `cellSymbol: 'tree'|'none'` + `baseMesh: boolean`。`symbolsLayer` 读参数画，不再按图层名硬编码。新图层加 `coreSymbol` 即可，零渲染层改动。
