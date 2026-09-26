@@ -317,6 +317,7 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
   }
 
   const used = new Set<string>();
+  const grouped = new Set<string>();
   const out: Region[] = [];
   let ci = 0;
 
@@ -372,13 +373,39 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
     };
     out.push(el);
 
-    for (const g of group) g.parentId = el.id;
+    for (const g of group) {
+      g.parentId = el.id;
+      grouped.add(g.id);
+    }
 
     ci++;
     if (ci >= config.count) break;
   }
 
   computeRelationships(world, out);
+  // 级联契约（fromLayer：country←province 不留孤儿省）：分组失败/超数的源
+  // 挂到共享邻接边最多的新元素；本次已挂的不动，旧档残留 parentId 在此覆盖
+  if (out.length) {
+    for (const s of sources) {
+      if (grouped.has(s.id)) continue;
+      let best = out[0].id;
+      let bestScore = -1;
+      for (const el of out) {
+        const elCells = new Set(el.cells);
+        let score = 0;
+        for (const c of s.cells) {
+          for (const nb of world.cells[c].neighbors) {
+            if (elCells.has(nb)) score++;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = el.id;
+        }
+      }
+      s.parentId = best;
+    }
+  }
   world.regions = world.regions.concat(out);
   materializeParentCells(world);
   return out;

@@ -70,6 +70,7 @@ describe('climate + biomes', () => {
 
   it('height meters mapping', () => {
     expect(heightToMeters(0)).toBe(0);
-    expect(heightToMeters(0.5)).toBe(3000);
+    expect(heightToMeters(64)).toBe(8848);
+    expect(heightToMeters(-63)).toBe(-11000);
   });
 });

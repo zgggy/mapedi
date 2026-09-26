@@ -14,7 +14,7 @@ describe('height absorb + identity', () => {
     const w = createWorld({ seed: 3, count: 400 });
     generateDemoContinents(w, 3);
     rebuildHeightRegions(w);
-    const cont = w.regions.filter((r) => r.layerId === 'height' && heightKindOf(r) === 'continent');
+    const cont = w.regions.filter((r) => r.layerId === 'landsea' && heightKindOf(r) === 'continent');
     expect(cont.length).toBeGreaterThan(0);
     // 取一个大陆边缘的海洋格，抬升后应 absorb 到邻接 continentId
     const land = new Set(cont.flatMap((r) => r.cells));
@@ -37,7 +37,7 @@ describe('height absorb + identity', () => {
     const w = createWorld({ seed: 11, count: 600 });
     generateDemoContinents(w, 11);
     rebuildHeightRegions(w);
-    const a = w.regions.find((r) => r.layerId === 'height' && heightKindOf(r) === 'continent')!;
+    const a = w.regions.find((r) => r.layerId === 'landsea' && heightKindOf(r) === 'continent')!;
     const id = a.id;
     rebuildHeightRegions(w);
     const still = w.regions.find((r) => r.id === id);

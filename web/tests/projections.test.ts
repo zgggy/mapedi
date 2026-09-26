@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { project, unproject, defaultProjParams } from '../src/core/project/projections';
 import { cellReliefHeights, displayHeight } from '../src/core/relief';
 import { createWorld } from '../src/core/world';
-import { buildFlatCellPoly, isPolarCellCenter } from '../src/core/project/polarPoly';
+import { polarCellIds } from '../src/core/voronoi';
 import { getProjCache, invalidateProjCache } from '../src/render/projCache';
 import { FRAME_LAT } from '../src/render/space';
 import type { Cell } from '../src/core/types';
@@ -141,62 +141,130 @@ describe('polar cell mercator poly', () => {
     expect(xa!.y).toBeCloseTo(xb!.y, 9);
   });
 
-  it('detects polar center only near true poles', () => {
-    expect(isPolarCellCenter({ lon: 0, lat: 90 })).toBe(true);
-    expect(isPolarCellCenter({ lon: 0, lat: -89 })).toBe(true);
-    expect(isPolarCellCenter({ lon: 0, lat: 80 })).toBe(false);
-    expect(isPolarCellCenter({ lon: 0, lat: 87 })).toBe(false);
-    expect(isPolarCellCenter({ lon: 0, lat: 40 })).toBe(false);
+  it('polar cells are nearest sites to poles (no lat threshold)', () => {
+    const mk = (id: number, lon: number, lat: number): Cell => ({
+      id,
+      polygon: [],
+      center: { lon, lat },
+      neighbors: [],
+      isOcean: true,
+      height: 0,
+      area: 1,
+    });
+    // 极点归属 = 距极方向最近站点（纬度极值派生）；无 88° 阈值、不强制站点贴极
+    const cells = [mk(0, 0, 40), mk(1, 0, 80), mk(2, 0, 87), mk(3, 0, -60)];
+    const poles = polarCellIds(cells);
+    expect(poles.north).toBe(2);
+    expect(poles.south).toBe(3);
   });
 
   it('regular high-lat cell is NOT polar-flattened', () => {
-    // 普通小格：中心 84°，环很小
-    const ring = [
-      { lon: 10, lat: 83 },
-      { lon: 12, lat: 83 },
-      { lon: 12, lat: 85.2 },
-      { lon: 10, lat: 85.2 },
+    // 84° 普通格：北面还有 87° 的极点 cell，本格不得压框
+    const cells: Cell[] = [
+      {
+        id: 0,
+        polygon: [
+          { lon: 10, lat: 83 },
+          { lon: 12, lat: 83 },
+          { lon: 12, lat: 85.2 },
+          { lon: 10, lat: 85.2 },
+        ],
+        center: { lon: 11, lat: 84 },
+        neighbors: [1],
+        isOcean: true,
+        height: 0,
+        area: 1,
+      },
+      {
+        id: 1,
+        polygon: [
+          { lon: 10, lat: 86 },
+          { lon: 12, lat: 86 },
+          { lon: 12, lat: 88 },
+          { lon: 10, lat: 88 },
+        ],
+        center: { lon: 11, lat: 87 },
+        neighbors: [0],
+        isOcean: true,
+        height: 0,
+        area: 1,
+      },
+      {
+        id: 2,
+        polygon: [
+          { lon: 10, lat: -86 },
+          { lon: 12, lat: -86 },
+          { lon: 12, lat: -88 },
+          { lon: 10, lat: -88 },
+        ],
+        center: { lon: 11, lat: -87 },
+        neighbors: [],
+        isOcean: true,
+        height: 0,
+        area: 1,
+      },
     ];
-    const flat = buildFlatCellPoly(ring, { lon: 11, lat: 84 }, proj);
-    expect(flat.polar).toBe(false);
-    // 不应被压到同一条框线
-    const ys = [flat.xy[1], flat.xy[3], flat.xy[5], flat.xy[7]];
-    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.01);
+    const w = {
+      meta: { seed: 1, cellCount: 3, formatVersion: 1, createdAt: 0 },
+      cells,
+      rivers: new Map(),
+      layers: [],
+      regions: [],
+    } as Parameters<typeof getProjCache>[0];
+    invalidateProjCache();
+    const pc = getProjCache(w, 'mercator', pp);
+    const edgeY = proj({ lon: 0, lat: FRAME_LAT }).y;
+    const poly = pc.polys[0];
+    expect(poly.length).toBeGreaterThanOrEqual(6);
+    // 不压框：y 保持真实落差，且无点贴框线（只有极点 cell 才补框闭合）
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 1; i < poly.length; i += 2) {
+      minY = Math.min(minY, poly[i]);
+      maxY = Math.max(maxY, poly[i]);
+    }
+    expect(maxY - minY).toBeGreaterThan(0.01);
+    for (let i = 1; i < poly.length; i += 2) {
+      expect(Math.abs(poly[i] - edgeY)).toBeGreaterThan(1e-6);
+    }
+    expect(pc.polarOutlines.has(0)).toBe(false);
   });
 
   it('closes north polar cap along frame top without mid-span spikes', () => {
-    // 模拟绕极边界环：lat≈80，lon 走满一圈
-    const ring = [];
-    for (let i = 0; i < 24; i++) {
-      const lon = -180 + (360 * i) / 23;
-      ring.push({ lon, lat: 80 + Math.sin(i) * 0.5 });
-    }
-    const flat = buildFlatCellPoly(ring, { lon: 0, lat: 90 }, proj);
-    expect(flat.polar).toBe(true);
+    invalidateProjCache();
+    const w = createWorld({ seed: 33, count: 500 });
+    const pc = getProjCache(w, 'mercator', pp);
+    const poles = polarCellIds(w.cells);
+    const poly = pc.polys[poles.north];
     const edgeY = proj({ lon: 0, lat: FRAME_LAT }).y;
-    // 顶点不越过外框
-    expect(flat.maxY).toBeLessThanOrEqual(edgeY + 1e-6);
-    // 沿 x 连续：相邻顶点不出现跨半球长刺
-    const xs: number[] = [];
-    for (let i = 0; i < flat.xy.length; i += 2) xs.push(flat.xy[i]);
-    for (let i = 1; i < xs.length - 2; i++) {
-      expect(Math.abs(xs[i] - xs[i - 1])).toBeLessThan(Math.PI * 0.2);
+    // 真实末边到相邻副本首点，随后仅沿顶框线闭合
+    expect(poly[poly.length - 1]).toBeCloseTo(edgeY, 5);
+    expect(poly[poly.length - 3]).toBeCloseTo(edgeY, 5);
+    // 网格只描真实边（polarOutlines）：无框线点、沿 x 连续无长刺
+    const outline = pc.polarOutlines.get(poles.north)!;
+    for (let i = 1; i < outline.length; i += 2) {
+      expect(Math.abs(outline[i] - edgeY)).toBeGreaterThan(1e-6);
     }
-    // 闭合两点落在框线
-    expect(flat.xy[flat.xy.length - 1]).toBeCloseTo(edgeY, 5);
-    expect(flat.xy[flat.xy.length - 3]).toBeCloseTo(edgeY, 5);
+    const n = outline.length / 2;
+    for (let i = 1; i < n; i++) {
+      const dx = Math.abs(outline[i * 2] - outline[(i - 1) * 2]);
+      expect(dx).toBeLessThan(Math.PI * 0.75);
+    }
   });
 
   it('south polar cap closes along frame bottom', () => {
-    const ring = [];
-    for (let i = 0; i < 16; i++) {
-      const lon = -180 + (360 * i) / 15;
-      ring.push({ lon, lat: -80 });
-    }
-    const flat = buildFlatCellPoly(ring, { lon: 0, lat: -90 }, proj);
-    expect(flat.polar).toBe(true);
+    invalidateProjCache();
+    const w = createWorld({ seed: 33, count: 500 });
+    const pc = getProjCache(w, 'mercator', pp);
+    const poles = polarCellIds(w.cells);
+    const poly = pc.polys[poles.south];
     const edgeY = proj({ lon: 0, lat: -FRAME_LAT }).y;
-    expect(flat.minY).toBeGreaterThanOrEqual(edgeY - 1e-6);
+    expect(poly[poly.length - 1]).toBeCloseTo(edgeY, 5);
+    expect(poly[poly.length - 3]).toBeCloseTo(edgeY, 5);
+    const outline = pc.polarOutlines.get(poles.south)!;
+    for (let i = 1; i < outline.length; i += 2) {
+      expect(Math.abs(outline[i] - edgeY)).toBeGreaterThan(1e-6);
+    }
   });
 
   it('world pole cells from createWorld build finite non-spike polys', () => {
@@ -219,7 +287,7 @@ describe('polar cell mercator poly', () => {
     }
   });
 
-  it('no ordinary cell has mercator long spikes (sphere-ok / mercator-bad)', () => {
+  it('no wrong-copy x steps in pick polys (|Δx| ≤ π; 极冠尾部结构步除外)', () => {
     invalidateProjCache();
     const w = createWorld({ seed: 22, count: 500 });
     const pc = getProjCache(w, 'mercator', pp);
@@ -227,13 +295,13 @@ describe('polar cell mercator poly', () => {
       const poly = pc.polys[cell.id];
       if (!poly || poly.length < 6) continue;
       const n = poly.length / 2;
+      const isPole = pc.polarOutlines.has(cell.id);
       for (let i = 1; i < n; i++) {
         const dx = Math.abs(poly[i * 2] - poly[(i - 1) * 2]);
-        // 极冠最后一跳是沿框线闭合，允许大步；其余必须连续
-        const isPolarClose = i >= n - 2;
-        if (!isPolarClose) {
-          expect(dx).toBeLessThan(Math.PI * 0.75);
-        }
+        // 极冠尾部三步是结构步（末实边到相邻副本首点、竖直到框、沿框闭合）；
+        // 其余相邻点 |Δx| ≤ π 是 unwrap 的结构保证——超过即错副本顶点（长刺）
+        if (isPole && i >= n - 3) continue;
+        expect(dx).toBeLessThanOrEqual(Math.PI + 1e-9);
       }
     }
   });

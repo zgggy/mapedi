@@ -11,9 +11,10 @@ function noise1(x: number, seed: number): number {
   return a + (b - a) * u;
 }
 
-/** 高度抽象 → 约海拔米（0–1 → 0–6000） */
+/** 整数高度（-63..64）→ 约海拔米：陆 0..8848（顶峰≈珠峰），海 0..-11000（深海） */
 export function heightToMeters(h: number): number {
-  return Math.max(0, h) * 6000;
+  if (h > 0) return (h / 64) * 8848;
+  return (h / 63) * 11000;
 }
 
 /**

@@ -4,7 +4,8 @@ import { generateDemoContinents } from '../src/core/height';
 import { generateRivers } from '../src/core/rivers';
 import { computeClimate } from '../src/core/climate';
 import { generateBiomes } from '../src/core/biomes';
-import { generateCountriesCost, generateCultures } from '../src/core/generate/culture';
+import { unifiedGenerate } from '../src/core/generate/unified';
+import { defaultGenConfig } from '../src/core/layer';
 import { generateRoads } from '../src/core/generate/networks';
 import { getProjCache } from '../src/render/projCache';
 import { defaultProjParams } from '../src/core/project/projections';
@@ -16,8 +17,10 @@ function pipeline(seed: number, count: number) {
   generateRivers(w, Math.max(4, Math.floor(count / 400)));
   computeClimate(w);
   generateBiomes(w);
-  generateCountriesCost(w, seed, Math.min(12, Math.max(4, Math.floor(count / 300))));
-  generateCultures(w, seed, 8, 2.5, 1.8);
+  // 生产路径统一生成器；province 先于 country
+  unifiedGenerate(w, 'province', defaultGenConfig('province', seed));
+  unifiedGenerate(w, 'country', defaultGenConfig('country', seed));
+  unifiedGenerate(w, 'culture', defaultGenConfig('culture', seed));
   generateRoads(w, seed, 3, 2, 1.2);
   const ms = Math.round(performance.now() - t0);
   const jsonLen = serializeWorld(w).length;

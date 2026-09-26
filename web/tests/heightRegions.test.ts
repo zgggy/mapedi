@@ -14,29 +14,29 @@ describe('height regions', () => {
     generateDemoContinents(w, 42);
     rebuildHeightRegions(w);
 
-    const heights = w.regions.filter((r) => r.layerId === 'height');
-    expect(heights.length).toBeGreaterThan(0);
+    const landsea = w.regions.filter((r) => r.layerId === 'landsea');
+    expect(landsea.length).toBeGreaterThan(0);
 
-    const kinds = heights.map(heightKindOf);
+    const kinds = landsea.map(heightKindOf);
     expect(kinds.some((k) => k === 'continent')).toBe(true);
     expect(kinds.some((k) => k === 'ocean' || k === 'lake')).toBe(true);
 
     // cells 不重叠覆盖陆地/海洋
     const land = w.cells.filter((c) => c.height > 0).map((c) => c.id);
     const contCells = new Set(
-      heights.filter((r) => heightKindOf(r) === 'continent').flatMap((r) => r.cells),
+      landsea.filter((r) => heightKindOf(r) === 'continent').flatMap((r) => r.cells),
     );
     expect(land.every((id) => contCells.has(id))).toBe(true);
 
     const ocean = w.cells.filter((c) => c.height <= 0).map((c) => c.id);
     const waterCells = new Set(
-      heights.filter((r) => heightKindOf(r) !== 'continent').flatMap((r) => r.cells),
+      landsea.filter((r) => heightKindOf(r) !== 'continent').flatMap((r) => r.cells),
     );
     expect(ocean.every((id) => waterCells.has(id))).toBe(true);
 
     // 湖泊不大于阈值
     const maxL = lakeMaxCells(w.cells.length);
-    for (const r of heights) {
+    for (const r of landsea) {
       if (heightKindOf(r) === 'lake') expect(r.cells.length).toBeLessThanOrEqual(maxL);
     }
   });
@@ -45,9 +45,9 @@ describe('height regions', () => {
     const w = createWorld({ seed: 7, count: 400 });
     generateDemoContinents(w, 7);
     rebuildHeightRegions(w);
-    const n1 = w.regions.filter((r) => r.layerId === 'height').length;
+    const n1 = w.regions.filter((r) => r.layerId === 'landsea').length;
     rebuildHeightRegions(w);
-    const n2 = w.regions.filter((r) => r.layerId === 'height').length;
+    const n2 = w.regions.filter((r) => r.layerId === 'landsea').length;
     expect(n2).toBe(n1);
   });
 
@@ -89,7 +89,7 @@ describe('height regions', () => {
     rebuildHeightRegions(w, [land2.id]);
     rebuildHeightRegions(w, [w.cells[0].id]);
 
-    const ids = w.regions.filter((r) => r.layerId === 'height').map((r) => r.id);
+    const ids = w.regions.filter((r) => r.layerId === 'landsea').map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -106,7 +106,7 @@ describe('height regions', () => {
 
     rebuildHeightRegions(w, [landCell.id]);
     const incremental = w.regions
-      .filter((r) => r.layerId === 'height')
+      .filter((r) => r.layerId === 'landsea')
       .map((r) => ({ id: r.id, cells: [...r.cells].sort((a, b) => a - b), kind: heightKindOf(r) }))
       .sort((a, b) => a.id.localeCompare(b.id));
 
@@ -118,7 +118,7 @@ describe('height regions', () => {
     w2.cells[landCell.id].isOcean = true;
     rebuildHeightRegions(w2);
     const full = w2.regions
-      .filter((r) => r.layerId === 'height')
+      .filter((r) => r.layerId === 'landsea')
       .map((r) => ({ cells: [...r.cells].sort((a, b) => a - b), kind: heightKindOf(r) }))
       .sort((a, b) => a.cells.length - b.cells.length);
 

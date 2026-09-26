@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import {
-  chainEdgesToMidpointRings,
-  midRingHasJump,
-  prepareDisplayRings,
-  closeRingForCylindrical,
-  splitOuterHoleRings,
-  traceMidRing,
-  type MidRing,
-} from '../src/core/ownerPolygon';
+import { chainEdgesToMidpointRings } from '../src/core/ring/build';
+import { prepareDisplayRings } from '../src/core/ring/normalize';
+import { splitOuterHoleRings, type MidRing } from '../src/core/ring/displayRing';
+import { traceMidRing } from '../src/core/ring/trace';
 import { project, defaultProjParams } from '../src/core/project/projections';
+
+/** 断链判定（与旧 midRingHasJump 同规则）：只看 x 落差 > π；高纬大 y 差不算断链 */
+function hasXJump(r: { pts: { x: number; y: number }[] }): boolean {
+  for (let i = 1; i < r.pts.length; i++) {
+    if (Math.abs(r.pts[i].x - r.pts[i - 1].x) > Math.PI) return true;
+  }
+  return false;
+}
 
 const pp = defaultProjParams();
 const proj = (ll: { lon: number; lat: number }) => project(ll, 'mercator', pp);
@@ -38,7 +41,7 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
     expect(out).toHaveLength(1);
     expect(out[0].pts).toHaveLength(4);
     expect(out[0].verts).toHaveLength(4);
-    expect(midRingHasJump(out[0])).toBe(false);
+    expect(hasXJump(out[0])).toBe(false);
   });
 
   it('高纬大 y 差（x 连续）不跳变、不沿框线拉伸', () => {
@@ -66,7 +69,7 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
       // 不得被压到外框纬线（旧误伤路径）
       if (Math.abs(p.y - frameY.maxY) < 1e-9) continue;
     }
-    expect(midRingHasJump(out[0])).toBe(false);
+    expect(hasXJump(out[0])).toBe(false);
   });
 
   it('verts 对齐段中点 unwrap，不飞到对面半球', () => {
@@ -141,9 +144,9 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
         { x: 1.2, y: yPole },
         { x: 0, y: yPole },
       ],
-      closed: false,
+      closed: true,
     };
-    const out = closeRingForCylindrical(ring, frameY);
+    const out = prepareDisplayRings(ring, frameY, 'north');
     expect(out).toHaveLength(1);
     expect(out[0].closed).toBe(true);
     expect(out[0].pts.length).toBe(out[0].verts.length);
@@ -152,23 +155,9 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
     expect(closes.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('高纬小跨度 x 跳变 → 日界线立柱，不是极冠框线', () => {
+  it('高纬小跨度断链不补极冠框边（非绕行环原样返回）', () => {
     const yHi = proj({ lon: 0, lat: 88 }).y;
     // xSpan 很小，只在日界线附近断开
-    const ring: MidRing = {
-      pts: [
-        { x: 3.0, y: yHi },
-        { x: 3.3, y: yHi * 0.99 },
-        { x: -3.2, y: yHi * 0.98 }, // unwrap → 3.08…，与 3.3 落差小；制造 cut 用首尾
-      ],
-      verts: [
-        { x: 3.15, y: yHi },
-        { x: 3.2, y: yHi },
-        { x: 3.1, y: yHi },
-      ],
-      closed: true,
-    };
-    // 强制 closedJump：首 x=3.0 末 unwrap 后应接近 3.08，闭合差小 —— 改用明显 cut
     const cutRing: MidRing = {
       pts: [
         { x: 2.8, y: yHi },
@@ -182,22 +171,15 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
       ],
       closed: true,
     };
-    void ring;
-    const out = closeRingForCylindrical(cutRing, frameY);
-    // 不应得到「三点 + 框线角点」的极冠大扇；应是拆段立柱或原样
+    const out = prepareDisplayRings(cutRing, frameY, 'north');
+    // 不是极冠框线：任何输出点不得落在框线上（非绕行环 winding=0，不补虚边）
     for (const piece of out) {
       const onFrame = piece.pts.filter((p) => Math.abs(p.y - frameY.maxY) < 1e-6).length;
-      // 允许立柱闭合点在 x=±π 侧，但 y 应贴近链本身，而不是整条压到框线再横扫
-      if (onFrame >= 2) {
-        // 若走了极冠，必须 xSpan 也大（本例不应满足）
-        const xs = piece.pts.map((p) => p.x);
-        const span = Math.max(...xs) - Math.min(...xs);
-        expect(span).toBeGreaterThan(Math.PI * 0.85);
-      }
+      expect(onFrame).toBe(0);
     }
   });
 
-  it('midRingHasJump 只看 x：高纬大 y 差不算断链', () => {
+  it('高纬大 y 差不算断链：prepare 后单段且 x 连续', () => {
     const y1 = proj({ lon: 0, lat: 80 }).y;
     const y2 = proj({ lon: 0.2, lat: 89 }).y;
     const ring: MidRing = {
@@ -209,7 +191,9 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
       verts: [],
       closed: false,
     };
-    expect(midRingHasJump(ring)).toBe(false);
+    const out = prepareDisplayRings(ring, frameY);
+    expect(out).toHaveLength(1);
+    expect(hasXJump(out[0])).toBe(false);
   });
 
   it('退化/稀疏 MidRing 不读 undefined.y', () => {
@@ -249,7 +233,7 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
       for (const p of out) {
         expect(() => splitOuterHoleRings([p])).not.toThrow();
         expect(() => traceMidRing(ctx, p, 0.65)).not.toThrow();
-        expect(() => midRingHasJump(p)).not.toThrow();
+        expect(() => hasXJump(p)).not.toThrow();
         expect(p.pts.every((q) => q && Number.isFinite(q.y))).toBe(true);
         expect(p.verts.length).toBe(p.pts.length);
       }

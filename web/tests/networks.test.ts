@@ -4,11 +4,8 @@ import { generateDemoContinents } from '../src/core/height';
 import { generateRivers } from '../src/core/rivers';
 import { computeClimate } from '../src/core/climate';
 import { generateBiomes } from '../src/core/biomes';
-import {
-  generateCountriesCost,
-  generateCultures,
-  generateReligions,
-} from '../src/core/generate/culture';
+import { unifiedGenerate } from '../src/core/generate/unified';
+import { defaultGenConfig } from '../src/core/layer';
 import { generateRoads, generateRoutes } from '../src/core/generate/networks';
 import { cascadeEnabled, defaultProfiles } from '../src/core/generate/profile';
 
@@ -18,9 +15,11 @@ function worldWithLands(seed = 31) {
   generateRivers(w, 6);
   computeClimate(w);
   generateBiomes(w);
-  generateCountriesCost(w, seed, 6);
-  generateCultures(w, seed, 7, 2.5, 1.8);
-  generateReligions(w, seed, 4);
+  // 生产路径统一生成器；province 先于 country（fromLayer 聚合并设 parentId）
+  unifiedGenerate(w, 'province', defaultGenConfig('province', seed));
+  unifiedGenerate(w, 'country', defaultGenConfig('country', seed));
+  unifiedGenerate(w, 'culture', defaultGenConfig('culture', seed));
+  unifiedGenerate(w, 'religion', defaultGenConfig('religion', seed));
   generateRoads(w, seed, 2, 2, 1.2);
   generateRoutes(w, seed, 4);
   return w;

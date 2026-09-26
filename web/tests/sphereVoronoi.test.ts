@@ -5,7 +5,7 @@ import {
   sphericalVoronoi,
   vec3ToLonLat,
 } from '../src/core/voronoiSphere';
-import { generateVoronoiCells } from '../src/core/voronoi';
+import { generateVoronoiCells, polarCellIds } from '../src/core/voronoi';
 import { createWorld } from '../src/core/world';
 import { createRng } from '../src/core/rng';
 
@@ -43,13 +43,17 @@ describe('spherical voronoi', () => {
     expect(edges).toBeGreaterThan(cells.length);
   });
 
-  it('north and south poles each get a cell site (not forced land)', () => {
+  it('poles belong to ordinary nearest-site cells (no forced pole sites)', () => {
     const w = createWorld({ seed: 11, count: 500 });
-    const north = w.cells.reduce((a, b) => (b.center.lat > a.center.lat ? b : a));
-    const south = w.cells.reduce((a, b) => (b.center.lat < a.center.lat ? b : a));
+    const poles = polarCellIds(w.cells);
+    const north = w.cells[poles.north];
+    const south = w.cells[poles.south];
     expect(north.id).not.toBe(south.id);
-    expect(north.center.lat).toBeGreaterThan(88);
-    expect(south.center.lat).toBeLessThan(-88);
+    // 极点归属 = 距极方向最近站点的普通 cell（纬度极值派生）；站点不强制贴极
+    const lats = w.cells.map((c) => c.center.lat);
+    expect(north.center.lat).toBe(Math.max(...lats));
+    expect(south.center.lat).toBe(Math.min(...lats));
+    // 普通地块：完整多边形、不强制陆地
     expect(north.polygon.length).toBeGreaterThanOrEqual(3);
     expect(south.polygon.length).toBeGreaterThanOrEqual(3);
     expect(north.isOcean).toBe(true);

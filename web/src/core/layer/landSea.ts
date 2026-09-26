@@ -140,6 +140,7 @@ export function rebuildLandSeaRegions(world: World, dirty?: Iterable<CellId> | n
     usedIds.add(id);
     return id;
   };
+  /** 唯一占位点：id 在此登记；pickOld 只挑不占，preferred 分支才可达 */
   const claimId = (preferred: string | undefined, prefix: string, n: number): string => {
     if (preferred && !usedIds.has(preferred)) {
       usedIds.add(preferred);
@@ -160,7 +161,6 @@ export function rebuildLandSeaRegions(world: World, dirty?: Iterable<CellId> | n
         best = r;
       }
     }
-    if (best) usedIds.add(best.id);
     return best;
   };
 
