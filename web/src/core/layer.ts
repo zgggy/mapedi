@@ -1,12 +1,12 @@
 /**
- * 统一图层元素 + 生成配置。
- * 元素数据 = Region；行为/能力见 core/layer/config.ts（实例+参数）。
+ * 统一图层元素 + 各层生成默认配置。
+ * 元素数据 = Region；行为/能力见 core/layer/config.ts（实例+参数）；
+ * 生成配置形状（GenConfig/枚举）见 core/layer/genTypes.ts。
  */
 import type { LayerId, World } from './types';
 
 export type { ElementOverlap } from './types';
-import type { GenMethod, GenScope, GenPattern, CoreSelector } from './layer/genTypes';
-export type { GenMethod, GenScope, GenPattern, CoreSelector } from './layer/genTypes';
+import type { GenConfig, GenMethod, GenScope, GenPattern, CoreSelector } from './layer/genTypes';
 export type {
   LayerConfig,
   PlacementRule,
@@ -21,27 +21,6 @@ export {
 } from './layer/config';
 export type { ElementStyle } from './layer/style';
 export { HEIGHT_INTERVALS, heightToIntervalIndex, intervalById, intervalByIndex } from './layer/heightIntervals';
-
-export interface GenConfig {
-  method: GenMethod;
-  scope: GenScope;
-  pattern: GenPattern;
-  coreSelector: CoreSelector;
-  count: number;
-  seed: number;
-  /** method=diffusion 时的径向参数（高度场） */
-  diffusion?: { falloff: number; radius: number; roughness: number; peakHeight: number };
-  /** method=fromLayer 时的源图层 */
-  fromLayerId?: LayerId;
-  /** method=fromLayer 时每个新元素聚合几个源元素 */
-  fromLayerCount?: number;
-  /** 元素名池（缺省用通用名） */
-  names?: string[];
-  /** 元素色池 */
-  colors?: string[];
-  /** 勾选才生成海上元素（海国等） */
-  allowOcean?: boolean;
-}
 
 /** 各图层默认生成配置（唯一真相，registry 只引用此处） */
 export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {

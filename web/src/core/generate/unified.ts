@@ -10,7 +10,7 @@
  */
 import type { CellId, LayerId, Region, World } from '../types';
 import { isLand as isLandCell } from '../types';
-import type { GenConfig } from '../layer';
+import type { GenConfig } from '../layer/genTypes';
 import { layerAllowsOverlap } from '../layer';
 import { createRng, hashSeed } from '../rng';
 import { projectMercator } from '../project/mercator';
