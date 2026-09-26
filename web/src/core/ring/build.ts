@@ -1,0 +1,265 @@
+/**
+ * 边界环构建（**唯一归属 = CellId 集合**）。
+ *
+ * 没有 owner 概念：Region / DisplayPiece / 海岸 都是 `cellIds` 的边界。
+ * 顶点拓扑只来自 `world.sharedEdges`（由 cell.polygon 导出）。
+ */
+import type { CellId, LonLat, World } from '../types';
+import { unwrapXAgainst, wrapPeriod, type Pt } from '../../render/space';
+import { alignVerts, type MidRing } from './displayRing';
+
+export type BoundEdge = {
+  ek: string;
+  pa: LonLat;
+  pb: LonLat;
+};
+
+function wkey(x: number, y: number, period: number): string {
+  let wx = wrapPeriod(x, period);
+  if (Math.abs(wx) >= period / 2 - 1e-5) wx = period / 2;
+  return `${Math.round(wx * 1e6)},${Math.round(y * 1e6)}`;
+}
+
+/**
+ * 顶点拓扑键（**全局唯一约定**）：0.001° 网格 + ±180 缝归一。
+ * 25k 时 cell 边长 ~1°，0.001° 足够细又吸收浮点/对偶误差。
+ */
+export function lonlatKey(ll: LonLat): string {
+  let lon = ll.lon;
+  while (lon > 180) lon -= 360;
+  while (lon < -180) lon += 360;
+  if (Math.abs(lon) >= 180 - 1e-3) lon = 180;
+  return `${Math.round(lon * 1000)},${Math.round(ll.lat * 1000)}`;
+}
+
+export function edgeMidpoint(p0: Pt, p1: Pt, period = Math.PI * 2): Pt {
+  const b = { x: unwrapXAgainst(p0.x, p1.x, period), y: p1.y };
+  return { x: (p0.x + b.x) / 2, y: (p0.y + b.y) / 2 };
+}
+
+function sphericalEdgeMidpoint(pa: LonLat, pb: LonLat): LonLat {
+  const unit = (p: LonLat) => {
+    const lon = p.lon * Math.PI / 180;
+    const lat = p.lat * Math.PI / 180;
+    return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+  };
+  const a = unit(pa);
+  const b = unit(pb);
+  const x = a[0] + b[0];
+  const y = a[1] + b[1];
+  const z = a[2] + b[2];
+  const r = Math.hypot(x, y, z);
+  if (r < 1e-10) return { lon: pa.lon, lat: pa.lat };
+  return { lon: Math.atan2(y, x) * 180 / Math.PI, lat: Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI };
+}
+
+export function indexEdgesByPair(world: World): Map<string, BoundEdge> {
+  const map = new Map<string, BoundEdge>();
+  if (!world.sharedEdges?.size) return map;
+  for (const [ek, [pa, pb]] of world.sharedEdges) {
+    map.set(ek, { ek, pa, pb });
+  }
+  return map;
+}
+
+/** 集合边界边：恰好一端在 cellSet 内 */
+export function cellSetBoundaryEdges(
+  world: World,
+  cellIds: Iterable<CellId>,
+  edgeByPair?: Map<string, BoundEdge>,
+): BoundEdge[] {
+  const set = new Set(cellIds);
+  const out: BoundEdge[] = [];
+  if (!set.size) return out;
+  const pair = edgeByPair ?? indexEdgesByPair(world);
+  const seen = new Set<string>();
+  const push = (e: BoundEdge) => {
+    if (seen.has(e.ek)) return;
+    seen.add(e.ek);
+    out.push(e);
+  };
+  for (const id of set) {
+    const cell = world.cells[id];
+    if (!cell) continue;
+    for (const n of cell.neighbors) {
+      if (set.has(n)) continue;
+      const ek = id < n ? `${id}-${n}` : `${n}-${id}`;
+      const e = pair.get(ek);
+      if (e) push(e);
+    }
+  }
+  for (const [ek, e] of pair) {
+    const dash = ek.indexOf('-');
+    if (dash < 0) continue;
+    const i = +ek.slice(0, dash);
+    const j = +ek.slice(dash + 1);
+    if (set.has(i) !== set.has(j)) push(e);
+  }
+  return out;
+}
+
+/**
+ * 边段 → 中点环。顶点身份优先 LonLat 键（±180 缝已归一）。
+ */
+export function chainEdgesToMidpointRings(
+  edgeSrc: { p0: Pt; p1: Pt; midpoint?: Pt; k0?: string; k1?: string }[],
+  period = Math.PI * 2,
+): MidRing[] {
+  if (!edgeSrc.length) return [];
+  type E = { k0: string; k1: string; p0: Pt; p1: Pt; midpoint?: Pt };
+  const edges: E[] = [];
+  for (const { p0, p1, midpoint, k0, k1 } of edgeSrc) {
+    if (!p0 || !p1) continue;
+    const p0w = { x: wrapPeriod(p0.x, period), y: p0.y };
+    const p1u = { x: unwrapXAgainst(p0w.x, p1.x, period), y: p1.y };
+    edges.push({
+      k0: k0 ?? wkey(p0.x, p0.y, period),
+      k1: k1 ?? wkey(p1.x, p1.y, period),
+      p0: p0w,
+      p1: p1u,
+      midpoint,
+    });
+  }
+  const rep = new Map<string, Pt>();
+  const adj = new Map<string, string[]>();
+  const edgeBetween = new Map<string, number[]>();
+  const ekey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  edges.forEach((e, idx) => {
+    if (!rep.has(e.k0)) rep.set(e.k0, e.p0);
+    if (!rep.has(e.k1)) rep.set(e.k1, { x: wrapPeriod(e.p1.x, period), y: e.p1.y });
+    const add = (from: string, to: string) => {
+      let l = adj.get(from);
+      if (!l) {
+        l = [];
+        adj.set(from, l);
+      }
+      if (!l.includes(to)) l.push(to);
+    };
+    add(e.k0, e.k1);
+    add(e.k1, e.k0);
+    const ek = ekey(e.k0, e.k1);
+    let el = edgeBetween.get(ek);
+    if (!el) {
+      el = [];
+      edgeBetween.set(ek, el);
+    }
+    el.push(idx);
+  });
+
+  const usedE = new Array(edges.length).fill(false);
+  const rings: MidRing[] = [];
+
+  const walkFrom = (startEdge: number): MidRing => {
+    const e0 = edges[startEdge];
+    usedE[startEdge] = true;
+    const startK = e0.k0;
+    const chainEdges: number[] = [startEdge];
+    const chainKeys: string[] = [startK, e0.k1];
+    let curK = e0.k1;
+    let prevK = startK;
+
+    for (let guard = 0; guard < edges.length + 8; guard++) {
+      if (curK === startK) break;
+      const nbs = adj.get(curK) ?? [];
+      let nextK: string | null = null;
+      let nextEi = -1;
+      for (const nk of nbs) {
+        if (nk === prevK && nbs.length > 1) continue;
+        const eis = edgeBetween.get(ekey(curK, nk)) ?? [];
+        const free = eis.find((i) => !usedE[i]);
+        if (free === undefined) continue;
+        nextK = nk;
+        nextEi = free;
+        break;
+      }
+      if (!nextK || nextEi < 0) {
+        for (const nk of nbs) {
+          const eis = edgeBetween.get(ekey(curK, nk)) ?? [];
+          const free = eis.find((i) => !usedE[i]);
+          if (free !== undefined) {
+            nextK = nk;
+            nextEi = free;
+            break;
+          }
+        }
+      }
+      if (!nextK || nextEi < 0) break;
+      usedE[nextEi] = true;
+      chainEdges.push(nextEi);
+      prevK = curK;
+      curK = nextK;
+      chainKeys.push(curK);
+      if (curK === startK) break;
+    }
+
+    const closed = chainKeys[chainKeys.length - 1] === startK && chainEdges.length >= 3;
+    const keys = closed ? chainKeys.slice(0, -1) : chainKeys;
+    const pts: Pt[] = [];
+    let prevX: number | null = null;
+    for (let i = 0; i < chainEdges.length; i++) {
+      const e = edges[chainEdges[i]];
+      const m = e.midpoint ?? edgeMidpoint(e.p0, e.p1, period);
+      const mm: { x: number; y: number } = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, period), y: m.y };
+      pts.push(mm);
+      prevX = mm.x;
+    }
+    const nE = chainEdges.length;
+    const nV = closed ? nE : nE - 1;
+    const rawVerts: Pt[] = [];
+    for (let i = 0; i < nV; i++) {
+      const a = pts[i];
+      const b = pts[i + 1] ?? (closed
+        ? { x: unwrapXAgainst(a.x, pts[0].x, period), y: pts[0].y }
+        : pts[i]);
+      const vk = keys[(i + 1) % keys.length];
+      const v = vk ? rep.get(vk) : undefined;
+      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+        rawVerts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      } else {
+        rawVerts.push({ x: unwrapXAgainst(a.x, v.x, period), y: v.y });
+      }
+    }
+    return { pts, verts: alignVerts(pts, rawVerts), closed };
+  };
+
+  for (let i = 0; i < edges.length; i++) {
+    if (usedE[i]) continue;
+    const r = walkFrom(i);
+    if (r.pts.length >= 2) rings.push(r);
+  }
+  return rings;
+}
+
+function edgeListToRings(
+  edgeSrc: BoundEdge[],
+  project: (ll: LonLat) => Pt,
+  period: number,
+): MidRing[] {
+  if (!edgeSrc.length) return [];
+  const projected: { p0: Pt; p1: Pt; midpoint: Pt; k0: string; k1: string }[] = [];
+  for (const { pa, pb } of edgeSrc) {
+    const a = project(pa);
+    const b = project(pb);
+    if (!a || !b || !Number.isFinite(a.x) || !Number.isFinite(a.y) ||
+      !Number.isFinite(b.x) || !Number.isFinite(b.y)) continue;
+    const p0 = { x: wrapPeriod(a.x, period), y: a.y };
+    const bu = { x: unwrapXAgainst(p0.x, b.x, period), y: b.y };
+    const midpoint = project(sphericalEdgeMidpoint(pa, pb));
+    if (!Number.isFinite(midpoint.x) || !Number.isFinite(midpoint.y)) continue;
+    projected.push({ p0, p1: bu, midpoint, k0: lonlatKey(pa), k1: lonlatKey(pb) });
+  }
+  return chainEdgesToMidpointRings(projected, period);
+}
+
+/** 唯一求环入口：cell 集 → 中点环 */
+export function cellSetBoundaryRings(
+  world: World,
+  cellIds: Iterable<CellId>,
+  project: (ll: LonLat) => Pt,
+  edgeSrc?: BoundEdge[],
+  period = Math.PI * 2,
+): MidRing[] {
+  const set = new Set(cellIds);
+  const edges = edgeSrc ?? cellSetBoundaryEdges(world, set);
+  return edgeListToRings(edges, project, period);
+}

@@ -1,0 +1,106 @@
+:root {
+  --bg: #12141a;
+  --panel: rgba(18, 20, 26, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text: #e8ecf1;
+  --text-dim: #9aa3b2;
+  --accent-view: #6b7c93;
+  --accent-generate: #3d9a6a;
+  --accent-draw: #c47b3a;
+  --danger: #d64545;
+  --ocean: #1a3348;
+  --land: #2d4a3e;
+  --cell-stroke: rgba(255, 255, 255, 0.06);
+  --hover: #f0c36a;
+  font-family:
+    -apple-system,
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+  font-size: 12px;
+  color: var(--text);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+input, select, textarea {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+button.primary {
+  background: rgba(61, 154, 106, 0.35);
+  border-color: rgba(61, 154, 106, 0.5);
+}
+
+button.danger {
+  background: rgba(214, 69, 69, 0.25);
+  border-color: rgba(214, 69, 69, 0.45);
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.viewport-root {
+  position: absolute;
+  inset: 0;
+}
+
+.viewport-root canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}

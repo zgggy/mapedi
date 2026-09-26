@@ -1,0 +1,121 @@
+import type { CellClimate, ClimateParams, World } from './types';
+import { isLand, isOcean } from './types';
+import { createRng, hashSeed } from './rng';
+
+function noise1(x: number, seed: number): number {
+  const i = Math.floor(x);
+  const f = x - i;
+  const u = f * f * (3 - 2 * f);
+  const a = hashSeed(seed, i) / 4294967296;
+  const b = hashSeed(seed, i + 1) / 4294967296;
+  return a + (b - a) * u;
+}
+
+/** 高度抽象 → 约海拔米（0–1 → 0–6000） */
+export function heightToMeters(h: number): number {
+  return Math.max(0, h) * 6000;
+}
+
+/**
+ * 为每个 cell 计算气候派生场。
+ * 温度：纬度余弦 + 高度递减 + 倾角极地加强
+ * 降水：距海 + 迎风坡近似 + 河流邻域
+ * 风带：顺/逆行决定中纬西风与信风方向
+ */
+export function computeClimate(world: World): Map<number, CellClimate> {
+  const c = world.climate;
+  const rng = createRng(hashSeed(world.meta.seed, 501));
+  void rng;
+
+  // 粗海岸距离：BFS 从海洋 cell
+  const coastDist = new Float32Array(world.cells.length).fill(99);
+  const q: number[] = [];
+  for (const cell of world.cells) {
+    if (isOcean(cell)) {
+      coastDist[cell.id] = 0;
+      q.push(cell.id);
+    }
+  }
+  let qi = 0;
+  while (qi < q.length) {
+    const id = q[qi++];
+    for (const n of world.cells[id].neighbors) {
+      if (coastDist[n] > coastDist[id] + 1) {
+        coastDist[n] = coastDist[id] + 1;
+        q.push(n);
+      }
+    }
+  }
+
+  // 高度梯度粗算（用于迎风/背风）
+  const riverCells = new Set<number>();
+  for (const [, river] of world.rivers) {
+    riverCells.add(river.a);
+    riverCells.add(river.b);
+  }
+  const out = new Map<number, CellClimate>();
+  for (const cell of world.cells) {
+    const lat = Math.abs(cell.center.lat);
+    const latR = (lat * Math.PI) / 180;
+    const tiltFactor = 1 + (c.axialTiltDeg / 23.4) * 0.15;
+    const m = heightToMeters(cell.height);
+    // 递减率 ~0.65°C/100m
+    let t =
+      c.baseTemperatureC * Math.cos(latR) -
+      (m / 100) * 0.65 -
+      Math.pow(lat / 90, 2) * 18 * tiltFactor;
+    t += (noise1(cell.id * 0.17, world.meta.seed) - 0.5) * 4;
+    if (isOcean(cell)) t = Math.min(t, 2); // 海面略冷于同纬陆地热带
+
+    // 风：顺行 → 低纬东北信风、中纬西风
+    const pro = c.rotationPrograde ? 1 : -1;
+    let windAngle: number;
+    if (lat < 30) windAngle = pro > 0 ? Math.PI * 0.25 : Math.PI * 0.75;
+    else if (lat < 60) windAngle = pro > 0 ? Math.PI * 1.25 : Math.PI * 0.75;
+    else windAngle = pro > 0 ? Math.PI * 1.75 : Math.PI * 0.25;
+
+    const cd = coastDist[cell.id];
+    const land = isLand(cell);
+    // 距海越远降水越少
+    let precip = land
+      ? Math.exp(-cd / (4 + 3 * c.oceanHeatCapacity)) * 0.9 + 0.05
+      : 0.7;
+    // 河流邻域加湿
+    if (riverCells.has(cell.id)) {
+      precip = Math.min(1, precip + 0.15);
+    }
+    // 迎风：邻域更高则可能雨影
+    let rainShadow = 0;
+    const windLon = Math.cos(windAngle);
+    const windLat = Math.sin(windAngle);
+    for (const n of cell.neighbors) {
+      const nc = world.cells[n];
+      const dx = nc.center.lon - cell.center.lon;
+      const dy = nc.center.lat - cell.center.lat;
+      // 上风向更高 → 雨影
+      if (dx * windLon + dy * windLat < 0 && nc.height > cell.height + 0.05) {
+        rainShadow += 0.08;
+      }
+    }
+    precip = Math.max(0.02, Math.min(1, precip - rainShadow));
+    precip += (noise1(cell.id * 0.31, world.meta.seed + 9) - 0.5) * 0.15;
+    precip = Math.max(0, Math.min(1, precip));
+
+    const humidity = Math.min(1, precip * 0.85 + (land ? 0 : 0.3));
+    const oxygen =
+      c.oxygenLevel *
+      (land ? Math.max(0.55, 1 - m / 9000) : 0.9) *
+      (0.95 + noise1(cell.id * 0.07, world.meta.seed + 3) * 0.1);
+
+    out.set(cell.id, {
+      temperatureC: t,
+      precipitation: precip,
+      humidity,
+      windAngle,
+      oxygen,
+      coastDist: cd,
+    });
+  }
+  world.cellClimate = out;
+  return out;
+}

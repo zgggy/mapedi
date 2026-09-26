@@ -1,0 +1,1032 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import type { World } from '../core/types';
+  import { defaultLayerStyleFor } from '../core/types';
+  import { pickCell } from '../core/world';
+  import {
+    unproject,
+    project,
+    type ProjectionId,
+    type ProjectionParams,
+    defaultProjParams,
+  } from '../core/project/projections';
+  import {
+    defaultCamera,
+    drawWorld,
+    screenToWorld,
+    type Camera,
+    type HoverInfo,
+  } from '../render/map2d';
+  import { getProjCache } from '../render/projCache';
+  import {
+    bgLayer,
+    cellsLayer,
+    frameLayer,
+    pathsLayer,
+  } from '../render/layers';
+  import {
+    screenToContentLonLat,
+    unwrapXAgainst,
+    worldCopyDxs,
+    worldToScreenX,
+    worldToScreenY,
+  } from '../render/space';
+  import {
+    catmullRomPolyline,
+    createPathFeature,
+    deleteControlPoint,
+    insertControlPointOnPath,
+    migrateToPathFeature,
+    solePathOfKind,
+    type PathKind,
+  } from '../core/paths';
+  import type { DrawTool } from '../core/draw/brush';
+  import { cellsInBrush } from '../core/draw/brush';
+  import { composeShownPieces } from '../core/displayCompose';
+  import type { LonLat } from '../core/types';
+  import { resolveLayerStyle } from '../core/layer/config';
+  import { editor } from '../app/store.svelte';
+  import { GpuFillRenderer } from '../render/gpuFill';
+
+  let {
+    world,
+    focusLayer = 'cells',
+    drawActive = false,
+    drawTool = 'brush' as DrawTool,
+    canPaint = false,
+    brushRadiusDeg = 1.5,
+    highlightRegionId = null,
+    roadSegments = [] as { a: number; b: number; pa: LonLat; pb: LonLat }[],
+    projection = 'mercator' as ProjectionId,
+    projParams,
+    reliefSmooth = 0.35,
+    styleId = 'dark',
+    workspaceOpen = false,
+    onhover,
+    onpaint,
+    onradius,
+    onstrokeend,
+    onendpoint,
+    bindCanvas,
+  }: {
+    world: World;
+    focusLayer?: string;
+    drawActive?: boolean;
+    drawTool?: DrawTool;
+    /** 允许左键直接画（高度层默认 true） */
+    canPaint?: boolean;
+    brushRadiusDeg?: number;
+    highlightRegionId?: string | null;
+    roadSegments?: { a: number; b: number; pa: LonLat; pb: LonLat }[];
+    projection?: ProjectionId;
+    projParams?: ProjectionParams;
+    reliefSmooth?: number;
+    styleId?: string;
+    /** 右侧工作区面板是否打开（高度标注的显示条件之一） */
+    workspaceOpen?: boolean;
+    onhover?: (info: HoverInfo | null) => void;
+    onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => void;
+    onradius?: (v: number) => void;
+    onstrokeend?: () => void;
+    onendpoint?: (
+      cellId: number,
+      lon: number,
+      lat: number,
+      phase: 'start' | 'move' | 'end',
+    ) => void;
+    bindCanvas?: (c: HTMLCanvasElement) => void;
+  } = $props();
+
+  let canvas: HTMLCanvasElement;
+  let overlay: HTMLCanvasElement;
+  let viewportRoot: HTMLDivElement;
+  let cam: Camera = $state(defaultCamera());
+  let hoverId: number | null = $state(null);
+  let panning = false;
+  let painting = false;
+  let dragEndpoint: number | null = null;
+  let spaceDown = false;
+  let lastX = 0;
+  let lastY = 0;
+  /** 右键拖动：地图内容相对于矩形的偏移 */
+  let contentOffsetX = $state(0);
+  let panningMode: 'cam' | 'content' | null = null;
+  /** 路/航/河：正在绘制的路径控制点 */
+  let pathDraft = $state<LonLat[] | null>(null);
+  /** 正在拖动的控制点索引 */
+  let dragPtIdx = $state(-1);
+  /** 正在拖动的路径在 world.paths 中的索引 */
+  let dragPathIdx = $state(-1);
+
+  const isFreeLayer = $derived(
+    focusLayer === 'road' || focusLayer === 'route' || focusLayer === 'river',
+  );
+  /**
+   * 路径编辑：仅当 ①在路/航/河层 且 ②绘制态（工作区选中路径或已 startDraw）。
+   * Esc / 退出绘制后控件消失，不能再画。
+   */
+  const pathEdit = $derived(isFreeLayer && drawActive);
+  const pathPipeline = [bgLayer, cellsLayer, pathsLayer, frameLayer];
+  /** 拖点时的原曲线（虚线幽灵） */
+  let dragGhostPts = $state<LonLat[] | null>(null);
+
+  /**
+   * 当前编辑的路径 = 工作区选中的那条（1 元素 : 1 曲线）。
+   * 未选中且本层仅有一条时可直接编辑；多条必须先选中。
+   */
+  function activePathOfKind(kind: PathKind) {
+    const paths = world.paths ?? [];
+    if (highlightRegionId) {
+      const sel = paths.find((p) => p.id === highlightRegionId);
+      if (sel && sel.layerId === kind) return sel;
+    }
+    const kindPaths = paths.filter((p) => p.layerId === kind);
+    if (kindPaths.length === 1) return kindPaths[0];
+    return null;
+  }
+
+  function pathPointsOf(p: {
+    points?: LonLat[];
+    start?: LonLat;
+    end?: LonLat;
+    controls?: LonLat[];
+  }): LonLat[] {
+    if (p.points?.length) return p.points;
+    return migrateToPathFeature(p as Record<string, unknown>).points;
+  }
+
+  function projParamsOr(): ProjectionParams {
+    return projParams ?? defaultProjParams();
+  }
+
+  /** 屏幕 → 经纬（与地图同一变换；覆盖层/拾取共用） */
+  function llAt(e: PointerEvent): LonLat {
+    return screenToContentLonLatHelper(e);
+  }
+
+  function screenToContentLonLatHelper(e: PointerEvent): LonLat {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const pp = projParamsOr();
+    return screenToContentLonLat(
+      sx,
+      sy,
+      cam,
+      rect.width,
+      rect.height,
+      contentOffsetX,
+      (x, y) => unproject(x, y, projection, pp),
+      (ll) => project(ll, projection, pp),
+    );
+  }
+
+  /** 投影点 → 屏幕（与地图 beginWorld 一致） */
+  function toScreenXY(px: number, py: number, rect: DOMRect) {
+    return {
+      sx: worldToScreenX(px, cam, rect.width, contentOffsetX),
+      sy: worldToScreenY(py, cam, rect.height),
+    };
+  }
+
+  function bestScreenInFrame(
+    px: number,
+    py: number,
+    rect: DOMRect,
+  ): { sx: number; sy: number } | null {
+    const sp = toScreenXY(px, py, rect);
+    if (
+      sp.sx < -80 ||
+      sp.sy < -80 ||
+      sp.sx > rect.width + 80 ||
+      sp.sy > rect.height + 80
+    )
+      return null;
+    return sp;
+  }
+
+  function unwrapPathXY(lls: LonLat[]): { x: number; y: number }[] {
+    const pp = projParamsOr();
+    if (!lls.length) return [];
+    const out: { x: number; y: number }[] = [];
+    let prev = project(lls[0], projection, pp);
+    out.push(prev);
+    for (let i = 1; i < lls.length; i++) {
+      const p = project(lls[i], projection, pp);
+      out.push({ x: unwrapXAgainst(prev.x, p.x), y: p.y });
+      prev = out[out.length - 1];
+    }
+    return out;
+  }
+
+  function nearestEndpoint(lon: number, lat: number): number | null {
+    let best: number | null = null;
+    let bestD = 0.08;
+    for (const s of roadSegments) {
+      for (const [cell, p] of [
+        [s.a, s.pa],
+        [s.b, s.pb],
+      ] as const) {
+        const d = Math.hypot(p.lon - lon, p.lat - lat);
+        if (d < bestD) {
+          bestD = d;
+          best = cell;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** 复制到剪贴板：Document 未聚焦时 writeText 会抛 NotAllowedError，用 execCommand 兜底 */
+  async function copyTextToClipboard(text: string): Promise<void> {
+    try {
+      canvas?.focus?.();
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      /* fall through */
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } catch {
+      /* ignore */
+    }
+    ta.remove();
+  }
+
+  function paintAt(e: PointerEvent) {
+    const ll = llAt(e);
+    onpaint?.(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
+    brushLon = ll.lon;
+    brushLat = ll.lat;
+  }
+
+  function hitTest(e: PointerEvent) {
+    const ll = llAt(e);
+    const cell = pickCell(world, ll.lon, ll.lat);
+    hoverId = cell?.id ?? null;
+    if (cell) {
+      onhover?.({
+        cellId: cell.id,
+        lon: ll.lon,
+        lat: ll.lat,
+        height: cell.height,
+      });
+    } else {
+      onhover?.(null);
+    }
+    // 高度层：地块标签在覆盖层，hover 只刷 overlay
+    if (focusLayer === 'height') requestOverlay();
+    else requestRender();
+  }
+
+  function hitControlPoint(sx: number, sy: number, rect: DOMRect) {
+    if (!world.paths) return null;
+    const threshold = 8;
+    for (let pi = 0; pi < world.paths.length; pi++) {
+      const p = world.paths[pi];
+      if (p.layerId !== focusLayer) continue;
+      const pts = pathPointsOf(p);
+      const xys = unwrapPathXY(pts);
+      for (let ci = 0; ci < xys.length; ci++) {
+        const sp = bestScreenInFrame(xys[ci].x, xys[ci].y, rect);
+        if (!sp) continue;
+        if (Math.hypot(sp.sx - sx, sp.sy - sy) < threshold)
+          return { pathIdx: pi, ptIdx: ci };
+      }
+    }
+    return null;
+  }
+
+  /** 点落在 Catmull-Rom 曲线附近时，返回最近段 */
+  function hitOnCurve(sx: number, sy: number, rect: DOMRect) {
+    if (!world.paths) return null;
+    const threshold = 8;
+    let best: {
+      pathIdx: number;
+      dist: number;
+      seg: number;
+      t: number;
+      polyLen: number;
+    } | null = null;
+    for (let pi = 0; pi < world.paths.length; pi++) {
+      const p = world.paths[pi];
+      if (p.layerId !== focusLayer) continue;
+      const pts = pathPointsOf(p);
+      if (pts.length < 2) continue;
+      const xys = unwrapPathXY(pts);
+      const poly = catmullRomPolyline(xys, 10);
+      let localBest = { dist: Infinity, seg: 0, t: 0 };
+      for (let i = 0; i < poly.length - 1; i++) {
+        const a = bestScreenInFrame(poly[i].x, poly[i].y, rect);
+        const b = bestScreenInFrame(poly[i + 1].x, poly[i + 1].y, rect);
+        if (!a || !b) continue;
+        const dx = b.sx - a.sx;
+        const dy = b.sy - a.sy;
+        const len2 = dx * dx + dy * dy || 1;
+        let t = ((sx - a.sx) * dx + (sy - a.sy) * dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const dist = Math.hypot(a.sx + dx * t - sx, a.sy + dy * t - sy);
+        if (dist < localBest.dist) localBest = { dist, seg: i, t };
+      }
+      if (localBest.dist <= threshold && (!best || localBest.dist < best.dist)) {
+        best = {
+          pathIdx: pi,
+          dist: localBest.dist,
+          seg: localBest.seg,
+          t: localBest.t,
+          polyLen: poly.length,
+        };
+      }
+    }
+    return best;
+  }
+
+  let dirty = false;
+  let overlayDirty = false;
+  let lastPaintRender = 0;
+  let raf = 0;
+  let panningLive = false;
+  let zoomingLive = false;
+  let zoomEndTimer = 0;
+
+  function requestRender() {
+    if (dirty) return;
+    dirty = true;
+    raf = requestAnimationFrame(() => {
+      dirty = false;
+      render();
+    });
+  }
+
+  function resize() {
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    if (overlay) {
+      overlay.width = canvas.width;
+      overlay.height = canvas.height;
+    }
+    requestRender();
+  }
+
+  /** 仅重绘路径控件 / 笔刷光标（不触发地图管线） */
+  function requestOverlay() {
+    if (overlayDirty) return;
+    overlayDirty = true;
+    requestAnimationFrame(() => {
+      overlayDirty = false;
+      renderOverlay();
+    });
+  }
+
+  function brushRadiusPx(): number {
+    return Math.max(
+      4,
+      brushRadiusDeg * (Math.PI / 180) * cam.scale * Math.cos((brushLat * Math.PI) / 180),
+    );
+  }
+
+  /**
+   * 覆盖层：高度标签、路径控制点、虚线、笔刷圆。
+   * 笔刷/标签移动只刷 overlay，不重绘地图。
+   * 高度值：仅 高度层 + 工作区打开 + 笔刷 hover 到的 cell。
+   */
+  function renderOverlay() {
+    if (!overlay) return;
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, overlay.width / dpr, overlay.height / dpr);
+    const rect = canvas.getBoundingClientRect();
+
+    // —— 地块高度值（仅笔刷覆盖到的 cell） ——
+    const showHLabels =
+      focusLayer === 'height' &&
+      workspaceOpen &&
+      brushHover &&
+      (drawActive || canPaint) &&
+      !pathEdit;
+    if (showHLabels) {
+      const drawHLabel = (sx: number, sy: number, text: string, strong: boolean) => {
+        ctx.font = strong ? '600 12px sans-serif' : '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const tw = ctx.measureText(text).width;
+        const bh = strong ? 16 : 13;
+        ctx.fillStyle = strong ? 'rgba(20,22,28,0.72)' : 'rgba(12,14,20,0.45)';
+        ctx.fillRect(sx - tw / 2 - 3, sy - bh / 2, tw + 6, bh);
+        ctx.fillStyle = strong ? '#ffe68c' : 'rgba(235,240,245,0.88)';
+        ctx.fillText(text, sx, sy);
+      };
+      const pc = getProjCache(world, projection, projParamsOr());
+      const brushR = brushRadiusPx();
+      // 笔刷圈内 cell 才标高度（与 hover 光标一致，不扫全图）
+      const hits = cellsInBrush(world, brushLon, brushLat, brushRadiusDeg);
+      for (const id of hits) {
+        const cell = world.cells[id];
+        if (!cell) continue;
+        const isHover = hoverId === cell.id;
+        const x = pc.centers[cell.id * 2];
+        const y = pc.centers[cell.id * 2 + 1];
+        if (!Number.isFinite(x)) continue;
+        const sp = toScreenXY(x, y, rect);
+        if (
+          sp.sx < -8 ||
+          sp.sy < -8 ||
+          sp.sx > rect.width + 8 ||
+          sp.sy > rect.height + 8
+        )
+          continue;
+        // 圈外兜底（投影/半径近似误差）
+        if (Math.hypot(sp.sx - brushSx, sp.sy - brushSy) > brushR * 1.15 && !isHover) continue;
+        const label = cell.height.toFixed(2);
+        drawHLabel(sp.sx, sp.sy, label, isHover);
+      }
+    }
+
+    // 笔刷：光标位置（与 cell 无关，不进地图管线）
+    if ((drawActive || canPaint) && !pathEdit && brushHover) {
+      ctx.beginPath();
+      ctx.arc(brushSx, brushSy, brushRadiusPx(), 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(240,195,106,0.95)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 路径控制点（仅绘制态；退出后消失）
+    if (!pathEdit) return;
+    const kind = focusLayer as PathKind;
+    const path = activePathOfKind(kind);
+    const list: { pts: LonLat[]; pi: number }[] = [];
+    if (path && world.paths) {
+      list.push({ pts: pathPointsOf(path), pi: world.paths.indexOf(path) });
+    }
+    if (pathDraft && pathDraft.length >= 1) {
+      list.push({ pts: pathDraft, pi: -1 });
+    }
+
+    const toScreen = (x: number, y: number) => toScreenXY(x, y, rect);
+
+    // 拖点时：原曲线 → 虚线幽灵
+    if (dragGhostPts && dragGhostPts.length >= 2) {
+      const gxy = unwrapPathXY(dragGhostPts);
+      const gpoly = catmullRomPolyline(gxy, 10);
+      if (gpoly.length >= 2) {
+        const s0 = toScreen(gpoly[0].x, gpoly[0].y);
+        ctx.beginPath();
+        ctx.moveTo(s0.sx, s0.sy);
+        for (let i = 1; i < gpoly.length; i++) {
+          const sp = toScreen(gpoly[i].x, gpoly[i].y);
+          ctx.lineTo(sp.sx, sp.sy);
+        }
+        ctx.strokeStyle = 'rgba(180,190,200,0.55)';
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    for (const item of list) {
+      const xys = unwrapPathXY(item.pts);
+      const poly = item.pts.length >= 2 ? catmullRomPolyline(xys, 10) : xys;
+      const isDragged =
+        item.pi >= 0 && dragPathIdx === item.pi && dragGhostPts != null;
+      // 拖动中：当前曲线实线；地图层已隐藏该路径，避免与幽灵叠线
+      if (poly.length >= 2) {
+        ctx.beginPath();
+        const s0 = toScreen(poly[0].x, poly[0].y);
+        ctx.moveTo(s0.sx, s0.sy);
+        for (let i = 1; i < poly.length; i++) {
+          const sp = toScreen(poly[i].x, poly[i].y);
+          ctx.lineTo(sp.sx, sp.sy);
+        }
+        ctx.strokeStyle = isDragged ? 'rgba(240,195,106,0.95)' : 'rgba(240,195,106,0.8)';
+        ctx.lineWidth = isDragged ? 2 : 1.5;
+        ctx.setLineDash(pathDraft && item.pi < 0 ? [5, 4] : []);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      for (let ci = 0; ci < xys.length; ci++) {
+        const sp = toScreen(xys[ci].x, xys[ci].y);
+        if (poly.length >= 2) {
+          let best = { dist: Infinity, px: 0, py: 0 };
+          for (let i = 0; i < poly.length - 1; i++) {
+            const a = toScreen(poly[i].x, poly[i].y);
+            const b = toScreen(poly[i + 1].x, poly[i + 1].y);
+            const dx = b.sx - a.sx;
+            const dy = b.sy - a.sy;
+            const len2 = dx * dx + dy * dy || 1;
+            let tt = ((sp.sx - a.sx) * dx + (sp.sy - a.sy) * dy) / len2;
+            tt = Math.max(0, Math.min(1, tt));
+            const px = a.sx + dx * tt;
+            const py = a.sy + dy * tt;
+            const dist = Math.hypot(px - sp.sx, py - sp.sy);
+            if (dist < best.dist) best = { dist, px, py };
+          }
+          if (Number.isFinite(best.dist) && best.dist > 0.5) {
+            ctx.beginPath();
+            ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = 'rgba(240,195,106,0.5)';
+            ctx.lineWidth = 1;
+            ctx.moveTo(sp.sx, sp.sy);
+            ctx.lineTo(best.px, best.py);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+        const dragging = dragPathIdx === item.pi && dragPtIdx === ci;
+        const isEnd = ci === 0 || ci === xys.length - 1;
+        ctx.beginPath();
+        ctx.arc(sp.sx, sp.sy, dragging ? 7 : isEnd ? 6 : 5, 0, Math.PI * 2);
+        ctx.fillStyle = dragging
+          ? '#f0c36a'
+          : isEnd
+            ? 'rgba(255,255,255,0.95)'
+            : 'rgba(240,195,106,0.95)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // GPU 离屏填充：只作 drawPreparedElement 的填充光栅器，按绘制序 drawImage 合成进 2d。
+  // 不是叠加层——叠加层会把所有描边压到所有填充之下，破坏 RENDER_LOGIC 的 z 序。
+  let gpuFill: GpuFillRenderer | null = null;
+  let gpuFillFailed = false;
+  function ensureGpuFill(): GpuFillRenderer | null {
+    // 性能测量期：先关 GPU，量 Canvas2D 基线
+    return null;
+    if (gpuFill) return gpuFill;
+    if (gpuFillFailed) return null;
+    try {
+      const off = document.createElement('canvas');
+      off.width = 8;
+      off.height = 8;
+      gpuFill = new GpuFillRenderer(off);
+    } catch (e) {
+      gpuFillFailed = true;
+      console.error('[gpuFill] 初始化失败，元素填充回退 Canvas2D evenodd：', e);
+      gpuFill = null;
+    }
+    return gpuFill;
+  }
+  function render() {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    // 统一接口：选中 ≡ 显示；无图层特殊性
+    const displayPieces = pathEdit
+      ? undefined
+      : composeShownPieces(world, focusLayer, highlightRegionId);
+    drawWorld(ctx, world, cam, hoverId, dpr, {
+      focusLayer,
+      focusLayerId: focusLayer,
+      highlightRegionId,
+      projection,
+      projParams,
+      reliefSmooth,
+      styleId,
+      showLabels: !panningLive && !zoomingLive && !pathEdit,
+      contentOffsetX,
+      pipeline: pathEdit ? pathPipeline : undefined,
+      singleWorldCopy: pathEdit,
+      displayPieces,
+      isDragging: panningLive || zoomingLive,
+      gpuFill: ensureGpuFill() ?? undefined,
+      styleOf: (id: string) => resolveLayerStyle(world, id),
+      borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
+      showCellMesh:
+        focusLayer === 'cells' ||
+        (world.layers.find((l) => l.id === 'cells')?.visible ?? false),
+      hidePathId:
+        pathEdit && dragPathIdx >= 0 && world.paths?.[dragPathIdx]
+          ? world.paths[dragPathIdx].id
+          : null,
+    });
+    // GPU 填充已在 drawPreparedElement 内按绘制序合成进 2d，这里不再叠加。
+    renderOverlay();
+  }
+
+  let brushLon = 0;
+  let brushLat = 0;
+  /** 笔刷视觉位置 = 鼠标屏幕坐标（不把鼠标再投影回地图） */
+  let brushSx = 0;
+  let brushSy = 0;
+  let brushHover = false;
+
+  onMount(() => {
+    resize();
+    bindCanvas?.(canvas);
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    // 禁止画布上弹出浏览器右键菜单（右键用于拖地图内容）
+    const stopCtx = (ev: Event) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    canvas.addEventListener('contextmenu', stopCtx);
+    canvas.addEventListener('dragstart', stopCtx);
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space') spaceDown = true;
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') spaceDown = false;
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      canvas.removeEventListener('contextmenu', stopCtx);
+      canvas.removeEventListener('dragstart', stopCtx);
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  });
+
+  $effect(() => {
+    void world.cells.length;
+    void world.regions.length;
+    void focusLayer;
+    void highlightRegionId;
+    void drawActive;
+    void drawTool;
+    void pathEdit;
+    void pathDraft;
+    void hoverId;
+    void roadSegments.length;
+    void projection;
+    void reliefSmooth;
+    void projParams;
+    void styleId;
+    void cam.scale;
+    requestRender();
+    requestOverlay();
+  });
+</script>
+
+<div class="viewport-root" class:draw={drawActive && !pathEdit} class:path-edit={pathEdit}>
+  <canvas
+    bind:this={canvas}
+    oncontextmenu={(e) => e.preventDefault()}
+    style="touch-action:none;user-select:none;-webkit-user-select:none;"
+    ondblclick={(e) => {
+      // 双击结束路径草稿（≥2 点时提交为正式路径）
+      if (!isFreeLayer || !pathDraft || pathDraft.length < 2) return;
+      const kind = focusLayer as PathKind;
+      if (!world.paths) world.paths = [];
+      const feat = createPathFeature(kind, pathDraft);
+      world.paths = world.paths.filter((x) => x.id !== `draft-${kind}`);
+      world.paths.push(feat);
+      pathDraft = null;
+      editor.touchWorld();
+      requestRender();
+    }}
+    onpointerdown={(e) => {
+      // 中键：平移；Shift+中键：复制 `#id`（无弹窗；文档未聚焦时用 textarea 兜底）
+      if (e.button === 1) {
+        if (e.shiftKey) {
+          e.preventDefault();
+          const ll = llAt(e);
+          const cell = pickCell(world, ll.lon, ll.lat);
+          if (cell) {
+            void copyTextToClipboard(`#${cell.id}`);
+            hoverId = cell.id;
+            onhover?.({
+              cellId: cell.id,
+              lon: ll.lon,
+              lat: ll.lat,
+              height: cell.height,
+            });
+            requestRender();
+          }
+          return;
+        }
+        e.preventDefault();
+        panning = true;
+        panningLive = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      // 右键：拖动地图内容相对于矩形的偏移
+      if (e.button === 2) {
+        panningMode = 'content';
+        lastX = e.clientX;
+        lastY = e.clientY;
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+      // 左键：绘制态下画；路/航/河层用控制点绘制
+      if (e.button === 0 && (drawActive || canPaint || pathEdit) && !spaceDown) {
+        if (pathEdit) {
+          const rect = canvas.getBoundingClientRect();
+          const sx = e.clientX - rect.left;
+          const sy = e.clientY - rect.top;
+          const kind = focusLayer as PathKind;
+          if (!world.paths) world.paths = [];
+
+          /** 只编辑工作区当前选中的路径（1 元素 = 1 条曲线） */
+          let path = activePathOfKind(kind);
+          const pathPoints = () => (path ? pathPointsOf(path) : []);
+
+          const projectOnto = (pts: LonLat[], cx: number, cy: number) => {
+            const xys = unwrapPathXY(pts);
+            const poly = catmullRomPolyline(xys, 10);
+            let best = { dist: Infinity, seg: 0, t: 0 };
+            for (let i = 0; i < poly.length - 1; i++) {
+              const a = bestScreenInFrame(poly[i].x, poly[i].y, rect);
+              const b = bestScreenInFrame(poly[i + 1].x, poly[i + 1].y, rect);
+              if (!a || !b) continue;
+              const dx = b.sx - a.sx;
+              const dy = b.sy - a.sy;
+              const len2 = dx * dx + dy * dy || 1;
+              let tt = ((cx - a.sx) * dx + (cy - a.sy) * dy) / len2;
+              tt = Math.max(0, Math.min(1, tt));
+              const dist = Math.hypot(a.sx + dx * tt - cx, a.sy + dy * tt - cy);
+              if (dist < best.dist) best = { dist, seg: i, t: tt };
+            }
+            return best;
+          };
+
+          // 点中任意本层控件：优先切到那条路径再操作
+          const hit = hitControlPoint(sx, sy, rect);
+          if (hit && world.paths[hit.pathIdx]?.layerId === kind) {
+            const hitPath = world.paths[hit.pathIdx];
+            if (e.shiftKey) {
+              hitPath.points = deleteControlPoint(pathPointsOf(hitPath), hit.ptIdx);
+              editor.touchWorld();
+              requestRender();
+              return;
+            }
+            dragGhostPts = pathPointsOf(hitPath).map((q) => ({ ...q }));
+            dragPathIdx = hit.pathIdx;
+            dragPtIdx = hit.ptIdx;
+            // 点到哪条就编辑哪条
+            if (highlightRegionId !== hitPath.id) {
+              editor.selectedRegionId = hitPath.id;
+              editor.draw = { ...editor.draw, targetRegionId: hitPath.id };
+            }
+            canvas.setPointerCapture(e.pointerId);
+            requestOverlay();
+            return;
+          }
+
+          if (!path) {
+            editor.status = '请在右侧工作区 ➕ 新建，或选中一条路径再绘制';
+            return;
+          }
+
+          const ll = llAt(e);
+          const pts = pathPoints();
+
+          // 空路径：前两点成直线
+          if (pts.length < 2) {
+            if (!pathDraft || pathDraft.length === 0) {
+              pathDraft = [ll];
+            } else if (pathDraft.length === 1) {
+              pathDraft = [pathDraft[0], ll];
+              path.points = [...pathDraft];
+              pathDraft = null;
+              dragPathIdx = world.paths.indexOf(path);
+              dragPtIdx = 1;
+              dragGhostPts = null;
+              canvas.setPointerCapture(e.pointerId);
+              editor.touchWorld();
+              requestRender();
+            }
+            return;
+          }
+
+          // 已有曲线：点在线条附近 → 投影插入（只加在当前选中的这条上）
+          const h = projectOnto(pts, sx, sy);
+          const pickPx = Math.max(12, (brushRadiusDeg || 1.5) * cam.scale * 0.08);
+          if (h.dist <= pickPx) {
+            dragGhostPts = pts.map((q) => ({ ...q }));
+            const { points: nextPts, index } = insertControlPointOnPath(pts, h.seg, h.t);
+            path.points = nextPts;
+            dragPathIdx = world.paths.indexOf(path);
+            dragPtIdx = index;
+            canvas.setPointerCapture(e.pointerId);
+            editor.touchWorld();
+            requestRender();
+          }
+          return;
+        }
+        if (drawActive && drawTool === 'road') {
+          const ll = llAt(e);
+          const ep = nearestEndpoint(ll.lon, ll.lat);
+          if (ep !== null) {
+            dragEndpoint = ep;
+            canvas.setPointerCapture(e.pointerId);
+            onendpoint?.(ep, ll.lon, ll.lat, 'start');
+            return;
+          }
+        }
+        painting = true;
+        brushHover = true;
+        {
+          const rect = canvas.getBoundingClientRect();
+          brushSx = e.clientX - rect.left;
+          brushSy = e.clientY - rect.top;
+        }
+        canvas.setPointerCapture(e.pointerId);
+        paintAt(e);
+      }
+    }}
+    onpointermove={(e) => {
+      // 拖动控制点
+      if (dragPtIdx >= 0 && dragPathIdx >= 0 && world.paths) {
+        const p = world.paths[dragPathIdx];
+        if (p) {
+          const ll = llAt(e);
+          const pts = pathPointsOf(p);
+          if (dragPtIdx >= 0 && dragPtIdx < pts.length) {
+            pts[dragPtIdx] = ll;
+            p.points = pts;
+          }
+          // 轻量重绘地图（该路径在地图层被 hidePathId 跳过）+ 覆盖层幽灵/实线
+          requestRender();
+          requestOverlay();
+        }
+        return;
+      }
+      if (dragEndpoint !== null) {
+        const ll = llAt(e);
+        onendpoint?.(dragEndpoint, ll.lon, ll.lat, 'move');
+        return;
+      }
+      // 始终更新笔刷位置 = 鼠标屏幕坐标（绘制命中仍用 llAt）
+      if ((drawActive || canPaint) && !pathEdit) {
+        const rect = canvas.getBoundingClientRect();
+        brushSx = e.clientX - rect.left;
+        brushSy = e.clientY - rect.top;
+        const ll = llAt(e);
+        brushLon = ll.lon;
+        brushLat = ll.lat;
+        brushHover = true;
+        requestOverlay();
+      }
+      if (painting) {
+        paintAt(e);
+        requestOverlay();
+        const now = performance.now();
+        if (now - lastPaintRender > 90) {
+          lastPaintRender = now;
+          requestRender();
+        }
+        // 绘制中同步 hover 高度标签
+        if (focusLayer === 'height') {
+          const ll = llAt(e);
+          const cell = pickCell(world, ll.lon, ll.lat);
+          hoverId = cell?.id ?? null;
+          if (cell) {
+            onhover?.({
+              cellId: cell.id,
+              lon: ll.lon,
+              lat: ll.lat,
+              height: cell.height,
+            });
+          }
+        }
+        return;
+      }
+      if (panningMode === 'content') {
+        const dx = e.clientX - lastX;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        // 不 wrap：外框固定，wrap contentOffset 会让内容相对外框瞬移一个世界宽
+        contentOffsetX += dx / cam.scale;
+        requestRender();
+        return;
+      }
+      if (panning) {
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        // 不 wrap cam.x：wrap 会在拖动中把相机扔回 [-π,π]，表现为地图瞬移
+        // y 翻转后 cam.y 增 = 内容下移（跟随鼠标）
+        const nx = cam.x - dx / cam.scale;
+        cam = { ...cam, x: nx, y: cam.y + dy / cam.scale };
+        requestRender();
+      } else {
+        hitTest(e);
+      }
+    }}
+    onpointerup={(e) => {
+      if (dragPtIdx >= 0 && dragPathIdx >= 0) {
+        editor.touchWorld();
+        dragPtIdx = -1;
+        dragPathIdx = -1;
+        dragGhostPts = null;
+        requestOverlay();
+        requestRender();
+      }
+      if (dragEndpoint !== null) {
+        const ll = llAt(e);
+        onendpoint?.(dragEndpoint, ll.lon, ll.lat, 'end');
+        dragEndpoint = null;
+      }
+      if (painting) onstrokeend?.();
+      panning = false;
+      panningLive = false;
+      panningMode = null;
+      painting = false;
+      canvas.releasePointerCapture?.(e.pointerId);
+      requestRender();
+    }}
+    onpointerleave={() => {
+      if (painting) onstrokeend?.();
+      panning = false;
+      panningMode = null;
+      painting = false;
+      dragEndpoint = null;
+      brushHover = false;
+      hoverId = null;
+      onhover?.(null);
+      requestRender();
+    }}
+    onwheel={(e) => {
+      e.preventDefault();
+      // Alt+滚轮：改笔刷半径
+      if (e.altKey && (drawActive || canPaint)) {
+        const d = e.deltaY > 0 ? -0.15 : 0.15;
+        onradius?.(Math.max(0.3, Math.min(8, brushRadiusDeg + d)));
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      // 缩放中：低分辨率 + 关阴影
+      zoomingLive = true;
+      clearTimeout(zoomEndTimer);
+      zoomEndTimer = setTimeout(() => {
+        zoomingLive = false;
+        requestRender();
+      }, 150);
+      const before = screenToWorld(cam, sx, sy, rect.width, rect.height);
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      const scale = Math.max(40, Math.min(4000, cam.scale * factor));
+      cam = { ...cam, scale };
+      const after = screenToWorld(cam, sx, sy, rect.width, rect.height);
+      cam = {
+        ...cam,
+        x: cam.x + (before.x - after.x),
+        y: cam.y + (before.y - after.y),
+      };
+      requestRender();
+    }}
+  ></canvas>
+  <!-- 覆盖层：笔刷光标 + 路径控制点（不触发地图重绘） -->
+  <canvas
+    class="ovl"
+    bind:this={overlay}
+    style="pointer-events:none;"
+  ></canvas>
+</div>
+
+<style>
+  .viewport-root {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  .viewport-root canvas:not(.ovl) {
+    cursor: default;
+  }
+  /* 高度/语义笔刷：隐藏系统光标，用覆盖层圆当鼠标 */
+  .viewport-root.draw canvas:not(.ovl) {
+    cursor: none;
+  }
+  /* 路径编辑：十字准星，控制点可见 */
+  .viewport-root.path-edit canvas:not(.ovl) {
+    cursor: crosshair;
+  }
+  .viewport-root canvas.ovl {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+</style>
