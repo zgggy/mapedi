@@ -584,12 +584,22 @@ export const elementsLayer: RenderLayer = {
         const rid = dp.regionId;
         const sel = dp.regionSelected || highlightRegionId === rid;
         const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, `piece:${dp.key}`);
-        // 增量烘焙：与脏区不相交的元素像素原样保留在拷贝里，跳过不画
+        // 跳过判定必须考虑世界副本：元素可经 k±1 副本平移后落入窗口（平移循环/跨缝），
+        // 未平移包围盒不相交 ≠ 不可见。
         if (env.dirtyBoxes?.length) {
           const b = entry.bbox;
-          const hits = env.dirtyBoxes.some(
-            (r) => b.maxX >= r.minX && b.minX <= r.maxX && b.maxY >= r.minY && b.minY <= r.maxY,
-          );
+          const per = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
+          let hits = false;
+          for (let k = -2; k <= 2 && !hits; k++) {
+            const sft = k * per;
+            hits = env.dirtyBoxes.some(
+              (r) =>
+                b.maxX + sft >= r.minX &&
+                b.minX + sft <= r.maxX &&
+                b.maxY >= r.minY &&
+                b.minY <= r.maxY,
+            );
+          }
           if (!hits) continue;
         }
         const rings = entry.rings;
