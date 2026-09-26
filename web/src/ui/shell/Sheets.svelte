@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { SheetId, SettingsTab } from './Rails.svelte';
   import { LAYER_META } from '../workbench/layerMeta';
-  import GenDock from '../chrome/GenDock.svelte';
+  import GenDock from './GenDock.svelte';
   import GenerationProfiles from '../workbench/GenerationProfiles.svelte';
-  import ViewDock from '../chrome/ViewDock.svelte';
-  import ProjectPanel from '../chrome/ProjectPanel.svelte';
+  import ViewDock from './ViewDock.svelte';
+  import ProjectPanel from './ProjectPanel.svelte';
   import ToolsPanel from '../workbench/ToolsPanel.svelte';
   import ElementList from '../workbench/ElementList.svelte';
   import type { World } from '../../core/types';

@@ -12,7 +12,7 @@
   import StatusBar from './ui/shell/StatusBar.svelte';
   import BrushHud from './ui/shell/BrushHud.svelte';
   import DisplayStylePanel from './ui/shell/DisplayStylePanel.svelte';
-  import ValidatorPanel from './ui/chrome/ValidatorPanel.svelte';
+  import ValidatorPanel from './ui/shell/ValidatorPanel.svelte';
   import { setSuzerain, toggleEnemy, toggleAlly } from './core/diplomacy';
 
   let shell = $state<ShellState>(initialShell());
