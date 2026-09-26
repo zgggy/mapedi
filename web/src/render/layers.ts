@@ -64,6 +64,9 @@ export interface RenderEnv {
   isDragging?: boolean;
   /** 单周期贴图的接缝余量；仅扩展离屏绘制裁剪，不改变地图外框 */
   periodicTilePadX?: number;
+  /** 烘焙代理的裁剪补偿：viewport 模式内容位移折进了相机，裁剪需补内容偏移；
+   *  period 模式是位置无关贴图（平铺即副本），必须为 0 */
+  clipDxBias?: number;
   /** 增量烘焙的脏区（内容空间包围盒）：元素层跳过不相交元素 */
   dirtyBoxes?: { minX: number; maxX: number; minY: number; maxY: number }[];
   /** 选中 Region（边界加亮） */
@@ -135,7 +138,7 @@ export function endWorld(ctx: CanvasRenderingContext2D): void {
  */
 export function clipToMapFrame(ctx: CanvasRenderingContext2D, env: RenderEnv, drawDxOverride?: number): void {
   const fr = getFrameRect(env);
-  const drawDx = drawDxOverride ?? env.drawDx ?? env.contentOffsetX ?? 0;
+  const drawDx = (drawDxOverride ?? env.drawDx ?? env.contentOffsetX ?? 0) + (env.clipDxBias ?? 0);
   const clip = frameClipInUserSpace(fr, drawDx);
   const pad = env.periodicTilePadX ?? 0;
   ctx.save();

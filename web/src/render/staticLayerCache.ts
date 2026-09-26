@@ -296,6 +296,9 @@ export function drawPeriodicStatic(
       h: proxyH,
       contentOffsetX: 0,
       drawDx: 0,
+      // viewport：内容位移折进了相机（cam=viewCenterX），裁剪需补回内容偏移，
+      // 否则相邻世界副本被绝对 ±π 裁掉（平移时副本消失）；period：平铺即副本，补偿必须为 0
+      clipDxBias: usePeriod ? 0 : env.contentOffsetX ?? 0,
       dirtyBoxes,
       worldDxs: usePeriod
         ? [-period, 0, period]
