@@ -10,7 +10,16 @@
 
 ## 当前状态（截至交接）
 
-**本轮已处理（2026-09-26，第十一次）— 技术债务整批清理（5 个整包）**
+**本轮已处理（2026-09-26，第十二次）— 测试修复整包 + 卡顿全盘分析设计**
+
+- **测试修复包（`b0bbafa`）：147/147 全绿**（此前 7 红含 2 文件收集失败）。修根因不改规则：
+  - 真 bug ×3：① `landSea` claimId/pickOld **双重占位**（preferred 分支不可达 → 每次重建 ID 漂移，选中/名字样式丢失）→ claimId 唯一占位点；② `heightToMeters` 浮点高度时代映射（整数模型下珠峰=38 万米、赤道均温 -619°C）→ 整数域映射（陆 0..8848 / 海 0..-11000）；③ `unified generateFromLayer` 分组失败吞源省 → 孤儿省，收尾挂接（共享邻接边最多的新元素，覆盖旧档残留 parentId）。
+  - 陈旧测试迁移：height/hierarchy 的 layer filter `'height'→'landsea'`；networks/validate/perf 旧生成器 → `unifiedGenerate`（生产路径）；sphereVoronoi 极点规则 → 「极点归属最近站点的普通 cell」；prepareDisplayRings/projections 的孤儿导入（ownerPolygon/polarPoly）→ ring/* + projCache/polarCellIds 现行契约。
+  - **culture.ts 退役**（第七轮条件「等用户要求改测试时删」达成，零引用删除）。
+  - spike 断言从旧平铺多边形 0.75π 密度约定迁到结构不变量（相邻点 |Δx|≤π=unwrap 保证；近极大跨角是球面真实几何）——**规则适配已记入提交信息，供复核**。
+- **卡顿全盘分析 + 设计 + 四包规划**：根因三条链（失效域/烘焙粒度/实时层）逐文件核实完毕，方案写在下方「最近在处理的问题 0」，**未动实施代码，等用户审方案**。
+
+**上一轮已处理（2026-09-26，第十一次）— 技术债务整批清理（5 个整包）**
 
 - **git 仓库建立**：基线提交（214 文件）+ `.gitignore`（node_modules/dist/dev.log/target/.DS_Store）；后续每包独立提交（共 7 个 commit）。
 - **文档修正**：`RENDER_LOGIC.md` 模块表补 `path2d.ts`、删已不存在的 `ownerPolygon.ts` 行（`defaultExclusiveColor` 现居 `layer/style.ts`）；`DESIGN_ENTITIES.md` 配套引用改指现行契约（旧 REQUIREMENTS/DESIGN_SPEC 已归档）。
@@ -155,10 +164,43 @@
 
 **最近在处理的问题（优先继续）**
 
-0. **拖动 / 绘制卡顿（当前最高优先，未开始）**
-   - 用户原话："拖动、绘制的卡顿太严重了，在不损失功能和显示的情况下避免卡顿；现在右键左右平移拖动完全不卡顿"——右键平移已因单周期贴图流畅，**卡顿集中在笔刷绘制 / 其他拖动**。
-   - 已查明失效链（尚未改代码）：store 的 `touchWorld/touchRegions/touchHeight` 均 `invalidateBorderCache() + invalidateStaticLayer() + bump*Rev()` → borderCache `ensureRev` 清空 ringsCache / pairEdgeCache / continentCentersCache → 下帧全量重求环 + 重烘焙贴图；`pairEdgeCache`（纯几何边表）也随任何 rev 清空，属**过度失效**；`Viewport.render()` 每帧 `composeShownPieces` 重建数组。
-   - 优化方向（不失显示）：pairEdgeCache 只随 geom 失效、笔刷期间增量/延迟重烘焙、displayPieces 记忆化。**性能不得打折**（不抽稀、不关阴影、不降 smooth）。
+0. **拖动 / 绘制卡顿（当前最高优先）— 全盘分析与设计已完成（2026-09-26），待用户审方案后实施**
+
+   **现象**（用户原话）："拖动、绘制的卡顿太严重了，在不损失功能和显示的情况下避免卡顿；现在右键左右平移拖动完全不卡顿"——右键横向平移（period 贴图平铺）流畅；卡顿集中在**笔刷绘制、滚轮缩放、放大后平移、路径端点拖动**。
+
+   **根因**（六层模型第 5 层：渲染临时几何/缓存失效，三条链，均已逐文件核实）：
+
+   **链 A 失效域过粗**：
+   - `store.endpoint` 路径端点拖动 **per-move 调 `touchWorld()`**（store.svelte.ts:1118）= 每 tick `invalidateProjCache + invalidateBorderCache + invalidateStaticLayer + bumpAllRev`；projCache 重建 O(N)（30k ≈ 591ms）→ 拖端点即冻结。而 `dragRoadEndpoint` 只改 `region.endpointOverrides`（regions 域），属杀鸡用牛刀。
+   - `touchRegions/touchHeight`（每次笔刷提交）都 `invalidateBorderCache + invalidateStaticLayer` → 边界环全量重链 + 贴图全量重烘。
+   - `borderCache.ensureRev` 按 **world 对象引用**失效（`world !== cachedWorld` 即清 ringsCache）；store 每次 touch 浅拷贝 world → 引用链式失效；`pairEdgeCache` 同样按引用（此前"只随 geom 失效"未真正落地）。
+   - 静态贴图 key 含 `dataRev + pieceSignature + highlightRegionId` → 点选元素也全量重烘。
+
+   **链 B 烘焙粒度过粗**：
+   - `invalidateStaticLayer` 清空整个 LRU（4 state）；脏矩形机器（`markDirtyCells/computeDirtyRects` 环形拆分）已有，但**只有样式面板用 `'all'`**——笔刷从不标记脏 cell，每次提交全量重烘。
+   - 滚轮：`TEX_SCALE = Math.round(cam.scale)` 进 key → **每 tick 全量重烘**（`zoomEndTimer` 只切 `zoomingLive` 标志、不延迟烘焙）→ 缩放顿挫 ~100ms/tick。
+   - viewport 模式（放大）：camBucket 0.3w 分桶，跨桶即新 key 重烘 → 放大后平移周期性顿挫。
+
+   **链 C 逐帧实时层成本**（管线 bg,cells,cellsMesh,elements 烘焙；paths,decorations,frame 每帧）：
+   - `pathsLayer` 每帧每路径 `projectPt + catmullRom(10)` + 双遍描边（河逐段双描），无缓存。
+   - `decorationsLayer`：tree 逐 cell 画且**无 viewIndex 视口裁剪**（植被层放大 = 1 万+ 图标/帧）；标签 `regionCenter` O(region.cells) + `measureText` 每帧每区域。
+   - hover 空划：`hitTest → hoverId → $effect → requestRender` = 无按键划过也全图渲染。
+   - （更正：阴影已非 8 遍——layers.ts:444 现为单遍 clip+blur；ROADMAP P0 首行过时。composeShownPieces 记忆化也已修。）
+
+   **设计原则**（红线不破）：
+   1. 失效按域：**geom**（cell 几何）/ **data**（height+regions）/ **style** / **view**（相机桶）；每个缓存只订阅自己的域。
+   2. 缓存键按 rev 订阅，**不按 world 对象引用**（引用链式失效是根）。
+   3. 重烘焙按脏集：笔刷提交只重烘脏矩形（机器已有，接线）；手势期间 blit 旧贴图（瞬态），停手一次性全质量 1:1（终态不打折；"不永久降分辨率"允许瞬态——与笔刷期 brush-cursor 反馈同一模式）。
+   4. 实时层只做**等价降本**：路径 poly 缓存投影空间（points rev+proj 失效）、每帧仿射到屏幕；装饰过 viewIndex（视口外不画 ≠ 抽稀）；标签 measureText/regionCenter 记忆化。
+   5. 显示不打折：不抽稀、不关阴影、不降 smooth、终态 1:1。
+
+   **分包规划**（每包独立验收 + §7.2 反例清单；顺序 1→2→3→4）：
+   - **包 1 失效域拆分 + 键去引用化**：rev 分域（geom/data/style/view）；borderCache/pairEdgeCache/静态 key 全部改 rev 订阅；`endpoint` 拖动改 regions 域轻量失效。验收：30k 世界拖道路端点全程不掉帧；点选元素不触发全量重烘。
+   - **包 2 烘焙增量 + 手势延迟**：笔刷提交 `markDirtyCells(受影响 cell)` + 脏矩形重烘（computeDirtyRects 接线）；滚轮/平移手势期 blit 旧贴图、`zoomEndTimer` 停手全质量重烘；选中高亮不进烘焙 key（改 overlay 或实时画）。验收：连续笔刷提交无顿挫；滚轮缩放流畅、停手即清晰 1:1。
+   - **包 3 实时层降本**：paths poly 投影空间缓存；装饰 viewIndex 裁剪；标签 measureText/regionCenter 记忆化。验收：植被层放大平移不掉帧；多路径平移不掉帧。
+   - **包 4（可选）hover 只刷 overlay**：hover 高亮挪 overlay，空划不触发地图管线。验收：无按键划过地图不重绘地图管线。
+
+   **待用户拍板的设计点**：手势期间（滚轮/平移）瞬态显示策略——(a) blit 缩放旧贴图（最快，瞬态略糊，停手 1:1）；(b) 瞬态渐进分辨率烘焙（第五轮验证过的路线，停手 1:1）；(c) 维持每 tick 全质量烘焙（现状，慢但始终清晰）。推荐 (b)：与"笔刷期光标反馈、commit 后定稿"同一瞬态模式，终态 1:1 不打折。
 
 1. ~~**应邻接的 cell 顶点仍可能不重合**~~ **已做：生成侧全局顶点表**  
    - 根因：凸包对偶近重合外心 + per-cell first-wins 去重 → 同一角两个坐标  

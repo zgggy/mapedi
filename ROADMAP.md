@@ -68,11 +68,10 @@
 
 | 项 | 现状 | 目标 |
 |---|---|---|
-| **拖动 / 绘制卡顿（失效链）** | `touchWorld/touchRegions/touchHeight` 全部 `invalidateBorderCache + invalidateStaticLayer`；`pairEdgeCache`（纯几何）随任何 rev 清空属过度失效；笔刷期间全量重求环 + 重烘焙 | 失效按域拆分（pairEdgeCache 只随 geom）、笔刷增量/延迟重烘焙、displayPieces 记忆化补每帧重建漏洞。见 HANDOFF「最近在处理的问题 0」 |
-| **阴影 8 遍描边** | `drawPreparedElement` 用 8 次 `ctx.stroke` 模拟内阴影渐变 | 换 SDF 或单遍渐变环；单元素最大 CPU 项。**不得关阴影**，只换算法 |
-| **笔刷大范围失效** | `flushHeightRegions` 每次 `rebuildHeightIntervalElements` 全量重建 12 个区间 | 只重建受影响区间的 cell 集 |
-| **getProjCache 首次重建** | 已改 key 失效 ✓；首次 O(N) 30000 cell ≈ 591ms | 增量更新或 Worker |
-| **GPU 后端** | 离屏填充通道已接通（map2d 转发补全后真正激活），但架构不对 | RegionMesh（三角化缓存 + per-vertex 属性）→ WebGL 批量；当前对「少量复杂环」无收益。**浏览器验收**：GPU 填充边缘应与 Canvas2D 兜底一致；回退杠杆 = Viewport 去掉 gpuFill 传参 |
+| **拖动 / 绘制卡顿** | 全盘分析已完成（三条根因链：失效域过粗 / 烘焙粒度过粗 / 逐帧实时层成本），四包设计见 HANDOFF「最近在处理的问题 0」 | 按包 1→2→3→4 实施；红线：不抽稀、不关阴影、不降 smooth、终态 1:1 |
+| **笔刷区间重建** | `flushHeightRegions` 拓扑变化时 `rebuildLandSeaRegions` 全量；非拓扑走 `updateHeightIntervalElements` 增量 ✓ | 归入卡顿包 2（脏矩形重烘焙）一并处理 |
+| **getProjCache 首次重建** | 已改 key 失效 ✓；首次 O(N) 30000 cell ≈ 591ms；**端点拖动 per-move 调 touchWorld 会反复触发全量重建**（卡顿链 A） | 归入卡顿包 1（失效域拆分）；后续可增量化或 Worker |
+| **GPU 后端** | 离屏填充通道接线已通（map2d 转发补全），但 `ensureGpuFill` 现有 `return null` 测量门（先量 Canvas2D 基线）；架构不对 | RegionMesh（三角化缓存 + per-vertex 属性）→ WebGL 批量；当前对「少量复杂环」无收益 |
 
 ### P1 — 架构一致性
 
@@ -84,10 +83,9 @@
 
 | 项 | 说明 |
 |---|---|
-| 缩放重烘焙顿挫 | 约 100ms 量级；**暂接受**。viewport 模式已减小烘焙面积，阴影算法是下一个瓶颈 |
+| 缩放重烘焙顿挫 | 约 100ms 量级；**暂接受**，归入卡顿包 2（手势延迟烘焙） |
 | 深海/远海配色 | 深海（-63~-55）= 最暗 ✅ 已确认正确 |
-| 测试覆盖 | 2731 行 / 28 测试文件，覆盖跨日界线/极区反例；**无 UI/渲染集成测试** |
-| **两份测试已陈旧（待拍板）** | `heightRegions.test.ts` / `hierarchy.test.ts` 用 `layerId === 'height'` 期望海陆元素，自「海陆层独立」（landsea 层）后应为 `'landsea'`——属旧架构残留，规则本身仍有效；改测试需用户点头（AGENTS.md 测试纪律）。本轮按纪律未跑测试 |
+| 测试覆盖 | 29 文件 / 147 用例 **全绿**（2026-09-26）；覆盖跨日界线/极区反例；**无 UI/渲染集成测试** |
 
 ---
 
