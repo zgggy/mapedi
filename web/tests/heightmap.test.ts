@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld } from '../src/core/world';
 import { assignContinents, generateDemoContinents } from '../src/core/height';
+import { landContinentsCSR } from '../src/core/index/cellGraph';
 
 describe('heightmap mapping', () => {
   it('assignContinents after flood to ocean', () => {
@@ -13,6 +14,6 @@ describe('heightmap mapping', () => {
       }
     }
     assignContinents(w);
-    expect(w.continents.length).toBe(0);
+    expect(landContinentsCSR(w).length).toBe(0);
   });
 });

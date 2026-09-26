@@ -28,7 +28,6 @@ function fakeWorld(ids: string[], layerId = 'country'): World {
     rivers: new Map(),
     layers: [],
     regions,
-    continents: [],
   } as World;
 }
 

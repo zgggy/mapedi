@@ -183,32 +183,7 @@ export function edgeKey(a: number, b: number): string {
   return a < b ? `${a}-${b}` : `${b}-${a}`;
 }
 
-/** 连通域：陆地高度 > 0 */
-export function computeContinents(cells: Cell[]): number[][] {
-  const land = cells.filter((c) => c.height > 0);
-  const idSet = new Set(land.map((c) => c.id));
-  const seen = new Set<number>();
-  const continents: number[][] = [];
-  for (const start of land) {
-    if (seen.has(start.id)) continue;
-    const stack = [start.id];
-    const comp: number[] = [];
-    seen.add(start.id);
-    while (stack.length) {
-      const id = stack.pop()!;
-      comp.push(id);
-      const cell = cells[id];
-      for (const n of cell.neighbors) {
-        if (!seen.has(n) && idSet.has(n)) {
-          seen.add(n);
-          stack.push(n);
-        }
-      }
-    }
-    continents.push(comp);
-  }
-  return continents;
-}
+/** 连通域算法唯一实现：core/index/cellGraph.ts landContinentsCSR */
 
 export function createWorld(
   opts: { seed: number; count?: number },
@@ -237,7 +212,6 @@ export function createWorld(
     rivers: new Map(),
     layers: builtinLayers(),
     regions: [],
-    continents: [],
     climate: defaultClimate(),
     sharedEdges,
   };
@@ -407,7 +381,6 @@ export function serializeWorld(
         : undefined,
     })),
     paths: world.paths ?? [],
-    continents: world.continents,
     climate: world.climate,
     cellClimate: world.cellClimate ? [...world.cellClimate.entries()] : undefined,
     astro: world.astro,
@@ -430,7 +403,6 @@ export function deserializeWorld(json: string): World {
       adjacentElementIds?: string[];
     })[];
     paths?: unknown[];
-    continents: number[][];
     climate?: ClimateParams;
     cellClimate?: [number, CellClimate][];
     astro?: World['astro'];
@@ -460,7 +432,6 @@ export function deserializeWorld(json: string): World {
         : undefined,
     })),
     paths,
-    continents: raw.continents ?? [],
     climate: raw.climate ?? defaultClimate(),
     cellClimate: raw.cellClimate ? new Map(raw.cellClimate) : undefined,
     astro: raw.astro,

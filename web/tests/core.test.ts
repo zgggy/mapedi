@@ -3,6 +3,7 @@ import { createRng } from '../src/core/rng';
 import { gcDistanceDeg, randomLonLat } from '../src/core/sphere';
 import { createWorld, pickCell, serializeWorld, deserializeWorld } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
+import { landContinentsCSR } from '../src/core/index/cellGraph';
 import { generateRivers } from '../src/core/rivers';
 import { generatePolitical, childrenOf } from '../src/core/political';
 
@@ -64,7 +65,7 @@ describe('height + rivers', () => {
     generateRivers(w, 6);
     const land = w.cells.filter((c) => c.height > 0);
     expect(land.length).toBeGreaterThan(20);
-    expect(w.continents.length).toBeGreaterThan(0);
+    expect(landContinentsCSR(w).length).toBeGreaterThan(0);
     expect(w.rivers.size).toBeGreaterThan(0);
   });
 });

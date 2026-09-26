@@ -71,7 +71,6 @@ describe('polar cell mercator poly', () => {
       rivers: new Map(),
       layers: [],
       regions: [],
-      continents: [],
     } as Parameters<typeof getProjCache>[0];
     invalidateProjCache();
     const pc = getProjCache(w, 'mercator', pp);
@@ -126,7 +125,6 @@ describe('polar cell mercator poly', () => {
       rivers: new Map(),
       layers: [],
       regions: [],
-      continents: [],
     } as Parameters<typeof getProjCache>[0];
     invalidateProjCache();
     const pc = getProjCache(w, 'mercator', pp);

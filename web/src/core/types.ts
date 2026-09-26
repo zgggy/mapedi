@@ -34,6 +34,7 @@ export interface Cell {
   /** 整数高度：陆地 1..64，海洋 -63..0（见 heightIntervals 的 12 档） */
   height: number;
   area: number;
+  /** 大陆分组派生缓存（笔刷多数票用）；真相 = landsea 层 continent Region 顺序 */
   continentId?: number;
 }
 
@@ -268,8 +269,6 @@ export interface World {
   regions: Region[];
   /** 道路·航线·河流：过点曲线，与 cell 无关 */
   paths?: PathFeature[];
-  /** cellId → 大陆连通域 */
-  continents: CellId[][];
   climate: ClimateParams;
   /** cellId → 气候派生（与 cells 对齐的稀疏表） */
   cellClimate?: Map<CellId, CellClimate>;

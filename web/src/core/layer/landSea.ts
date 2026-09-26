@@ -295,11 +295,10 @@ export function rebuildLandSeaRegions(world: World, dirty?: Iterable<CellId> | n
     }
   }
 
-  // 同步 world.continents / cell.continentId
+  // cell.continentId 同步（大陆 Region 顺序 = 索引；大陆分组真相在 Region.cells）
   const continents = next.filter((r) => landSeaKindOf(r) === 'continent');
-  world.continents = continents.map((r) => [...r.cells]);
-  for (let i = 0; i < world.continents.length; i++) {
-    for (const id of world.continents[i]) {
+  for (let i = 0; i < continents.length; i++) {
+    for (const id of continents[i].cells) {
       if (world.cells[id]) world.cells[id].continentId = i;
     }
   }
@@ -331,6 +330,16 @@ export function landSeaCoastRegions(world: World): Region[] {
   return world.regions.filter(
     (r) => r.layerId === 'landsea' && landSeaKindOf(r) !== 'ocean' && r.cells.length > 0,
   );
+}
+
+/**
+ * 大陆分组（派生，无独立真相）：landsea 层 continent Region 的 cells。
+ * 顺序与 cell.continentId 索引一致（rebuildLandSeaRegions 的赋值序）。
+ */
+export function continentCellGroups(world: World): CellId[][] {
+  return world.regions
+    .filter((r) => r.layerId === 'landsea' && landSeaKindOf(r) === 'continent')
+    .map((r) => r.cells);
 }
 
 /** 兼容旧名 */

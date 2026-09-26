@@ -6,6 +6,7 @@ import {
   rebuildSharedEdgesFromCells,
 } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
+import { rebuildLandSeaRegions, continentCellGroups } from '../src/core/layer/landSea';
 import { History, HeightCellsCommand } from '../src/core/history';
 import { getCellSetRingsCached, invalidateBorderCache, getContinentCentersCached } from '../src/render/borderCache';
 import { project, defaultProjParams } from '../src/core/project/projections';
@@ -76,11 +77,12 @@ describe('border edge index + proj worldBBox', () => {
   it('continent centers cache stably', () => {
     const w = createWorld({ seed: 55, count: 500 });
     generateDemoContinents(w, 55);
+    rebuildLandSeaRegions(w);
     invalidateBorderCache();
     const pc = getProjCache(w, 'mercator', pp);
     const ca = getContinentCentersCached(w, pc);
     const cb = getContinentCentersCached(w, pc);
     expect(ca).toBe(cb);
-    expect(ca.length).toBe(w.continents.length);
+    expect(ca.length).toBe(continentCellGroups(w).length);
   });
 });

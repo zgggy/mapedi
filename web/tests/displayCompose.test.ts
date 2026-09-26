@@ -4,7 +4,6 @@ import {
   splitRegionForDisplay,
   visibleColorRoots,
   displayTree,
-  effectiveRegionCells,
   materializeParentCells,
   isLayerShown,
   VIRTUAL_PARENT,
@@ -37,7 +36,6 @@ function worldOf(layers: LayerDef[], regions: Region[]): World {
     rivers: new Map(),
     layers,
     regions,
-    continents: [],
   } as World;
 }
 
@@ -77,7 +75,6 @@ describe('displayCompose', () => {
     );
     materializeParentCells(w);
     expect([...A.cells].sort()).toEqual([2, 3, 4, 7]);
-    expect([...effectiveRegionCells(w, A)].sort()).toEqual([2, 3, 4, 7]);
     const pieces = composeShownPieces(w, 'province');
     const labels = pieces.map((x) => x.label);
     // 统一接口：shown 层都出元素；行省含 p(A)/q(B)

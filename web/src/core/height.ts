@@ -137,7 +137,7 @@ export function assignContinents(world: World): void {
   for (let i = 0; i < continents.length; i++) {
     for (const id of continents[i]) world.cells[id].continentId = i;
   }
-  // world.continents 只由 rebuildLandSeaRegions 从 continent Regions 写入（单一真相）
+  // 生成期种子（供笔刷多数票）；landSea rebuild 后以大陆 Region 顺序为准
 }
 
 /** 大陆生成：海底 + 几块大陆（中心山脉向外扩散，参数随机） */
