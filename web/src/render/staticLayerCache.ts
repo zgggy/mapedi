@@ -5,6 +5,8 @@ import { MapTransform, worldCopyDxs } from './space.js';
 
 type PeriodicState = {
   key: string;
+  /** 布局指纹（窗口/分辨率/投影/样式）：同布局才可作增量烘焙的底图 */
+  layoutSig: string;
   proxyX: number;
   proxyY: number;
   canvas: HTMLCanvasElement;
@@ -145,14 +147,13 @@ function jsonOf(v: unknown): string {
   return JSON.stringify(v);
 }
 
-function periodicCacheKey(env: RenderEnv, h: number, period: number, pad: number, texScale: number): string {
+function periodicCacheKeys(env: RenderEnv, h: number, period: number, pad: number, texScale: number): { full: string; layout: string } {
   const fill = env.fillStyle;
   const fillKey = fill
     ? `${fill.border.enabled ? 1 : 0}${fill.border.width}${fill.border.color}${fill.border.smooth}${fill.shadow.enabled ? 1 : 0}${fill.shadow.width}${fill.shadow.alpha}${fill.fill.enabled ? 1 : 0}${fill.fill.alpha}`
     : '';
   const border = env.borderStyle;
-  return [
-    dataRev(),
+  const layout = [
     env.dpr,
     h,
     texScale,
@@ -167,11 +168,11 @@ function periodicCacheKey(env: RenderEnv, h: number, period: number, pad: number
     env.focusLayerId ?? '',
     env.showCellMesh ? 1 : 0,
     env.useDefaultRegions ? 1 : 0,
-    env.highlightRegionId ?? '',
-    pieceSignature(env),
     fillKey,
     jsonOf(border),
   ].join('|');
+  const content = [dataRev(), env.highlightRegionId ?? '', pieceSignature(env)].join('|');
+  return { full: `${layout}|${content}`, layout };
 }
 
 function makeSurface(w: number, h: number) {
@@ -228,9 +229,10 @@ export function drawPeriodicStatic(
   const pixelH = usePeriod ? periodPixelH : vpPixelH;
   if (pixelW < 2 || pixelH < 2) return false;
 
-  const key = usePeriod
-    ? periodicCacheKey(env, h, period, pad, TEX_SCALE)
-    : `${periodicCacheKey(env, h, period, pad, TEX_SCALE)}|vp|${camBucketX}|${camBucketY}`;
+  const keys = periodicCacheKeys(env, h, period, pad, TEX_SCALE);
+  const vpSuffix = usePeriod ? '' : `|vp|${camBucketX}|${camBucketY}`;
+  const key = `${keys.full}${vpSuffix}`;
+  const layoutSig = `${keys.layout}${vpSuffix}`;
   state = stateMap.get(key) ?? null;
   // cell 级脏区域：样式/绘制变 → 只重绘脏矩形（环形拆分，不重绘中间空洞）
   const dirty = getDirtyCells();
@@ -245,6 +247,15 @@ export function drawPeriodicStatic(
     const dirtyRects = dirty.size > 0
       ? computeDirtyRects(env.world, env.pcache, pixelW, pixelH)
       : [{ x: 0, y: 0, w: pixelW, h: pixelH }];
+    // 增量：同布局旧贴图作底，脏区外像素原样保留（内容/选中变化不全量重烘）
+    if (dirty.size > 0) {
+      for (const s of stateMap.values()) {
+        if (s.layoutSig === layoutSig && s.canvas.width === pixelW && s.canvas.height === pixelH) {
+          c.drawImage(s.canvas, 0, 0);
+          break;
+        }
+      }
+    }
     // 只重绘脏矩形内的元素
     const proxy: RenderEnv = {
       ...env,
@@ -287,7 +298,7 @@ export function drawPeriodicStatic(
         c.restore();
       }
     }
-    state = { key, proxyX: usePeriod ? env.cam.x : viewCenterX, proxyY: env.cam.y, canvas: surf.canvas };
+    state = { key, layoutSig, proxyX: usePeriod ? env.cam.x : viewCenterX, proxyY: env.cam.y, canvas: surf.canvas };
     stateMap.set(key, state);
     if (stateMap.size > 4) {
       const firstKey = stateMap.keys().next().value;

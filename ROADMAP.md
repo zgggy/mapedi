@@ -68,8 +68,8 @@
 
 | 项 | 现状 | 目标 |
 |---|---|---|
-| **拖动 / 绘制卡顿** | 包 1（失效域拆分）✅ 已落地；包 2/3/4 见 HANDOFF「最近在处理的问题 0」 | 按包推进；红线：不抽稀、不关阴影、不降 smooth、**终态 1:1（用户否决手势瞬态）** |
-| **100k 级 cell 目标** | 可行性已评估：平移/绘制/选中/悬停/编辑 CPU 包 1-4 可达标；**缩放动画达标唯一路径 = GPU 后端**（CPU 全质量重光栅 100k 数百 ms/次） | GPU 后端立项（RegionMesh/WebGL 设计下一轮出）；GPU 落地前缩放维持逐格全质量（慢但不糊） |
+| **拖动 / 绘制卡顿** | 包 1-4 ✅ 全部落地（失效域拆分 / 增量烘焙 / 实时层缓存 / hover 覆盖层） | 剩余卡点 = 缩放动画（依赖 GPU）；红线：不抽稀、不关阴影、不降 smooth、**零瞬态折扣** |
+| **100k 级 cell 目标** | CPU 侧交互（平移/绘制/选中/悬停）已按 100k 优化；**缩放动画达标唯一路径 = GPU 后端** | GPU 后端设计（RegionMesh/WebGL）待与用户敲定后立项 |
 | **笔刷区间重建** | `flushHeightRegions` 拓扑变化时 `rebuildLandSeaRegions` 全量；非拓扑走 `updateHeightIntervalElements` 增量 ✓ | 归入卡顿包 2（脏矩形重烘焙）一并处理 |
 | **getProjCache 首次重建** | 已改 key 失效 ✓；端点拖动反复触发已消除（包 1）✓；首次 O(N) 30000 cell ≈ 591ms（100k ~2s，一次性） | 可 Worker 化 |
 | **GPU 后端** | 离屏填充通道接线已通（map2d 转发补全），但 `ensureGpuFill` 现有 `return null` 测量门（先量 Canvas2D 基线）；架构不对 | **升级为 100k 达标路径**：RegionMesh（三角化缓存 + per-vertex 属性）→ WebGL 批量；填充/描边/阴影全走 GPU，保 RENDER_LOGIC z 序 |

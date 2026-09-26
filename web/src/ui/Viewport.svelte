@@ -3,6 +3,7 @@
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
+  import { markDirtyCells } from '../render/staticLayerCache';
   import {
     unproject,
     project,
@@ -670,7 +671,6 @@
     void drawTool;
     void pathEdit;
     void pathDraft;
-    void hoverId;
     void roadSegments.length;
     void projection;
     void reliefSmooth;
@@ -679,6 +679,27 @@
     void cam.scale;
     requestRender();
     requestOverlay();
+  });
+
+  // hover 只刷覆盖层（高度标注/笔刷反馈）；地图管线无 hover 消费者，不重绘
+  $effect(() => {
+    void hoverId;
+    requestOverlay();
+  });
+
+  // 选中变化只标脏新旧选中元素的 cell（增量重烘）；找不到对应区域（如刚删除）→ 全量
+  let lastHighlightForDirty: string | null = null;
+  $effect(() => {
+    const hid = highlightRegionId ?? null;
+    if (hid === lastHighlightForDirty) return;
+    const prev = lastHighlightForDirty;
+    lastHighlightForDirty = hid;
+    const dirtyIds: number[] = [];
+    for (const r of world.regions) {
+      if (r.id === prev || r.id === hid) dirtyIds.push(...r.cells);
+    }
+    if (dirtyIds.length) markDirtyCells(dirtyIds);
+    else if (prev !== null || hid !== null) markDirtyCells('all');
   });
 </script>
 

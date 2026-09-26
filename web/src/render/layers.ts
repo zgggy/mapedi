@@ -493,6 +493,22 @@ function preparePieces(
   return out;
 }
 
+/** 投影空间路径折线缓存：points 签名 + 投影不变则跨帧复用（平移/缩放零重算） */
+const pathPolyCache = new Map<string, { sig: string; poly: Pt[] }>();
+function pathPointsSig(proj: string, pp: unknown, points: { lon: number; lat: number }[]): string {
+  let h = 2166136261;
+  for (const p of points) {
+    h = Math.imul(h ^ Math.round(p.lon * 1e6), 16777619);
+    h = Math.imul(h ^ Math.round(p.lat * 1e6), 16777619);
+  }
+  return `${proj}|${JSON.stringify(pp ?? 0)}|${points.length}|${h >>> 0}`;
+}
+
+/** 标签文字宽度缓存（同字体同名跨帧复用） */
+const labelWidthCache = new Map<string, number>();
+/** 元素中心缓存：rev + id + cells 长度为键 */
+const regionCenterCache = new Map<string, { x: number; y: number }>();
+
 /** 展开环可跨相邻世界；按整数副本序号去重，不能按浮点偏移去重。 */
 function elementCopies(env: RenderEnv): number[] {
   const base = env.worldDxs ?? [env.contentOffsetX ?? 0];
@@ -647,18 +663,25 @@ export const pathsLayer: RenderLayer = {
       const dim = focus === kind ? 1 : 0.45;
       ctx.globalAlpha = dim;
 
-      const ctrl: Pt[] = [];
-      let prev: Pt | null = null;
-      for (const ll of path.points) {
-        const p = projectPt(env, ll);
-        const u: Pt = prev
-          ? { x: unwrapXAgainst(prev.x, p.x), y: p.y }
-          : { x: p.x, y: p.y };
-        ctrl.push(u);
-        prev = u;
+      // 投影空间折线缓存：points 签名+投影不变则跨帧/跨副本复用
+      const psig = pathPointsSig(env.proj, env.pp, path.points);
+      const cached = pathPolyCache.get(path.id);
+      let poly = cached?.poly;
+      if (!cached || cached.sig !== psig) {
+        const ctrl: Pt[] = [];
+        let prev: Pt | null = null;
+        for (const ll of path.points) {
+          const p = projectPt(env, ll);
+          const u: Pt = prev
+            ? { x: unwrapXAgainst(prev.x, p.x), y: p.y }
+            : { x: p.x, y: p.y };
+          ctrl.push(u);
+          prev = u;
+        }
+        poly = catmullRomPolyline(ctrl, 10);
+        pathPolyCache.set(path.id, { sig: psig, poly });
       }
-      const poly = catmullRomPolyline(ctrl, 10);
-      if (poly.length < 2) continue;
+      if (!poly || poly.length < 2) continue;
 
       const strokePoly = (width: number, color: string, dash: number[]) => {
         ctx.beginPath();
@@ -799,6 +822,21 @@ export const decorationsLayer: RenderLayer = {
     clipToMapFrame(ctx, env);
     // 屏幕空间文字的坐标换算：与 beginWorld 同一 MapTransform（含内容偏移，唯一换算点）
     const tScreen = new MapTransform(cam, w, h, env.drawDx ?? env.contentOffsetX ?? 0);
+    // 视口裁剪：装饰只画视口内 cell（视口外像素本就不可见，不是抽稀）
+    const padV = 4 / Math.max(cam.scale, 1e-6);
+    const vL = cam.x - tScreen.drawDx - w / 2 / cam.scale - padV;
+    const vR = cam.x - tScreen.drawDx + w / 2 / cam.scale + padV;
+    const vT = cam.y + h / 2 / cam.scale + padV;
+    const vB = cam.y - h / 2 / cam.scale + padV;
+    const inView = (id: number) => {
+      const i4 = id * 4;
+      return (
+        pcache.bboxes[i4 + 1] >= vL &&
+        pcache.bboxes[i4] <= vR &&
+        pcache.bboxes[i4 + 2] <= vT &&
+        pcache.bboxes[i4 + 3] >= vB
+      );
+    };
 
     for (const layer of world.layers) {
       const labelMode = layer.labelMode ?? 'none';
@@ -832,7 +870,11 @@ export const decorationsLayer: RenderLayer = {
         };
         /** 屏幕坐标投影（走统一 MapTransform，标签随内容平移） */
         const toScreen = (x: number, y: number) => tScreen.worldToScreen(x, y);
-        const regionCenter = (cells: number[]): { x: number; y: number } | null => {
+        const regionCenter = (r: { id: string; cells: number[] }): { x: number; y: number } | null => {
+          const key = `${dataRev()}|${r.id}|${r.cells.length}`;
+          const hit = regionCenterCache.get(key);
+          if (hit) return hit;
+          const cells = r.cells;
           if (!cells.length) return null;
           let sx = pcache.centers[cells[0] * 2];
           let sy = pcache.centers[cells[0] * 2 + 1];
@@ -840,7 +882,10 @@ export const decorationsLayer: RenderLayer = {
             sx += pcache.centers[cells[i] * 2];
             sy += pcache.centers[cells[i] * 2 + 1];
           }
-          return { x: sx / cells.length, y: sy / cells.length };
+          const c = { x: sx / cells.length, y: sy / cells.length };
+          if (regionCenterCache.size > 512) regionCenterCache.clear();
+          regionCenterCache.set(key, c);
+          return c;
         };
 
         // 标签在屏幕空间画（字号不随缩放）
@@ -851,12 +896,18 @@ export const decorationsLayer: RenderLayer = {
         ctx.textBaseline = 'middle';
 
         for (const r of regions) {
-          const c = regionCenter(r.cells);
+          const c = regionCenter(r);
           if (!c) continue;
           const sp = toScreen(c.x, c.y);
           const name = labelMode === 'coreLabel' && (r.coreLabel ?? r.centerLabel) ? (r.coreLabel ?? r.centerLabel)! : r.name;
           if (!name) continue;
-          const tw = ctx.measureText(name).width;
+          const wkey = `${font.size}|${font.family}|${name}`;
+          let tw = labelWidthCache.get(wkey);
+          if (tw === undefined) {
+            tw = ctx.measureText(name).width;
+            if (labelWidthCache.size > 1024) labelWidthCache.clear();
+            labelWidthCache.set(wkey, tw);
+          }
           const bh = font.size + 8;
           if (hitsBox(sp.sx - tw / 2, sp.sy - bh / 2, tw, bh)) continue;
           if (font.halo) {
@@ -889,7 +940,7 @@ export const decorationsLayer: RenderLayer = {
           for (const r of regions) {
             for (const id of r.cells) {
               const cell = world.cells[id];
-              if (!cell) continue;
+              if (!cell || !inView(id)) continue;
               const x = pcache.centers[id * 2];
               const y = pcache.centers[id * 2 + 1];
               drawTree(ctx, x, y, (0.55 * sc) / cam.scale, ((id * 9973) % 100) / 100);
@@ -904,12 +955,15 @@ export const decorationsLayer: RenderLayer = {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           // baseMesh 层标记所有 cell；普通层标记所属元素的 cell
-          const cellIds: number[] = layer.baseMesh
-            ? world.cells.map((c) => c.id)
+          // baseMesh 全量 cell 走惰性迭代（不每帧建 10 万级数组）
+          const cellIds: Iterable<number> = layer.baseMesh
+            ? (function* () {
+                for (const c of world.cells) yield c.id;
+              })()
             : [...new Set(regions.flatMap((r) => r.cells))];
           for (const id of cellIds) {
             const cell = world.cells[id];
-            if (!cell) continue;
+            if (!cell || !inView(id)) continue;
             const x = pcache.centers[id * 2];
             const y = pcache.centers[id * 2 + 1];
             const label = cellMarker === 'id' ? String(id) : String(Math.round(cell.height));

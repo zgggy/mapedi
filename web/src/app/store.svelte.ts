@@ -4,7 +4,7 @@ import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ens
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
 import { invalidateProjCache } from '../render/projCache';
 import { invalidateBorderCache } from '../render/borderCache';
-import { invalidateStaticLayer } from '../render/staticLayerCache';
+import { invalidateStaticLayer, markDirtyCells } from '../render/staticLayerCache';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
 import { invalidateCellIndex } from '../core/index/cellIndex';
@@ -289,6 +289,16 @@ export class EditorStore {
 
   /** 仅视图/选中/UI：不失效几何缓存 */
   touchView() {
+    this.notify();
+  }
+
+  /** 归属提交（增量）：bump data rev + 调用方标脏；不动静态贴图/边界缓存（rev 键自愈） */
+  private touchRegionsIncremental() {
+    invalidateRegionIndex();
+    invalidateCellIndex();
+    bumpRegionsRev();
+    materializeParentCells(this.world!);
+    this.world = this.world ? { ...this.world } : this.world;
     this.notify();
   }
 
@@ -1062,11 +1072,14 @@ export class EditorStore {
       this.strokeRegionId = null;
       this.paintDirty = false;
       this.markHeightDirty(dirtyIds);
+      // 拓扑翻转会重塑远处边界 → 全量；纯高度微调只重烘 stroke 波及 cell
+      markDirtyCells(heightTopologyChanged(samples) ? 'all' : dirtyIds);
       this.flushHeightRegions(samples);
       if (this.world) this.world = { ...this.world };
       this.notify();
       return;
     }
+    const strokeDirty = [...this.strokeAdd, ...this.strokeRm];
     if (this.world && this.strokeRegionId && (this.strokeAdd.length || this.strokeRm.length)) {
       history.run(
         this.world,
@@ -1078,8 +1091,13 @@ export class EditorStore {
     this.strokeAdd = [];
     this.strokeRm = [];
     this.paintDirty = false;
-    // Region 归属变化只失效 Region 相关缓存；投影缓存（cell 几何）不变
-    this.touchRegions();
+    // 归属提交：脏矩形增量重烘（只重画 stroke 波及的 cell）；几何/投影缓存不变
+    if (strokeDirty.length) {
+      markDirtyCells(strokeDirty);
+      this.touchRegionsIncremental();
+    } else {
+      this.touchRegions();
+    }
   }
 
   flood(cellId: number) {
