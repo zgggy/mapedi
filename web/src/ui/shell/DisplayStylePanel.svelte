@@ -43,7 +43,7 @@
     }, 150);
   }
 
-  function num(v: number, lo: number, hi: number) {
+  function num(v: string | number, lo: number, hi: number) {
     return Math.max(lo, Math.min(hi, Number(v) || 0));
   }
   function fmt(v: number, digits = 1) {

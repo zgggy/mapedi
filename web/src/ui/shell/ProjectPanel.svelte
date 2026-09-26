@@ -13,6 +13,7 @@
     onExportGeoJson,
     onExportHeight,
     onImportFile,
+    onImportHeight,
     onClearIdb,
     onSearch,
     onHit,

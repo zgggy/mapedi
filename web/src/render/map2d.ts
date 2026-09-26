@@ -9,6 +9,7 @@ import { styleById } from '../core/styles';
 import { getProjCache } from './projCache';
 import { getRegionIndex } from '../core/index/regionIndex';
 import { defaultPipeline, type RenderEnv, type RenderLayer } from './layers';
+import type { GpuFillRenderer } from './gpuFill';
 import { worldCopyDxs } from './space';
 import { drawPeriodicStatic } from './staticLayerCache';
 
@@ -80,6 +81,8 @@ export function drawWorld(
     staticCache?: boolean;
     /** 平移/缩放中：跳过脏区域重烘焙（贴图 1:1 显示，不拉伸） */
     isDragging?: boolean;
+    /** GPU 填充后端（可选；缺省回退 Canvas2D evenodd） */
+    gpuFill?: GpuFillRenderer;
   },
 ): void {
   const w = ctx.canvas.width / dpr;
@@ -141,6 +144,7 @@ export function drawWorld(
     styleOf: opts?.styleOf,
     borderStyle: opts?.borderStyle,
     isDragging: opts?.isDragging,
+    gpuFill: opts?.gpuFill,
   };
 
   const pipeline = opts?.pipeline ?? defaultPipeline;

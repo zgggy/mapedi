@@ -91,27 +91,44 @@ export function migrateToPathFeature(raw: Record<string, unknown>): PathFeature 
 }
 
 /**
- * Catmull-Rom 采样：输出折线点（投影平面 xy）。
+ * Catmull-Rom 采样：输出折线点（投影平面 xy，或球面 xyz）。
  * pts: 顺序控制点；返回插值折线（含端点）。
+ * 输入带 z（球面）则按同一公式插值 z；纯 2D 输出保持 {x,y} 不带 z。
  */
 export function catmullRomPolyline(
+  pts: { x: number; y: number; z: number }[],
+  samplesPerSeg?: number,
+): { x: number; y: number; z: number }[];
+export function catmullRomPolyline(
   pts: { x: number; y: number }[],
+  samplesPerSeg?: number,
+): { x: number; y: number }[];
+export function catmullRomPolyline(
+  pts: { x: number; y: number; z?: number }[],
   samplesPerSeg = 12,
-): { x: number; y: number }[] {
+): { x: number; y: number; z?: number }[] {
   const n = pts.length;
+  const hasZ = pts.some((p) => p.z !== undefined);
+  const zOf = (p: { z?: number }): number => p.z ?? 0;
   if (n === 0) return [];
   if (n === 1) return [{ ...pts[0] }];
   if (n === 2) {
     return [{ ...pts[0] }, { ...pts[1] }];
   }
-  const out: { x: number; y: number }[] = [];
+  const out: { x: number; y: number; z?: number }[] = [];
   // 端点虚拟邻点
-  const at = (i: number) => {
-    if (i < 0) return { x: 2 * pts[0].x - pts[1].x, y: 2 * pts[0].y - pts[1].y };
+  const at = (i: number): { x: number; y: number; z?: number } => {
+    if (i < 0) {
+      return {
+        x: 2 * pts[0].x - pts[1].x,
+        y: 2 * pts[0].y - pts[1].y,
+        z: 2 * zOf(pts[0]) - zOf(pts[1]),
+      };
+    }
     if (i >= n) {
       const a = pts[n - 1];
       const b = pts[n - 2];
-      return { x: 2 * a.x - b.x, y: 2 * a.y - b.y };
+      return { x: 2 * a.x - b.x, y: 2 * a.y - b.y, z: 2 * zOf(a) - zOf(b) };
     }
     return pts[i];
   };
@@ -138,7 +155,17 @@ export function catmullRomPolyline(
           (-p0.y + p2.y) * t +
           (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
           (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
-      out.push({ x, y });
+      if (hasZ) {
+        const z =
+          0.5 *
+          (2 * zOf(p1) +
+            (-zOf(p0) + zOf(p2)) * t +
+            (2 * zOf(p0) - 5 * zOf(p1) + 4 * zOf(p2) - zOf(p3)) * t2 +
+            (-zOf(p0) + 3 * zOf(p1) - 3 * zOf(p2) + zOf(p3)) * t3);
+        out.push({ x, y, z });
+      } else {
+        out.push({ x, y });
+      }
     }
   }
   out.push({ ...pts[n - 1] });

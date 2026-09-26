@@ -5,7 +5,6 @@ export interface ShellState {
   layersOpen: boolean;
   workspaceOpen: boolean;
   projectOpen: boolean;
-  settingsOpen: boolean;
   viewMode: ViewMode;
   leftW: number;
   rightW: number;
@@ -16,7 +15,6 @@ export function initialShell(): ShellState {
     layersOpen: true,
     workspaceOpen: false,
     projectOpen: false,
-    settingsOpen: false,
     viewMode: 'view-2d',
     leftW: 200,
     rightW: 320,

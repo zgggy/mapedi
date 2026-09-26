@@ -53,6 +53,9 @@
     onCloseInfo,
     onSaveInfo,
     onRegionDrag,
+    onSetSuzerain,
+    onToggleEnemy,
+    onToggleAlly,
   }: {
     world: World | null;
     focusLayer?: string;

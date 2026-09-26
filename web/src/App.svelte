@@ -221,7 +221,6 @@
 
   <TopBar
     bind:open={shell.projectOpen}
-    bind:settingsOpen={shell.settingsOpen}
     mapName={world?.meta ? `世界 ${world.meta.seed}` : '未命名世界'}
     viewMode={shell.viewMode}
     {styleId}

@@ -129,7 +129,7 @@
           <GenerationProfiles
             bind:profiles={ed.profiles}
             onRegenLayer={(id) => ed.regenLayer(id)}
-            onRegenAll={() => onGenerate(ed.seedInput, ed.densityInput)}
+            onRegenAll={() => onGenerate(Number(ed.seedInput) || 1, ed.densityInput)}
             onApplyPreset={(n) => ed.applyGenPreset(n)}
           />
         {/if}

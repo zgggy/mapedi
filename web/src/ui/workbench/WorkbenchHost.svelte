@@ -58,8 +58,6 @@
     onRegenLayer: (id: string) => void;
     onRegenAll: () => void;
     onApplyPreset?: (name: string) => void;
-    onApplyPreset?: (name: string) => void;
-    onApplyPreset?: (name: string) => void;
     onRandomName: (kind: string) => void;
     onWorldChange: () => void;
   } = $props();
