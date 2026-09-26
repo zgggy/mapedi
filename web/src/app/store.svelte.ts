@@ -118,6 +118,12 @@ const ui = $state({
   searchQ: '',
   searchHits: [] as { id: string; name: string; layerId: string; cells: number }[],
   measuring: false,
+  /** 渲染后端：canvas（默认）/ gpu（RegionMesh，显示面板可切换） */
+  renderBackend: (
+    typeof localStorage !== 'undefined' && localStorage.getItem('mapedi-render-backend') === 'gpu'
+      ? 'gpu'
+      : 'canvas'
+  ) as 'canvas' | 'gpu',
   measureA: null as LonLat | null,
   measureB: null as LonLat | null,
   projectEpoch: 0,
@@ -289,6 +295,22 @@ export class EditorStore {
 
   /** 仅视图/选中/UI：不失效几何缓存 */
   touchView() {
+    this.notify();
+  }
+
+  get renderBackend(): 'canvas' | 'gpu' {
+    return ui.renderBackend;
+  }
+
+  /** 切换渲染后端（显示面板）；贴图内容随绘制方式变化，需重烘焙 */
+  setRenderBackend(b: 'canvas' | 'gpu') {
+    ui.renderBackend = b;
+    try {
+      localStorage.setItem('mapedi-render-backend', b);
+    } catch {
+      /* 忽略持久化失败 */
+    }
+    invalidateStaticLayer();
     this.notify();
   }
 

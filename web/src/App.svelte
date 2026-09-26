@@ -169,6 +169,7 @@
         <Viewport
           {world}
           {focusLayer}
+          renderBackend={editor.renderBackend}
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
@@ -455,6 +456,8 @@
       if (styleLayerId) editor.setLayerStyle(styleLayerId, patch);
     }}
     onClose={() => (styleLayerId = null)}
+    renderBackend={editor.renderBackend}
+    onRenderBackend={(b) => editor.setRenderBackend(b)}
   />
 
   <ValidatorPanel

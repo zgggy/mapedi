@@ -14,6 +14,8 @@
     cfg,
     onChange,
     onClose,
+    renderBackend = 'canvas',
+    onRenderBackend,
   }: {
     open?: boolean;
     layerId?: string;
@@ -21,6 +23,9 @@
     cfg?: ElementStyle;
     onChange?: (patch: ElementStylePatch) => void;
     onClose?: () => void;
+    /** 渲染后端（全局）：canvas / gpu */
+    renderBackend?: 'canvas' | 'gpu';
+    onRenderBackend?: (b: 'canvas' | 'gpu') => void;
   } = $props();
 
   const isFreeform = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
@@ -61,6 +66,16 @@
     </div>
 
     <div class="body">
+      <div class="grp">
+        <div class="grp-hd">渲染后端（全局）</div>
+        <div class="row">
+          <button type="button" class="seg" class:on={renderBackend === 'canvas'}
+            onclick={() => onRenderBackend?.('canvas')}>Canvas2D</button>
+          <button type="button" class="seg" class:on={renderBackend === 'gpu'}
+            onclick={() => onRenderBackend?.('gpu')}>GPU（实验）</button>
+        </div>
+        <p class="dim">GPU = WebGL2 元素后端（RegionMesh）；显示异常可切回 Canvas2D。</p>
+      </div>
       {#if isFreeform}
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素三通道。</p>
       {:else}
@@ -147,6 +162,24 @@
 {/if}
 
 <style>
+  .row {
+    display: flex;
+    gap: 6px;
+  }
+  .seg {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid var(--border, #3a4354);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .seg.on {
+    background: var(--accent, #4a7ab0);
+    border-color: var(--accent, #4a7ab0);
+  }
   .dsp {
     position: fixed;
     left: 210px;

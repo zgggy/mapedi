@@ -48,6 +48,7 @@
   import { resolveLayerStyle } from '../core/layer/config';
   import { editor } from '../app/store.svelte';
   import { GpuFillRenderer } from '../render/gpuFill';
+  import { GpuElementsRenderer } from '../render/gpu/gpuElements';
 
   let {
     world,
@@ -63,6 +64,7 @@
     reliefSmooth = 0.35,
     styleId = 'dark',
     workspaceOpen = false,
+    renderBackend = 'canvas' as 'canvas' | 'gpu',
     onhover,
     onzoom,
     onpaint,
@@ -89,6 +91,8 @@
     onhover?: (info: HoverInfo | null) => void;
     /** 缩放级别（cam.scale / 默认 180）→ 状态栏显示 */
     onzoom?: (zoom: number) => void;
+    /** 渲染后端：gpu = WebGL2 RegionMesh 元素后端 */
+    renderBackend?: 'canvas' | 'gpu';
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => void;
     onradius?: (v: number) => void;
     onstrokeend?: () => void;
@@ -614,6 +618,18 @@
     }
     return gpuFill;
   }
+  let gpuElements: GpuElementsRenderer | null = null;
+  let gpuElementsFailed = false;
+  /** GPU 元素后端（惰性创建；显示面板切换后才启用；失败回退 Canvas2D） */
+  function ensureGpuElements(): GpuElementsRenderer | null {
+    if (renderBackend !== 'gpu') return null;
+    if (gpuElements) return gpuElements;
+    if (gpuElementsFailed) return null;
+    gpuElements = GpuElementsRenderer.create();
+    if (!gpuElements) gpuElementsFailed = true;
+    return gpuElements;
+  }
+
   function render() {
     if (!canvas) return;
     syncBackingStore();
@@ -639,6 +655,7 @@
       displayPieces,
       isDragging: panningLive || zoomingLive,
       gpuFill: ensureGpuFill() ?? undefined,
+      gpuElements: ensureGpuElements(),
       styleOf: (id: string) => resolveLayerStyle(world, id),
       borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
       showCellMesh:

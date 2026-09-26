@@ -38,6 +38,7 @@ import { poleSideForRing } from '../core/ring/normalize';
 import type { DisplayPiece } from '../core/displayCompose';
 import { isLayerShown } from '../core/displayCompose';
 import { dataRev } from '../core/rev';
+import type { GpuElementsRenderer, GpuPieceSpec } from './gpu/gpuElements';
 
 export interface RenderEnv {
   ctx: CanvasRenderingContext2D;
@@ -89,6 +90,8 @@ export interface RenderEnv {
   borderStyle?: import('../core/types').LayerRenderConfig;
   /** GPU 离屏填充光栅器（可选；缺省走 Canvas2D evenodd） */
   gpuFill?: GpuFillRenderer;
+  /** GPU 元素后端（RegionMesh：填充/描边/阴影整片）；缺省走 Canvas2D */
+  gpuElements?: GpuElementsRenderer | null;
 }
 
 export interface RenderLayer {
@@ -558,6 +561,10 @@ export const elementsLayer: RenderLayer = {
     const project = (ll: { lon: number; lat: number }) => projectPt(env, ll);
     const fr = frameYOf(env);
     const copies = elementCopies(env);
+    // GPU 后端（RegionMesh）整片渲染；失败回退 Canvas2D（闭包保存每件的画法）
+    const gpuSpecs: GpuPieceSpec[] = [];
+    const canvasFallbacks: (() => void)[] = [];
+    const useGpu = !!env.gpuElements;
 
     beginWorld(ctx, env, 0, true);
     clipToMapFrame(ctx, env, 0);
@@ -608,14 +615,32 @@ export const elementsLayer: RenderLayer = {
         if (!rings.length && entry.fullWorld && fillOn && !seenFill.has(dp.key)) {
           seenFill.add(dp.key);
           const pad = env.periodicTilePadX ?? 0;
-          ctx.save();
-          ctx.globalAlpha = Math.max(0, Math.min(1, fillA * (dp.opacity ?? 1)));
-          ctx.fillStyle = dp.color;
+          const alpha = Math.max(0, Math.min(1, fillA * (dp.opacity ?? 1)));
           // 与 clipToMapFrame 同口径：填充须覆盖「可见带」[fr − clipDxBias]——
           // 平移后可见带滑出绝对 ±π（副本区域），钉在 ±π 的填充会让副本带丢底色
           const bias = env.clipDxBias ?? 0;
-          ctx.fillRect(fr.minX - bias - pad, fr.minY, fr.maxX - fr.minX + pad * 2, fr.maxY - fr.minY);
-          ctx.restore();
+          const fx = fr.minX - bias - pad;
+          const fy = fr.minY;
+          const fw = fr.maxX - fr.minX + pad * 2;
+          const fh = fr.maxY - fr.minY;
+          const paint = () => {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = dp.color;
+            ctx.fillRect(fx, fy, fw, fh);
+            ctx.restore();
+          };
+          if (useGpu) {
+            gpuSpecs.push({
+              rings: [],
+              smooth: sm,
+              copies,
+              fullFrameFill: { color: dp.color, alpha, minX: fx, maxX: fx + fw, minY: fy, maxY: fy + fh },
+            });
+            canvasFallbacks.push(paint);
+          } else {
+            paint();
+          }
         }
         if (!rings.length) continue;
         const prepared = preparePieces(rings, fr, entry.poles);
@@ -633,7 +658,7 @@ export const elementsLayer: RenderLayer = {
         const stroke = region ? darkenHex(region.color, 0.7) : elColor;
         // 所有图层统一：Region.cells → fill + border。高度区间/大陆/湖泊都是普通元素，无特判。
         const fillColor: string | CanvasGradient = dp.color;
-        drawPreparedElement(ctx, prepared, {
+        const drawOpts = {
           camScale: cam.scale,
           fillColor,
           fillAlpha: fillA * (dp.opacity ?? 1),
@@ -651,7 +676,48 @@ export const elementsLayer: RenderLayer = {
           cam: env.cam,
           dpr: env.dpr,
           drawDx: 0,
-        });
+        };
+        const paintPiece = () => {
+          drawPreparedElement(ctx, prepared, drawOpts);
+        };
+        if (useGpu && typeof fillColor === 'string') {
+          // 宽度口径与 drawPreparedElement 内部一致（屏幕像素宽 ÷ 比例 = 用户单位）
+          const bwUser = (Math.max(0, drawOpts.widthPx) * (sel ? 1.6 : 1)) / cam.scale;
+          const swUser = (Math.max(0, drawOpts.shadowWidthPx) * (sel ? 1.15 : 1)) / cam.scale;
+          gpuSpecs.push({
+            rings: prepared,
+            fill: needFill
+              ? { color: fillColor, alpha: Math.max(0, Math.min(1, drawOpts.fillAlpha)) }
+              : undefined,
+            border:
+              bwUser > 0 && drawOpts.stroke !== 'transparent'
+                ? { color: drawOpts.stroke as string, width: bwUser }
+                : undefined,
+            shadow:
+              swUser > 0 && shadowA > 0
+                ? {
+                    color: excl,
+                    width: swUser,
+                    alpha: sel ? Math.min(1, shadowA + 0.12) : shadowA,
+                  }
+                : undefined,
+            smooth: sm,
+            copies,
+          });
+          canvasFallbacks.push(paintPiece);
+        } else {
+          paintPiece();
+        }
+      }
+    }
+    if (useGpu && gpuSpecs.length) {
+      const ok = env.gpuElements!.render(
+        ctx as unknown as Parameters<GpuElementsRenderer['render']>[0],
+        { cam: env.cam, w: env.w, h: env.h, dpr: env.dpr },
+        gpuSpecs,
+      );
+      if (!ok) {
+        for (const f of canvasFallbacks) f();
       }
     }
     void focusLayerId;
