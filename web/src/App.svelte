@@ -24,6 +24,7 @@
   let globeSpin = $state(true);
   let projParams = $state(defaultProjParams());
   let fps = $state(0);
+  let zoomScale = $state(1);
   let viewFade = $state(1);
   let infoRegionId = $state<string | null>(null);
   let expandedIds = $state(new Set<string>());
@@ -182,6 +183,7 @@
           {styleId}
           bindCanvas={(c) => (exportCanvas = c)}
           onhover={(h) => (hover = h)}
+          onzoom={(z) => (zoomScale = z)}
           onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
           onradius={(v) => {
             editor.draw = { ...editor.draw, radiusDeg: v };
@@ -431,7 +433,7 @@
     />
   </WorkspacePanel>
 
-  <StatusBar {hover} {status} {fps} />
+  <StatusBar {hover} {status} {fps} zoom={zoomScale} />
 
   <BrushHud
     {draw}

@@ -274,6 +274,17 @@ export function drawPeriodicStatic(
       ? computeDirtyRects(env.world, env.pcache, pixelW, pixelH, win)
       : [{ x: 0, y: 0, w: pixelW, h: pixelH }];
     if (src) c.drawImage(src.canvas, 0, 0);
+    // 脏矩形 → 内容空间包围盒：元素层据此跳过与脏区不相交的元素（增量关键）
+    const spanX = (win.maxX - win.minX) || 1;
+    const spanY = (win.maxY - win.minY) || 1;
+    const sx = pixelW / spanX;
+    const sy = pixelH / spanY;
+    const dirtyBoxes = dirtyRects.map((r) => ({
+      minX: win.minX + r.x / sx,
+      maxX: win.minX + (r.x + r.w) / sx,
+      maxY: win.maxY - r.y / sy,
+      minY: win.maxY - (r.y + r.h) / sy,
+    }));
     const proxy: RenderEnv = {
       ...env,
       ctx: c,
@@ -285,6 +296,7 @@ export function drawPeriodicStatic(
       h: proxyH,
       contentOffsetX: 0,
       drawDx: 0,
+      dirtyBoxes,
       worldDxs: usePeriod
         ? [-period, 0, period]
         : worldCopyDxs(
@@ -298,22 +310,25 @@ export function drawPeriodicStatic(
       isDragging: false,
     };
     for (const layer of staticLayers) {
+      // 增量时底色已在拷贝里；bg 的 clearRect 会抹掉拷贝内容——跳过
+      if (src && layer.name === 'bg') continue;
+      // 脏矩形合并为单次裁剪，整层只画一遍（不做 矩形×层×元素 的笛卡尔积）
+      c.save();
+      c.beginPath();
       for (const rect of dirtyRects) {
-        c.save();
-        c.beginPath();
         c.rect(rect.x / env.dpr, rect.y / env.dpr, rect.w / env.dpr, rect.h / env.dpr);
-        c.clip();
-        if (!layer.repeat) {
-          proxy.drawDx = 0;
-          layer.draw(proxy);
-        } else {
-          for (const dx of proxy.worldDxs!) {
-            proxy.drawDx = dx;
-            layer.draw(proxy);
-          }
-        }
-        c.restore();
       }
+      c.clip();
+      if (!layer.repeat) {
+        proxy.drawDx = 0;
+        layer.draw(proxy);
+      } else {
+        for (const dx of proxy.worldDxs!) {
+          proxy.drawDx = dx;
+          layer.draw(proxy);
+        }
+      }
+      c.restore();
     }
     state = { key, layoutSig, proxyX: usePeriod ? env.cam.x : anchorX, proxyY: anchorY, canvas: surf.canvas };
     stateMap.set(key, state);

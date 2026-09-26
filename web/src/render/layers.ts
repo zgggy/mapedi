@@ -64,6 +64,8 @@ export interface RenderEnv {
   isDragging?: boolean;
   /** 单周期贴图的接缝余量；仅扩展离屏绘制裁剪，不改变地图外框 */
   periodicTilePadX?: number;
+  /** 增量烘焙的脏区（内容空间包围盒）：元素层跳过不相交元素 */
+  dirtyBoxes?: { minX: number; maxX: number; minY: number; maxY: number }[];
   /** 选中 Region（边界加亮） */
   highlightRegionId?: string | null;
   /** 拖动中的路径 id：地图层不画它（避免与覆盖层幽灵曲线叠成双线） */
@@ -579,6 +581,14 @@ export const elementsLayer: RenderLayer = {
         const rid = dp.regionId;
         const sel = dp.regionSelected || highlightRegionId === rid;
         const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, `piece:${dp.key}`);
+        // 增量烘焙：与脏区不相交的元素像素原样保留在拷贝里，跳过不画
+        if (env.dirtyBoxes?.length) {
+          const b = entry.bbox;
+          const hits = env.dirtyBoxes.some(
+            (r) => b.maxX >= r.minX && b.minX <= r.maxX && b.maxY >= r.minY && b.minY <= r.maxY,
+          );
+          if (!hits) continue;
+        }
         const rings = entry.rings;
         // 湖泊/大陆都是普通元素，不特判中空
         if (!rings.length && entry.fullWorld && fillOn && !seenFill.has(dp.key)) {

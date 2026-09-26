@@ -3,10 +3,13 @@
     hover = null,
     status = '',
     fps = 0,
+    zoom = 1,
   }: {
     hover?: { cellId: number; lon: number; lat: number; height: number } | null;
     status?: string;
     fps?: number;
+    /** 缩放级别（相对默认视野的倍率） */
+    zoom?: number;
   } = $props();
 </script>
 
@@ -18,6 +21,7 @@
     <span class="dim">{hover.height > 0 ? '陆地' : hover.height === 0 ? '海平面' : '海洋'}</span>
   {/if}
   <span class="st">{status}</span>
+  <span class="dim">×{zoom.toFixed(2)}</span>
   <span class="fps">{fps}</span>
 </div>
 

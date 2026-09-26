@@ -64,6 +64,7 @@
     styleId = 'dark',
     workspaceOpen = false,
     onhover,
+    onzoom,
     onpaint,
     onradius,
     onstrokeend,
@@ -86,6 +87,8 @@
     /** 右侧工作区面板是否打开（高度标注的显示条件之一） */
     workspaceOpen?: boolean;
     onhover?: (info: HoverInfo | null) => void;
+    /** 缩放级别（cam.scale / 默认 180）→ 状态栏显示 */
+    onzoom?: (zoom: number) => void;
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => void;
     onradius?: (v: number) => void;
     onstrokeend?: () => void;
@@ -387,6 +390,17 @@
     requestRender();
   }
 
+  /** dpr/尺寸可能在无 resize 事件时变化（系统/浏览器缩放）——渲染前对齐 backing store，
+   *  否则渲染坐标系（canvas.width/dpr）与输入坐标系（rect）错位：内容半显 + 缩放定锚漂移 */
+  function syncBackingStore() {
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const wantW = Math.max(1, Math.floor(rect.width * dpr));
+    const wantH = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== wantW || canvas.height !== wantH) resize();
+  }
+
   /** 仅重绘路径控件 / 笔刷光标（不触发地图管线） */
   function requestOverlay() {
     if (overlayDirty) return;
@@ -602,6 +616,7 @@
   }
   function render() {
     if (!canvas) return;
+    syncBackingStore();
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
@@ -650,6 +665,21 @@
     bindCanvas?.(canvas);
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
+    // dpr 变化（系统/浏览器缩放）不触发 ResizeObserver；补 matchMedia 监听
+    let dprMq: MediaQueryList | null = null;
+    let dprHandler: (() => void) | null = null;
+    const watchDpr = () => {
+      const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      const onChange = () => {
+        resize();
+        mq.removeEventListener('change', onChange);
+        watchDpr();
+      };
+      mq.addEventListener('change', onChange);
+      dprMq = mq;
+      dprHandler = onChange;
+    };
+    watchDpr();
     // 禁止画布上弹出浏览器右键菜单（右键用于拖地图内容）
     const stopCtx = (ev: Event) => {
       ev.preventDefault();
@@ -668,6 +698,7 @@
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      if (dprMq && dprHandler) dprMq.removeEventListener('change', dprHandler);
       canvas.removeEventListener('contextmenu', stopCtx);
       canvas.removeEventListener('dragstart', stopCtx);
       window.removeEventListener('keydown', down);
@@ -690,6 +721,7 @@
     void projParams;
     void styleId;
     void cam.scale;
+    onzoom?.(cam.scale / 180);
     requestRender();
     requestOverlay();
   });
