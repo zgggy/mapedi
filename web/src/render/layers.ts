@@ -611,7 +611,10 @@ export const elementsLayer: RenderLayer = {
           ctx.save();
           ctx.globalAlpha = Math.max(0, Math.min(1, fillA * (dp.opacity ?? 1)));
           ctx.fillStyle = dp.color;
-          ctx.fillRect(fr.minX - pad, fr.minY, fr.maxX - fr.minX + pad * 2, fr.maxY - fr.minY);
+          // 与 clipToMapFrame 同口径：填充须覆盖「可见带」[fr − clipDxBias]——
+          // 平移后可见带滑出绝对 ±π（副本区域），钉在 ±π 的填充会让副本带丢底色
+          const bias = env.clipDxBias ?? 0;
+          ctx.fillRect(fr.minX - bias - pad, fr.minY, fr.maxX - fr.minX + pad * 2, fr.maxY - fr.minY);
           ctx.restore();
         }
         if (!rings.length) continue;
