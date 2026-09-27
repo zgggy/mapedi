@@ -10,6 +10,31 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-27，第三十三次）— UI 交互重构（眼睛显隐 / 选中即绘制 / 悬浮图层面板）**
+
+- **用户定交互契约**：① 工作区**删除全部拖动功能**；② 滑块放进 button 里，**只有选中行是黄色外框**；
+  ③ 图层面板删"双击显隐"，button **左侧加眼睛图标**（睁眼=显示、闭眼=隐藏，点击切换）；
+  ④ 双击图层行改为**弹出显示面板**（DisplayStyle）；⑤ 图层面板改**悬浮面板 + 左上角收起**；
+  ⑥ 点图层行 = **打开工作区**；⑦ 工作区里**选中任何元素直接进入绘制**（删除绘制按钮）；
+  ⑧ 退出绘制 = 完成/Esc/**点工作区空白处（无选中元素）**。
+- **实现要点**：
+  - `EntityBox`：眼睛按钮（`.eye` / `.closed` 用 scaleY 压扁表示闭眼）在 main 左侧；双击 = onStyle；
+    acts 只留 ℹ/🗑（👁/🖌 动作按钮删除）。
+  - `LayersPanel`：悬浮卡片（shadow/radius）+ `collapsed` $state + `.lp-head` 收起按钮（☰/⊟），
+    `{#if !collapsed}` 包列表；行单击 = handleSelect + onDrawLayer（选中并开工作区）。
+  - `WorkspaceDrawer`：拖动机制整体删（collectRects/pointer*/shellHint/parentHl/dragId/dropHint…）；
+    行卡 `.rowwrap.sel`（黄框）内 `.rowbtn` 含滑块（input stopPropagation 不触发选中）；
+    `handleSelect` = onSelect + onDraw（选中即绘制）；`onBlankClick` = onSelect(null) + onDrawMode()
+    退出绘制；🖌️ 绘制按钮删除；虚拟列表行统一 `{@render rowNode(item.node)}`。
+  - App：onSelect(null) 空白=取消选中；onPaintValue 推送滑块值。
+- **验证（浏览器自动化，100k 世界）**：eyes=15、眼睛 hidden↔vis↔hidden ✓、双击弹出
+  "DisplayStyle · environment" ✓、rowbtns=12 内含 12 滑块 ✓、绘制按钮=0 ✓、选中后
+  `.viewport-root.draw` ✓、空白点击退出（class 去 draw）✓、运行时错误 0 ✓。
+- **注意**：图层面板**保留**拖动排序（用户只要求删"工作区的拖动"）；EntityRowShell 的
+  dragging/hint props 仍被 LayersPanel 使用。
+- **待办**（沿上轮）：拓扑翻转增量连通分量；撤销/重做一致性复验；生成小头；cell 网格 100k
+  视口裁剪；阴影恢复时走场图集路径。
+
 **本轮已处理（2026-09-27，第三十二次）— 绘制语义 v2（选定值直刷）+ 工作区滑块联动 + 修绘制回归**
 
 - **用户报告**：① 修改期间只有第一次点击"变成大陆"、后续不变；② 现在绘制完全不能用，

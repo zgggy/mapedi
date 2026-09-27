@@ -323,6 +323,12 @@
       drawActive={draw.active}
       brushRadius={draw.radiusDeg}
       onSelect={(id) => {
+        // 空白点击（id=null）= 无选中元素 = 退出绘制（与完成/Esc 同效）
+        if (id === null) {
+          editor.selectedRegionId = null;
+          editor.notify();
+          return;
+        }
         // 高度：选中区间 = 工作区间（与其它层同一列表）
         if (focusLayer === 'height') {
           editor.setHeightInterval(id);

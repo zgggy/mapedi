@@ -36,7 +36,7 @@
     newName?: string;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
-    /** 双击显隐 */
+    /** 眼睛图标：显隐（双击 = 显示面板） */
     onToggleVisible?: (id: string) => void;
     /** 🖌 绘制：打开工作区 */
     onDrawLayer?: (id: string) => void;
@@ -209,6 +209,9 @@
     return !!dropHint && dropHint.kind === 'gap' && dropHint.highlightParentId === id;
   }
 
+  /** 悬浮面板收起（左上角按钮） */
+  let collapsed = $state(false);
+
   function handleSelect(id: string) {
     onSelect?.(id);
   }
@@ -226,7 +229,8 @@
 {#if open}
   <aside
     class="lp"
-    style="width:{leftW}px"
+    class:collapsed
+    style="width:{collapsed ? 'auto' : leftW + 'px'}"
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
@@ -239,44 +243,57 @@
       dragReady = false;
     }}
   >
-    <PanelHeader
-      icon="📚"
-      title="图层"
-      placeholder="新图层"
-      {newName}
-      onNewName={(v) => onNewName?.(v)}
-      onRandom={() => onRandomName?.()}
-      onCreate={() => onAddLayer?.()}
-    />
-    <p class="hint">单击选中置顶 · 双击显隐 · ℹ 信息 · 🎨 显示 · 🖌 绘制</p>
-    <ul class="list" class:dragging={!!dragId} role="list" bind:this={listEl}>
-      {#each rows as row (row.id)}
-        <li class="node" data-row-id={row.id}>
-          <EntityRowShell
-            depth={row.depth}
-            name={row.meta.name}
-            emoji={row.meta.emoji}
-            selected={focusLayer === row.id}
-            showActions={true}
-            visible={row.visible}
-            dragging={dragId === row.id}
-            hint={shellHint(row.id)}
-            parentHighlight={parentHl(row.id)}
-            nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === row.id}
-            onSelect={() => handleSelect(row.id)}
-            onToggle={() => handleToggle(row.id)}
-            onInfo={() => (infoLayerId = row.id)}
-            onDraw={() => onDrawLayer?.(row.id)}
-            onStyle={() => onStyleLayer?.(row.id)}
-          />
-        </li>
-      {/each}
-    </ul>
-    {#if ghost}
-      <div class="drag-ghost" style="left:{ghost.x}px;top:{ghost.y}px" aria-hidden="true">
-        {ghost.name}
-      </div>
-    {/if}
+    <div class="lp-head">
+      <button
+        type="button"
+        class="collapse"
+        title={collapsed ? '展开图层面板' : '收起图层面板'}
+        aria-label={collapsed ? '展开图层面板' : '收起图层面板'}
+        onclick={() => (collapsed = !collapsed)}
+      >{collapsed ? '☰' : '⊟'}</button>
+      {#if !collapsed}
+        <PanelHeader
+          icon="📚"
+          title="图层"
+          placeholder="新图层"
+          {newName}
+          onNewName={(v) => onNewName?.(v)}
+          onRandom={() => onRandomName?.()}
+          onCreate={() => onAddLayer?.()}
+        />
+        <p class="hint">单击选中并开工作区 · 眼睛显隐 · 双击显示面板 · ℹ 信息</p>
+        <ul class="list" class:dragging={!!dragId} role="list" bind:this={listEl}>
+          {#each rows as row (row.id)}
+            <li class="node" data-row-id={row.id}>
+              <EntityRowShell
+                depth={row.depth}
+                name={row.meta.name}
+                emoji={row.meta.emoji}
+                selected={focusLayer === row.id}
+                showActions={true}
+                visible={row.visible}
+                dragging={dragId === row.id}
+                hint={shellHint(row.id)}
+                parentHighlight={parentHl(row.id)}
+                nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === row.id}
+                onSelect={() => {
+                  handleSelect(row.id);
+                  onDrawLayer?.(row.id);
+                }}
+                onToggle={() => handleToggle(row.id)}
+                onInfo={() => (infoLayerId = row.id)}
+                onDraw={() => onDrawLayer?.(row.id)}
+                onStyle={() => onStyleLayer?.(row.id)}
+              />
+            </li>
+          {/each}
+        </ul>
+        {#if ghost}
+          <div class="drag-ghost" style="left:{ghost.x}px;top:{ghost.y}px" aria-hidden="true">
+            {ghost.name}
+          </div>
+        {/if}
+      {/if}
   </aside>
 {/if}
 
@@ -305,6 +322,11 @@
 
 <style>
   .lp {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    border-radius: 12px;
+    border: 1px solid var(--panel-border);
+    background: rgba(22, 26, 34, 0.92);
+    backdrop-filter: blur(8px);
     position: fixed;
     top: 0;
     bottom: 0;
@@ -317,6 +339,29 @@
     overflow: hidden;
     font-size: 12px;
     user-select: none;
+  }
+  .lp.collapsed {
+    width: auto !important;
+    padding: 4px;
+  }
+  .lp-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .collapse {
+    flex: 0 0 auto;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border-radius: 7px;
+    padding: 3px 7px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .collapse:hover {
+    background: rgba(255, 255, 255, 0.12);
   }
   .hint {
     margin: 0;

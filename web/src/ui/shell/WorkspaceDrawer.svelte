@@ -66,7 +66,7 @@
     brushRadius?: number;
     newName?: string;
     infoRegionId?: string | null;
-    onSelect: (id: string) => void;
+    onSelect: (id: string | null) => void;
     onInfo: (id: string) => void;
     onDelete: (id: string) => void;
     onDraw: (id: string) => void;
@@ -253,18 +253,9 @@
     world && focusLayer === 'country' ? (diplomacyBadge(world, r) ?? '') : '',
   );
 
-  let dragId: string | null = $state(null);
-  let dropHint = $state<DropHint | null>(null);
   let enterId: string | null = $state(null);
   let createPulseParent: string | null = $state(null);
-
-  let ptr = { x: 0, y: 0, id: null as string | null };
   let listEl: HTMLElement | undefined = $state();
-  let promoteEl: HTMLElement | undefined = $state();
-  /** 拖拽中复用首帧 rect，避免每次 pointermove 读 layout */
-  let rectCache: { id: string; top: number; bottom: number; left: number; right: number }[] | null =
-    null;
-  let promoteRectCache: DOMRect | null = null;
 
   $effect(() => {
     // 只补缺失的高度区间元素；禁止依赖 world.regions 的条件重建（会无限触发）
@@ -309,101 +300,20 @@
     expandedIds = next;
   }
 
-  function handleSelect(id: string, e?: MouseEvent) {
-    if (e && ptr.id === id && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) > DRAG_THRESHOLD) {
-      return;
-    }
-    if (dragId) return;
+  /** 选中即进入绘制（无需再点绘制按钮）；工作区拖动功能已整体移除 */
+  function handleSelect(id: string, _e?: MouseEvent) {
     onSelect(id);
+    onDraw?.(id);
     const r = world?.regions.find((x) => x.id === id);
     if (r && canExpand(r)) toggleExpand(id);
   }
 
-  function collectRects(): { id: string; top: number; bottom: number; left: number; right: number }[] {
-    if (rectCache) return rectCache;
-    if (isFreeLayer && pathWin && listEl) {
-      const top = listEl.getBoundingClientRect().top;
-      rectCache = syntheticRowRects(pathIds, top, ROW_EST, dragId);
-      return rectCache;
-    }
-    if (virtualMode && listEl) {
-      const top = listEl.getBoundingClientRect().top;
-      rectCache = syntheticRowRects(vIds, top, ROW_EST, dragId);
-      return rectCache;
-    }
-    if (!listEl) return [];
-    const nodes = listEl.querySelectorAll<HTMLElement>('[data-row-id]');
-    rectCache = Array.from(nodes).map((el) => {
-      const r = el.getBoundingClientRect();
-      return {
-        id: el.dataset.rowId!,
-        top: r.top,
-        bottom: r.bottom,
-        left: r.left,
-        right: r.right,
-      };
-    });
-    return rectCache;
-  }
-
-  function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    const li = (e.target as HTMLElement).closest?.('[data-row-id]') as HTMLElement | null;
-    if (!li) return;
-    ptr = { x: e.clientX, y: e.clientY, id: li.dataset.rowId ?? null };
-    rectCache = null;
-    promoteRectCache = null;
-  }
-
-  function onPointerMove(e: PointerEvent) {
-    if (!ptr.id) return;
-    const dist = Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
-    if (!dragId && dist > DRAG_THRESHOLD) {
-      dragId = ptr.id;
-      rectCache = null;
-      promoteRectCache = promoteEl?.getBoundingClientRect() ?? null;
-      (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
-    }
-    if (!dragId) return;
-
-    // 升级区
-    if (promoteEl) {
-      const pr = promoteRectCache ?? promoteEl.getBoundingClientRect();
-      if (!promoteRectCache) promoteRectCache = pr;
-      if (e.clientY >= pr.top && e.clientY <= pr.bottom) {
-        dropHint = { kind: 'promote' };
-        return;
-      }
-    }
-    const rects = collectRects().filter((r) => r.id !== dragId);
-    dropHint = hintAtPoint(e.clientY, rects, dragRows);
-  }
-
-  function onPointerUp(e: PointerEvent) {
-    if (dragId && dropHint && onRegionDrag) {
-      onRegionDrag(dragId, dropHint);
-    }
-    dragId = null;
-    dropHint = null;
-    ptr.id = null;
-    rectCache = null;
-    promoteRectCache = null;
-    (e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId);
-  }
-
-  function onPointerCancel() {
-    dragId = null;
-    dropHint = null;
-    ptr.id = null;
-    rectCache = null;
-    promoteRectCache = null;
-  }
-
-  function shellHint(id: string) {
-    return hintForShell(dropHint, id, dragRows);
-  }
-  function parentHl(id: string) {
-    return !!dropHint && dropHint.kind === 'gap' && dropHint.highlightParentId === id;
+  /** 点击面板空白处 = 无选中元素 = 退出绘制（与完成/Esc 同效） */
+  function onBlankClick(e: MouseEvent) {
+    const t = e.target as HTMLElement;
+    if (t.closest('button') || t.closest('input') || t.closest('.box-slot')) return;
+    onSelect(null as unknown as string);
+    if (drawActive) onDrawMode?.();
   }
 
   function activeHeader() {
@@ -414,6 +324,7 @@
     const cl = childLayerFor(r);
     return cl ? (LAYER_META[cl]?.name ?? cl) : '子元素';
   }
+
   function handleCreateChild(parentId: string) {
     onCreateChild?.(parentId);
     createPulseParent = parentId;
@@ -454,13 +365,7 @@
   <p class="dim pad">世界尚未生成。</p>
 {:else}
   {@const hd = activeHeader()}
-  <div
-    class="ws"
-    onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={onPointerUp}
-    onpointercancel={onPointerCancel}
-  >
+  <div class="ws" onclick={onBlankClick}>
     <PanelHeader
       icon={hd.icon}
       title={hd.title}
@@ -474,9 +379,6 @@
 
     {#if isHeight}
       <div class="tools">
-        <button type="button" class:active={drawActive} onclick={() => onDrawMode?.()}>
-          🖌️ {drawActive ? '绘制中…' : '绘制'}
-        </button>
         <label class="field inline">
           <span>笔刷 {brushRadius.toFixed(1)}°</span>
           <input
@@ -491,55 +393,49 @@
       </div>
     {/if}
 
-    {#if dragId && focusChildLayerId}
-      <div class="promote-zone" class:over={dropHint?.kind === 'promote'} bind:this={promoteEl}>
-        ↑ 升级为{meta?.name}
-      </div>
-    {/if}
-
     {#snippet rowNode(n: Node)}
       {@const open = expandedIds.has(n.region.id) && n.expandable}
       {@const id = n.region.id}
+      {@const ia = intervalAttrs(n.region)}
       <li class="node" data-row-id={id} data-kind="region">
-        <EntityRowShell
-          depth={n.depth}
-          name={n.region.name}
-          color={n.region.color}
-          badge={diploBadge(n.region)}
-          selected={selectedRegionId === id}
-          showActions={true}
-          expandable={n.expandable}
-          expanded={open}
-          childTint={n.childTint}
-          dragging={dragId === id}
-          hint={shellHint(id)}
-          parentHighlight={parentHl(id)}
-          nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === id}
-          onSelect={(e) => {
-            handleSelect(id, e);
-            const ia2 = intervalAttrs(n.region);
-            if (ia2) onPaintValue?.(id, paintValueOf(id, ia2));
-          }}
-          onInfo={() => onInfo(id)}
-          onDraw={() => onDraw(id)}
-          onDelete={() => onDelete(id)}
-        />
-        {#if intervalAttrs(n.region)}
-          {@const ia = intervalAttrs(n.region)!}
-          <div class="valrow">
-            <input
-              type="range"
-              min={ia.lo}
-              max={ia.hi}
-              step="1"
-              value={paintValueOf(id, ia)}
-              aria-label="{n.region.name} 涂改高度"
-              oninput={(e) => onSliderInput(id, e)}
-            />
-            <span class="val">{paintValueOf(id, ia)}</span>
-            <span class="dim rng">{ia.lo}~{ia.hi}</span>
-          </div>
-        {/if}
+        <div class="rowwrap" class:sel={selectedRegionId === id}>
+          <!-- 行按钮：滑块就在 button 里；选中即进入绘制 -->
+          <button
+            type="button"
+            class="rowbtn"
+            onclick={() => {
+              handleSelect(id);
+              if (ia) onPaintValue?.(id, paintValueOf(id, ia));
+            }}
+          >
+            <span class="swatch" style="background:{n.region.color}"></span>
+            <span class="nm">{n.region.name}</span>
+            <span class="dim">{n.region.cells.length}c</span>
+            {#if diploBadge(n.region)}<span class="badge">{diploBadge(n.region)}</span>{/if}
+            {#if ia}
+              <input
+                type="range"
+                min={ia.lo}
+                max={ia.hi}
+                step="1"
+                value={paintValueOf(id, ia)}
+                aria-label="{n.region.name} 涂改高度"
+                oninput={(e) => onSliderInput(id, e)}
+                onclick={(e) => e.stopPropagation()}
+                onpointerdown={(e) => e.stopPropagation()}
+              />
+              <span class="val">{paintValueOf(id, ia)}</span>
+              <span class="dim rng">{ia.lo}~{ia.hi}</span>
+            {/if}
+          </button>
+          <span class="actbtns">
+            <button type="button" title="信息" onclick={(e) => { e.stopPropagation(); onInfo(id); }}>ℹ️</button>
+            {#if n.expandable}
+              <button type="button" title="展开子元素" onclick={(e) => { e.stopPropagation(); toggleExpand(id); }}>{open ? '▾' : '▸'}</button>
+            {/if}
+            <button type="button" title="删除（保留子元素）" onclick={(e) => { e.stopPropagation(); onDelete(id); }}>🗑️</button>
+          </span>
+        </div>
         {#if n.expandable}
           <div class="branch" class:open>
             <div class="branch-inner">
@@ -614,7 +510,6 @@
     {:else if virtualMode && !isFreeLayer}
     <ul
       class="list virtual"
-      class:dragging={!!dragId}
       role="list"
       bind:this={listEl}
       onscroll={(e) => {
@@ -626,40 +521,14 @@
         <li class="v-pad" style="height:{vwin.padTop}px" aria-hidden="true"></li>
       {/if}
       {#each vSlice as item (item.node.region.id)}
-        {@const n = item.node}
-        {@const id = n.region.id}
-        <li class="node flat" data-row-id={id} data-kind="region">
-          <EntityRowShell
-            depth={n.depth}
-            name={n.region.name}
-            color={n.region.color}
-            badge={diploBadge(n.region)}
-            selected={selectedRegionId === id}
-            showActions={true}
-            expandable={n.expandable}
-            expanded={item.open}
-            childTint={n.childTint}
-            dragging={dragId === id}
-            hint={shellHint(id)}
-            parentHighlight={parentHl(id)}
-            nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === id}
-            onSelect={(e) => {
-            handleSelect(id, e);
-            const ia2 = intervalAttrs(n.region);
-            if (ia2) onPaintValue?.(id, paintValueOf(id, ia2));
-          }}
-            onInfo={() => onInfo(id)}
-            onDraw={() => onDraw(id)}
-            onDelete={() => onDelete(id)}
-          />
-        </li>
+        {@render rowNode(item.node)}
       {/each}
       {#if vwin}
         <li class="v-pad" style="height:{vwin.padBottom}px" aria-hidden="true"></li>
       {/if}
     </ul>
     {:else}
-    <ul class="list" class:dragging={!!dragId} role="list" bind:this={listEl}>
+    <ul class="list" role="list" bind:this={listEl}>
       {#each roots as n (n.region.id)}
         {@render rowNode(n)}
       {/each}
@@ -785,23 +654,79 @@
     transition: none !important;
     animation: none !important;
   }
-  .valrow {
+  /* 行卡：滑块在 button 里；只有选中的是黄色外框 */
+  .rowwrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .rowwrap.sel {
+    border: 1px solid #f0c36a;
+    border-radius: 9px;
+    box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
+  }
+  .rowbtn {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 2px 10px 6px 28px;
+    padding: 5px 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
   }
-  .valrow input[type='range'] {
+  .rowbtn:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .rowbtn .swatch {
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .rowbtn .nm {
+    flex: 0 0 auto;
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rowbtn .dim {
+    flex: 0 0 auto;
+  }
+  .rowbtn input[type='range'] {
     flex: 1;
+    min-width: 60px;
   }
-  .valrow .val {
+  .rowbtn .val {
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     min-width: 34px;
     text-align: right;
   }
-  .valrow .rng {
+  .rowbtn .rng {
     font-size: 10px;
+  }
+  .actbtns {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 2px;
+  }
+  .actbtns button {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+  .actbtns button:hover {
+    background: rgba(255, 255, 255, 0.1);
   }
   .node {
     margin: 0;

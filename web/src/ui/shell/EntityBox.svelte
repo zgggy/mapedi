@@ -28,7 +28,7 @@
     visible?: boolean;
     /** 单击：选中 */
     onSelect?: (e?: MouseEvent) => void;
-    /** 双击：显隐（图层）；未提供时双击=信息 */
+    /** 眼睛图标点击：显隐切换（睁眼=显示，闭眼=隐藏） */
     onToggle?: () => void;
     onInfo?: () => void;
     onStyle?: () => void;
@@ -38,14 +38,25 @@
 </script>
 
 <div class="ebox" class:sel={selected} class:vis={visible} class:hidden={!visible}>
+  {#if onToggle}
+    <!-- 眼睛图标（按钮左侧）：睁眼=显示该图层，闭眼=隐藏；点击即切换 -->
+    <button
+      type="button"
+      class="eye"
+      class:closed={!visible}
+      title={visible ? '隐藏图层' : '显示图层'}
+      aria-label={visible ? '隐藏图层' : '显示图层'}
+      onclick={(e) => { e.stopPropagation(); onToggle(); }}
+    ><span class="eyeglyph" aria-hidden="true">👁</span></button>
+  {/if}
   <button
     type="button"
     class="main"
     onclick={(e) => onSelect?.(e)}
     ondblclick={(e) => {
       e.preventDefault();
-      if (onToggle) onToggle();
-      else onInfo?.();
+      // 双击 = 弹出图层显示面板（原显隐切换移到眼睛图标）
+      if (onStyle) onStyle();
     }}
   >
     {#if color}
@@ -65,12 +76,6 @@
     <span class="acts">
       {#if onInfo}
         <button type="button" title="信息" onclick={(e) => { e.stopPropagation(); onInfo(); }}>ℹ</button>
-      {/if}
-      {#if onStyle}
-        <button type="button" title="显示" onclick={(e) => { e.stopPropagation(); onStyle(); }}>👁</button>
-      {/if}
-      {#if onDraw}
-        <button type="button" title="绘制" onclick={(e) => { e.stopPropagation(); onDraw(); }}>🖌</button>
       {/if}
       {#if onDelete}
         <button type="button" title="删除" onclick={(e) => { e.stopPropagation(); onDelete(); }}>🗑</button>
@@ -102,6 +107,30 @@
   }
   .ebox:hover {
     background: rgba(255, 255, 255, 0.07);
+  }
+  .eye {
+    flex: 0 0 auto;
+    margin-right: 2px;
+    padding: 2px 3px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    opacity: 0.95;
+  }
+  .eye:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+  }
+  .eye .eyeglyph {
+    display: inline-block;
+    transform: scaleY(1.1);
+  }
+  /* 闭眼：压扁 + 划线 = 该图层隐藏 */
+  .eye.closed .eyeglyph {
+    transform: scaleY(0.28);
+    opacity: 0.55;
   }
   .main {
     flex: 1;
