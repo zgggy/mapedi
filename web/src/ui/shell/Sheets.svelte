@@ -39,6 +39,7 @@
     onDelete,
     onDraw,
     onAnnex,
+    onPaintValue,
     onRadius,
     onDrawMode,
     onAnnexMode,
@@ -73,6 +74,8 @@
     onDelete: (id: string) => void;
     onDraw: (id: string) => void;
     onAnnex: (id: string) => void;
+    /** 区间型元素滑块联动（涂改值） */
+    onPaintValue?: (id: string, value: number) => void;
     onRadius: (v: number) => void;
     onDrawMode: () => void;
     onAnnexMode: () => void;
@@ -196,6 +199,7 @@
         onDelete={onDelete}
         onDraw={onDraw}
         onAnnex={onAnnex}
+        {onPaintValue}
       />
     {/if}
   </div>

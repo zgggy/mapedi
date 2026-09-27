@@ -44,6 +44,7 @@
     onInfo,
     onDelete,
     onDraw,
+    onPaintValue,
     onRadius,
     onDrawMode,
     onCreate,
@@ -69,6 +70,8 @@
     onInfo: (id: string) => void;
     onDelete: (id: string) => void;
     onDraw: (id: string) => void;
+    /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字 */
+    onPaintValue?: (id: string, value: number) => void;
     onRadius?: (v: number) => void;
     onDrawMode?: () => void;
     onCreate?: () => void;
@@ -276,6 +279,28 @@
   $effect(() => {
     if (virtualMode && listEl) listH = listEl.clientHeight || 360;
   });
+
+  /** 区间型元素（attributes.kind === 'interval'，带 lo/hi/min）：滑块区间 = 元素高度区间。
+   *  数据驱动——未来任何「区间型元素」都自动获得滑块；单值型元素不渲染滑块。 */
+  function intervalAttrs(r: { attributes?: Record<string, unknown> }): { lo: number; hi: number; min: number } | null {
+    const a = r.attributes;
+    if (!a || a.kind !== 'interval') return null;
+    const lo = typeof a.lo === 'number' ? a.lo : 0;
+    const hi = typeof a.hi === 'number' ? a.hi : 1;
+    const min = typeof a.min === 'number' ? a.min : lo;
+    return { lo, hi, min };
+  }
+  /** 每元素涂改值（初始 = 区间 min） */
+  const paintValues: Record<string, number> = {};
+  function paintValueOf(id: string, attrs: { min: number }): number {
+    return paintValues[id] ?? attrs.min;
+  }
+  function onSliderInput(id: string, e: Event) {
+    const v = Number((e.currentTarget as HTMLInputElement).value);
+    paintValues[id] = v;
+    handleSelect(id, new MouseEvent('click') as unknown as MouseEvent);
+    onPaintValue?.(id, v);
+  }
 
   function toggleExpand(id: string) {
     const next = new Set(expandedIds);
@@ -490,11 +515,31 @@
           hint={shellHint(id)}
           parentHighlight={parentHl(id)}
           nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === id}
-          onSelect={(e) => handleSelect(id, e)}
+          onSelect={(e) => {
+            handleSelect(id, e);
+            const ia2 = intervalAttrs(n.region);
+            if (ia2) onPaintValue?.(id, paintValueOf(id, ia2));
+          }}
           onInfo={() => onInfo(id)}
           onDraw={() => onDraw(id)}
           onDelete={() => onDelete(id)}
         />
+        {#if intervalAttrs(n.region)}
+          {@const ia = intervalAttrs(n.region)!}
+          <div class="valrow">
+            <input
+              type="range"
+              min={ia.lo}
+              max={ia.hi}
+              step="1"
+              value={paintValueOf(id, ia)}
+              aria-label="{n.region.name} 涂改高度"
+              oninput={(e) => onSliderInput(id, e)}
+            />
+            <span class="val">{paintValueOf(id, ia)}</span>
+            <span class="dim rng">{ia.lo}~{ia.hi}</span>
+          </div>
+        {/if}
         {#if n.expandable}
           <div class="branch" class:open>
             <div class="branch-inner">
@@ -598,7 +643,11 @@
             hint={shellHint(id)}
             parentHighlight={parentHl(id)}
             nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === id}
-            onSelect={(e) => handleSelect(id, e)}
+            onSelect={(e) => {
+            handleSelect(id, e);
+            const ia2 = intervalAttrs(n.region);
+            if (ia2) onPaintValue?.(id, paintValueOf(id, ia2));
+          }}
             onInfo={() => onInfo(id)}
             onDraw={() => onDraw(id)}
             onDelete={() => onDelete(id)}
@@ -735,6 +784,24 @@
   .list.dragging :global(.kid-wrap) {
     transition: none !important;
     animation: none !important;
+  }
+  .valrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 10px 6px 28px;
+  }
+  .valrow input[type='range'] {
+    flex: 1;
+  }
+  .valrow .val {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    min-width: 34px;
+    text-align: right;
+  }
+  .valrow .rng {
+    font-size: 10px;
   }
   .node {
     margin: 0;

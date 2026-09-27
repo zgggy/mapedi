@@ -641,9 +641,12 @@
     }
   }
 
-  // 切层顺滑：世界稳定后预热各层件几何（环/样条/三角化/Path2D），切层命中缓存
+  // 切层顺滑：世界稳定后预热各层件几何（环/样条/三角化/Path2D），切层命中缓存。
+  // warmDone=false 期间为「首启渐现」（冷件跳过）；完成后同步重建，件不得消失。
   let warmTimer = 0;
+  let warmDone = false;
   function scheduleWarm() {
+    warmDone = false;
     clearTimeout(warmTimer);
     warmTimer = setTimeout(() => {
       if (!canvas || !world.cells.length) return;
@@ -669,6 +672,10 @@
         },
         world.layers.map((l) => l.id),
         (pieces) => gl?.prime(pieces),
+        () => {
+          warmDone = true;
+          requestRender();
+        },
       );
     }, 600);
   }
@@ -754,6 +761,7 @@
       isDragging: panningLive || zoomingLive,
       glScene: ensureMapGl() ?? undefined,
       onGeometryReady: requestRender,
+      progressiveBoot: !warmDone,
       styleOf: (id: string) => resolveLayerStyle(world, id),
       borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
       showCellMesh:

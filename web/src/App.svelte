@@ -365,6 +365,7 @@
         editor.deleteSelected();
       }}
       onDraw={(id) => editor.startDraw(id)}
+      onPaintValue={(id, v) => editor.setHeightPaint(id, v)}
       onRadius={(v) => {
         editor.draw = { ...editor.draw, radiusDeg: v };
       }}

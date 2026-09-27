@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Region, World } from '../../core/types';
+  import { intervalById, type HeightInterval } from '../../core/layer/heightIntervals';
 
   let {
     world,
@@ -11,6 +12,7 @@
     onDelete,
     onDraw,
     onAnnex,
+    onPaintValue,
     annexPick = false,
   }: {
     world: World;
@@ -22,8 +24,26 @@
     onDelete: (id: string) => void;
     onDraw: (id: string) => void;
     onAnnex: (id: string) => void;
+    /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字 */
+    onPaintValue?: (id: string, value: number) => void;
     annexPick?: boolean;
   } = $props();
+
+  /** 区间型元素（高度档）：滑块区间 = 元素高度区间；滑动即选中。
+   *  未来其它「区间型元素」同样接入（提供 interval 映射即可），单值型元素不需要滑块。 */
+  const intervalOf = (id: string): HeightInterval | null => intervalById(id) ?? null;
+
+  /** 每元素的涂改值（初始 = 区间 min；滑动时由 onPaintValue 传出） */
+  const values: Record<string, number> = {};
+  function valueOf(iv: HeightInterval): number {
+    return values[iv.id] ?? iv.min;
+  }
+  function onSliderInput(iv: HeightInterval, e: Event) {
+    const v = Number((e.currentTarget as HTMLInputElement).value);
+    values[iv.id] = v;
+    onSelect(iv.id);
+    onPaintValue?.(iv.id, v);
+  }
 
   const items = $derived(world.regions.filter((r) => r.layerId === focusLayer));
   const childLayerOf = $derived(
@@ -43,7 +63,15 @@
       <div class="box" class:sel={selectedRegionId === r.id}>
         <div class="row">
           <span class="swatch" style="background:{r.color}"></span>
-          <button type="button" class="name" onclick={() => onSelect(r.id)}>
+          <button
+            type="button"
+            class="name"
+            onclick={() => {
+              onSelect(r.id);
+              const iv2 = intervalOf(r.id);
+              if (iv2) onPaintValue?.(r.id, valueOf(iv2));
+            }}
+          >
             {r.name}
           </button>
           <span class="dim">{r.cells.length}c</span>
@@ -66,6 +94,22 @@
             {/if}
           </span>
         </div>
+        {#if intervalOf(r.id)}
+          {@const iv = intervalOf(r.id)!}
+          <div class="valrow">
+            <input
+              type="range"
+              min={iv.lo}
+              max={iv.hi}
+              step="1"
+              value={valueOf(iv)}
+              aria-label="{r.name} 涂改高度"
+              oninput={(e) => onSliderInput(iv, e)}
+            />
+            <span class="val">{valueOf(iv)}</span>
+            <span class="dim rng">{iv.lo}~{iv.hi}</span>
+          </div>
+        {/if}
         {#if childLayerOf && expandedId === r.id}
           <div class="children">
             {#each childrenOf(r.id) as ch (ch.id)}
@@ -99,6 +143,24 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  .valrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 8px 6px 30px;
+  }
+  .valrow input[type='range'] {
+    flex: 1;
+  }
+  .valrow .val {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    min-width: 34px;
+    text-align: right;
+  }
+  .valrow .rng {
+    font-size: 10px;
   }
   .box {
     border: 1px solid var(--panel-border);

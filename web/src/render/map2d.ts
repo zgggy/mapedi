@@ -93,7 +93,9 @@ export function buildRenderEnv(
     dpr,
     w,
     h,
-    warmQueue: [],
+    // 渐现仅限首启（progressiveBoot）：冷件跳过入队、空闲补热。
+    // 活跃期（预热完成后）必须同步重建被失效的件——否则件会"消失"直到下一次空闲（=全图重载观感）
+    warmQueue: opts?.progressiveBoot ? [] : undefined,
     style,
     focus: opts?.focusLayer ?? 'height',
     proj,
@@ -208,6 +210,8 @@ export function drawWorld(
     isDragging?: boolean;
     /** 冷件补热就绪回调（渐现：触发重绘让元素出现） */
     onGeometryReady?: () => void;
+    /** 首启渐现：冷件跳过入队（仅世界载入/生成期为 true；之后同步重建） */
+    progressiveBoot?: boolean;
     /** GL 直绘场景（bg/cellsMesh/elements 三通道）；返回 true = 已绘，2D 只画余下层（透明底） */
     glScene?: {
       render(env: RenderEnv, channels: { cellsMesh: boolean; elements: boolean }): boolean;

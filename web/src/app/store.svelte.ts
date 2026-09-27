@@ -71,8 +71,7 @@ import {
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
 import {
-  heightDrawStroke,
-  type HeightDrawInput,
+  setHeightStroke,
 } from '../core/draw/heightDraw';
 import {
   membershipDrawStroke,
@@ -240,6 +239,8 @@ export class EditorStore {
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
   heightIntervalId = 'h6';
+  /** 当前涂改高度值（工作区滑块选定；未选过则用所选区间的 min 兜底） */
+  heightPaintValue: number | null = null;
 
   randomName(kind: string) {
     const rng = createRng((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
@@ -990,7 +991,7 @@ export class EditorStore {
       addMode: true,
     };
     const iv = intervalById(this.heightIntervalId);
-    this.status = `高度绘制 · ${iv?.name ?? ''}：左键赋${iv?.min ?? 0}/再点+1 · Shift±档 · 右键−1 · Alt=0 · Esc 退出`;
+    this.status = `高度绘制 · ${iv?.name ?? ''} ${this.heightPaintValue ?? iv?.min ?? 0}：左键刷值 · 右键擦除 · Esc 退出`;
   }
 
   setHeightInterval(intervalId: string) {
@@ -999,7 +1000,19 @@ export class EditorStore {
       this.draw = { ...this.draw, targetRegionId: `__height__:${intervalId}` };
     }
     const iv = intervalById(intervalId);
-    this.status = `工作区间：${iv?.name ?? intervalId}（${iv?.lo} ~ ${iv?.hi}，赋 ${iv?.min}）`;
+    this.status = `选定：${iv?.name ?? intervalId}（${iv?.lo} ~ ${iv?.hi}）→ 涂改值 ${this.heightPaintValue}`;
+    this.notify();
+  }
+
+  /** 工作区滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字 */
+  setHeightPaint(intervalId: string, value: number) {
+    this.heightIntervalId = intervalId;
+    this.heightPaintValue = value;
+    if (this.draw.targetRegionId?.startsWith('__height__')) {
+      this.draw = { ...this.draw, targetRegionId: `__height__:${intervalId}` };
+    }
+    const iv = intervalById(intervalId);
+    this.status = `涂改值 ${value}（${iv?.name ?? intervalId}）`;
     this.notify();
   }
 
@@ -1069,29 +1082,29 @@ export class EditorStore {
 
   /** 高度笔刷：HeightDraw 整数语义 */
   paintHeight(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, pointer: 'left' | 'right' = 'left'): number[] | null {
+    void shift; void ctrl; void alt;
     if (!this.world) return null;
     const radius = this.draw.radiusDeg || 1.2;
     const hits = cellsInBrush(this.world, lon, lat, radius);
     if (!hits.length) return null;
-    const intervalId = this.heightIntervalId ?? 'h6';
     if (!this.paintDirty) {
       this.strokeRegionId = '__height__';
       this.strokeAdd = [];
       this.strokeRm = [];
       this.paintDirty = true;
-      this.heightStroke = hits.map((id) => ({ id, h: this.world!.cells[id].height }));
+      this.heightStroke = [];
       this.heightTouched = new Set();
     }
-    const input: HeightDrawInput = {
-      cellIds: hits,
-      pointer: ctrl && !alt ? 'right' : pointer,
-      phase: this.heightTouched?.size ? 'move' : 'down',
-      shift,
-      alt,
-      intervalId,
-      touched: this.heightTouched ?? new Set(),
-    };
-    heightDrawStroke(this.world, input);
+    // 撤销样本：每个 cell 在**首次触碰**时记录原高（此前只记首批 = 拖涂撤销不完整）
+    for (const id of hits) {
+      if (!this.heightTouched!.has(id)) {
+        this.heightStroke!.push({ id, h: this.world!.cells[id].height });
+        this.heightTouched!.add(id);
+      }
+    }
+    // 【v2 语义】笔刷只写「选定值」（右键擦除为 0）；拖动中零重算，只回传命中供色块高亮
+    const paintValue = this.heightPaintValue ?? intervalById(this.heightIntervalId)?.min ?? 0;
+    setHeightStroke(this.world, hits, paintValue, pointer === 'right');
     for (const id of hits) {
       const c = this.world.cells[id];
       if (!c) continue;
@@ -1099,8 +1112,6 @@ export class EditorStore {
       else absorbLandCell(this.world, c.id);
       this.markHeightDirty([c.id]);
     }
-    // 【绘制模型】拖动中零重算：只回传命中 cell 供色块高亮；
-    // 区间归属/件环/rev 的重算在 commitStroke 一次完成（用户定：先高亮，松手才重算）
     return hits;
   }
 
