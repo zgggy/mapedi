@@ -66,9 +66,11 @@ export function blueNoiseSphere(
     const minD = avg * factor;
     const minD2 = minD * minD;
     const cell = Math.max(minD, 0.015);
-    const grid = new Map<string, number[]>();
-    const keyOf = (p: Vec3) =>
-      `${Math.floor(p[0] / cell)},${Math.floor(p[1] / cell)},${Math.floor(p[2] / cell)}`;
+    // 数字格键（|floor(p/cell)| ≤ 67 → 偏移 256、步长 512 无碰撞）——
+    // 旧字符串键每尝试 27 次模板拼接 + Map 查询，是撒点 5s 的主因
+    const grid = new Map<number, number[]>();
+    const gk = (x: number, y: number, z: number) =>
+      (Math.floor(x / cell) + 256) * 262144 + (Math.floor(y / cell) + 256) * 512 + (Math.floor(z / cell) + 256);
 
     const tryPush = (p: Vec3): boolean => {
       const cx = Math.floor(p[0] / cell);
@@ -77,7 +79,7 @@ export function blueNoiseSphere(
       for (let dx = -1; dx <= 1; dx++)
         for (let dy = -1; dy <= 1; dy++)
           for (let dz = -1; dz <= 1; dz++) {
-            const a = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+            const a = grid.get((cx + dx + 256) * 262144 + (cy + dy + 256) * 512 + (cz + dz + 256));
             if (!a) continue;
             for (const j of a) {
               const q = pts[j];
@@ -86,7 +88,7 @@ export function blueNoiseSphere(
             }
           }
       pts.push(p);
-      const k = keyOf(p);
+      const k = gk(p[0], p[1], p[2]);
       let arr = grid.get(k);
       if (!arr) {
         arr = [];
@@ -420,24 +422,170 @@ function convexHullTriangles(
   const used = new Uint8Array(n);
   used[i0] = used[i1] = used[i2] = used[i3] = 1;
 
-  // 剩余点（球面上大多在包上）
-  for (let pi = 0; pi < n; pi++) {
-    if (used[pi]) continue;
-    if (onProgress && (pi & 511) === 0) onProgress(pi, n);
+  // ---- 行进式可见域（quickhull）：边→面邻接 + 播种行走 + 可见域 BFS ----
+  // 旧实现每点全量扫面 = O(n²)（30k ≈ 18 亿次平面测试 = 16s；100k ≈ 2 分钟）。
+  // 新实现：可见域是连通的——从提示面沿「更可见」方向行走到可见面，再 BFS 扩展；
+  // 插入序按 Morton（空间填充曲线）排序，相邻插入点相邻落位 → 行走步数 O(1)。
+  const ekey = (u: number, v: number) => (u < v ? u * n + v : v * n + u);
+  const edgeFaces = new Map<number, number[]>();
+  const register = (f: Face, fi: number) => {
+    for (const [u, v] of [
+      [f.a, f.b],
+      [f.b, f.c],
+      [f.c, f.a],
+    ] as const) {
+      const k = ekey(u, v);
+      const arr = edgeFaces.get(k);
+      if (arr) arr.push(fi);
+      else edgeFaces.set(k, [fi]);
+    }
+  };
+  for (let fi = 0; fi < faces.length; fi++) register(faces[fi], fi);
+
+  // Morton 序（球面 xyz 量化到 21 位）：确定性，不改 sites 数组本身 → 输出与旧版同序
+  // 10 位×3 = 30 位乘法 Morton（JS 位运算 32 位溢出 → 禁止 <<3b；乘法在 double 精度内精确）
+  const morton = (v: Vec3): number => {
+    const xi = Math.min(1023, Math.max(0, Math.floor((v[0] * 0.5 + 0.5) * 1023)));
+    const yi = Math.min(1023, Math.max(0, Math.floor((v[1] * 0.5 + 0.5) * 1023)));
+    const zi = Math.min(1023, Math.max(0, Math.floor((v[2] * 0.5 + 0.5) * 1023)));
+    let m = 0;
+    let mul = 1;
+    for (let b = 0; b < 10; b++) {
+      m += (((xi >> b) & 1) + 2 * ((yi >> b) & 1) + 4 * ((zi >> b) & 1)) * mul;
+      mul *= 8;
+    }
+    return m;
+  };
+  const order: number[] = [];
+  for (let i = 0; i < n; i++) if (!used[i]) order.push(i);
+  const mkey = new Float64Array(n);
+  for (const i of order) mkey[i] = morton(pts[i]);
+  order.sort((a, b) => mkey[a] - mkey[b]);
+
+  let hint = 0; // 播种提示面（每轮更新为新建面 → 相邻插入 O(1) 行走）
+  // 最近新建面 FIFO（Morton 局部性）：爬山卡局部极大时从这里重播种
+  const recent: number[] = [];
+  const walkFrom = (start: number, pi: number): number => {
+    let cur = start;
+    // 起点已死：从其邻接找活面（O(1)）
+    if (faces[cur]?.dead) {
+      const f0 = faces[cur];
+      let found = -1;
+      if (f0) {
+        for (const [u, v] of [
+          [f0.a, f0.b],
+          [f0.b, f0.c],
+          [f0.c, f0.a],
+        ] as const) {
+          const arr = edgeFaces.get(ekey(u, v));
+          if (!arr) continue;
+          for (const g of arr) {
+            if (faces[g] && !faces[g].dead) {
+              found = g;
+              break;
+            }
+          }
+          if (found >= 0) break;
+        }
+      }
+      if (found < 0) return -1;
+      cur = found;
+    }
+    // 沿 planeDist 更大的邻面爬（分片函数会卡局部极大 → 失败由调用方重播种）
+    for (let steps = 0; steps < 512; steps++) {
+      const f = faces[cur];
+      if (!f || f.dead) return -1;
+      const d0 = planeDist(f, pi);
+      if (d0 > 1e-12) return cur;
+      let best = -1;
+      let bestD = d0;
+      for (const [u, v] of [
+        [f.a, f.b],
+        [f.b, f.c],
+        [f.c, f.a],
+      ] as const) {
+        const arr = edgeFaces.get(ekey(u, v));
+        if (!arr) continue;
+        for (const g of arr) {
+          const gf = faces[g];
+          if (!gf || gf.dead) continue;
+          const d = planeDist(gf, pi);
+          if (d > bestD) {
+            bestD = d;
+            best = g;
+          }
+        }
+      }
+      if (best < 0) return -1;
+      cur = best;
+    }
+    return -1;
+  };
+  const deadCnt = { n: 0 };
+  const compact = () => {
+    const live = faces.filter((f) => !f.dead);
+    faces.length = 0;
+    edgeFaces.clear();
+    for (const f of live) {
+      faces.push(f);
+      register(f, faces.length - 1);
+    }
+    hint = faces.length ? faces.length - 1 : 0;
+    deadCnt.n = 0;
+  };
+
+  for (const pi of order) {
     used[pi] = 1;
-    const visible: number[] = [];
-    for (let fi = 0; fi < faces.length; fi++) {
-      const f = faces[fi];
-      if (f.dead) continue;
-      if (planeDist(f, pi) > 1e-12) {
-        visible.push(fi);
-        f.dead = true;
+    // 1) 播种行走：hint → 失败则最近新建面 FIFO 重播种（Morton 局部性）→ 再失败全扫兜底
+    let seedFace = walkFrom(hint, pi);
+    if (seedFace < 0) {
+      for (let ri = recent.length - 1; ri >= 0 && seedFace < 0; ri--) {
+        seedFace = walkFrom(recent[ri], pi);
       }
     }
-    if (!visible.length) continue; // 在内部
-    // 地平线：只被一个可见面使用的边
-    const edgeCount = new Map<string, { u: number; v: number; c: number }>();
-    const ekey = (u: number, v: number) => (u < v ? `${u}_${v}` : `${v}_${u}`);
+    // 2) 可见域收集：BFS（播种行走命中）或全扫（回退，罕见；同口径记「本轮死面」）
+    const visible: number[] = [];
+    const stack: number[] = [];
+    if (seedFace >= 0) {
+      faces[seedFace].dead = true;
+      deadCnt.n++;
+      stack.push(seedFace);
+    } else {
+      for (let fi = 0; fi < faces.length; fi++) {
+        const f = faces[fi];
+        if (f.dead) continue;
+        if (planeDist(f, pi) > 1e-12) {
+          f.dead = true;
+          deadCnt.n++;
+          stack.push(fi);
+        }
+      }
+      if (!stack.length) continue; // 在包内
+    }
+    while (stack.length) {
+      const fi = stack.pop()!;
+      visible.push(fi);
+      const f = faces[fi];
+      for (const [u, v] of [
+        [f.a, f.b],
+        [f.b, f.c],
+        [f.c, f.a],
+      ] as const) {
+        const arr = edgeFaces.get(ekey(u, v));
+        if (!arr) continue;
+        for (const g of arr) {
+          const gf = faces[g];
+          if (!gf || gf.dead) continue;
+          if (planeDist(gf, pi) > 1e-12) {
+            gf.dead = true;
+            deadCnt.n++;
+            stack.push(g);
+          }
+        }
+      }
+    }
+    // 3) 地平线：可见域中只被一个可见面使用的边
+    const edgeCount = new Map<number, { u: number; v: number; c: number }>();
     for (const fi of visible) {
       const f = faces[fi];
       for (const [u, v] of [
@@ -451,16 +599,20 @@ function convexHullTriangles(
         else edgeCount.set(k, { u, v, c: 1 });
       }
     }
+    let lastNew = -1;
     for (const e of edgeCount.values()) {
       if (e.c !== 1) continue;
       faces.push({ a: e.u, b: e.v, c: pi, dead: false });
+      lastNew = faces.length - 1;
+      register(faces[lastNew], lastNew);
     }
-    // 紧凑掉 dead，防数组膨胀
-    if (faces.length > 0 && faces.length > n * 8) {
-      const live = faces.filter((f) => !f.dead);
-      faces.length = 0;
-      faces.push(...live);
+    if (lastNew >= 0) {
+      hint = lastNew;
+      recent.push(lastNew);
+      if (recent.length > 64) recent.shift();
     }
+    // 紧凑掉 dead（重建邻接；罕见）
+    if (deadCnt.n > n * 2) compact();
   }
 
   const out: [number, number, number][] = [];

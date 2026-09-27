@@ -149,10 +149,11 @@ export function warmLayerGeometry(
     }
   }
   let i = 0;
+  // 真空闲才跑（不设 timeout）：切层顺滑靠缓存命中，预热本身不得抢主线程
   const idle: (fn: () => void) => void =
     typeof requestIdleCallback === 'function'
-      ? (fn) => requestIdleCallback(() => fn(), { timeout: 100 })
-      : (fn) => setTimeout(fn, 0);
+      ? (fn) => requestIdleCallback(() => fn())
+      : (fn) => setTimeout(fn, 32);
   const step = (): void => {
     if (i >= jobs.length) return;
     const { env, piece } = jobs[i++];
