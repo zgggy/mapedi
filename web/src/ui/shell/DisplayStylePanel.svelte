@@ -7,6 +7,7 @@
   import { defaultElementStyle, patchElementStyle } from '../../core/layer/style';
   import { markDirtyCells } from '../../render/staticLayerCache';
   import PanelShell from './PanelShell.svelte';
+  import CapsuleSlider from './CapsuleSlider.svelte';
 
   let {
     open = false,
@@ -57,7 +58,7 @@
   }
 </script>
 
-<PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} x={250} y={56} maxHeight="calc(100vh - 120px)" onCollapse={onCollapse}>
+<PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} x={250} y={56} onCollapse={onCollapse}>
     <div class="body">
       <div class="grp">
         <div class="grp-hd">渲染后端（全局）</div>
@@ -82,14 +83,12 @@
         {#if c.border.enabled}
           <label class="r">
             宽度
-            <input type="range" min="0" max="12" step="0.1" value={c.border.width}
-              oninput={(e) => debouncedChange({ border: { width: num(e.currentTarget.value, 0, 12) } })} />
+            <CapsuleSlider min={0} max={12} step={0.1} value={c.border.width} label="边界宽度" onInput={(v) => debouncedChange({ border: { width: num(v, 0, 12) } })} />
             <span class="v">{fmt(c.border.width)}</span>
           </label>
           <label class="r">
             平滑
-            <input type="range" min="0" max="1" step="0.05" value={c.border.smooth}
-              oninput={(e) => debouncedChange({ border: { smooth: num(e.currentTarget.value, 0, 1) } })} />
+            <CapsuleSlider min={0} max={1} step={0.05} value={c.border.smooth} label="边界平滑" onInput={(v) => debouncedChange({ border: { smooth: num(v, 0, 1) } })} />
             <span class="v">{fmt(c.border.smooth, 2)}</span>
           </label>
           <label class="r">
@@ -110,14 +109,12 @@
         {#if c.shadow.enabled}
           <label class="r">
             宽度
-            <input type="range" min="0" max="48" step="0.5" value={c.shadow.width}
-              oninput={(e) => debouncedChange({ shadow: { width: num(e.currentTarget.value, 0, 48) } })} />
+            <CapsuleSlider min={0} max={48} step={0.5} value={c.shadow.width} label="阴影宽度" onInput={(v) => debouncedChange({ shadow: { width: num(v, 0, 48) } })} />
             <span class="v">{fmt(c.shadow.width)}</span>
           </label>
           <label class="r">
             浓度
-            <input type="range" min="0" max="1" step="0.05" value={c.shadow.alpha}
-              oninput={(e) => debouncedChange({ shadow: { alpha: num(e.currentTarget.value, 0, 1) } })} />
+            <CapsuleSlider min={0} max={1} step={0.05} value={c.shadow.alpha} label="阴影浓度" onInput={(v) => debouncedChange({ shadow: { alpha: num(v, 0, 1) } })} />
             <span class="v">{fmt(c.shadow.alpha, 2)}</span>
           </label>
           <label class="r">
@@ -138,8 +135,7 @@
         {#if c.fill.enabled}
           <label class="r">
             透明
-            <input type="range" min="0" max="1" step="0.05" value={c.fill.alpha}
-              oninput={(e) => debouncedChange({ fill: { alpha: num(e.currentTarget.value, 0, 1) } })} />
+            <CapsuleSlider min={0} max={1} step={0.05} value={c.fill.alpha} label="填充透明" onInput={(v) => debouncedChange({ fill: { alpha: num(v, 0, 1) } })} />
             <span class="v">{fmt(c.fill.alpha, 2)}</span>
           </label>
           <label class="r">

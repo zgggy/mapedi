@@ -338,7 +338,7 @@ function composeShownPiecesUncached(
     const rootId = rootOf(layerId);
     const tree = displayTree(world, rootId);
     const treeIds = new Set(tree.map((t) => t.layerId));
-    const regions = world.regions.filter((r) => r.layerId === layerId);
+    const regions = world.regions.filter((r) => r.layerId === layerId && !r.hidden);
     if (!regions.length) continue;
     const opacity = layer.opacity ?? 0.88;
     const ancIds = displayAncestors(world, layerId).filter((id) => treeIds.has(id));

@@ -1,9 +1,11 @@
 <script lang="ts">
   /**
-   * 工作区：PanelShell 壳 + 统一 ItemButton 行（眼睛 + 元素色 + 名称 + 简介 + 可选控件）。
+   * 工作区：PanelShell 壳 + 单列网格 ItemButton 行。
+   * 行 = 眼睛 + 元素色 + 名称（+ 可选控件：区间元素 = 胶囊滑块）。
    * 选中即进入绘制；空白点击/Esc/完成退出。
-   * 拖动 = 长按（进度条填满解锁）；拖动时其他行让开，松手触发重排重算。
-   * 区间型元素（attributes.kind === 'interval'）行内滑块：拖滑块 = 选中该元素，涂改值 = 滑块数字。
+   * 右键菜单：显示/隐藏、上移一层、下移一层、复制一个、删除。
+   * 拖动 = 长按进度条解锁 → 整个按钮被拿起来（浮动件跟指针）→ 目标格与下方元素让一格
+   *（transform + 过渡动画）→ 松手触发重排重算。
    */
   import { tick } from 'svelte';
   import type { Region, World } from '../../core/types';
@@ -14,15 +16,12 @@
   import { defaultLayerVisible } from '../../core/displayCompose';
   import PanelShell from './PanelShell.svelte';
   import ItemButton from './ItemButton.svelte';
+  import CapsuleSlider from './CapsuleSlider.svelte';
+  import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import CreateBox from './CreateBox.svelte';
-  import {
-    hintAtPoint,
-    hintForShell,
-    type DropHint,
-    type RowMeta,
-  } from './dnd';
   import { ROW_EST, VIRTUAL_MIN, listWindow } from './virtualList';
+  import { liftTransforms, insertIndex, insertPlan, measureSlot, SLOT, type FlatRow, type RowRect } from './liftDrag';
 
   let {
     world,
@@ -45,6 +44,9 @@
     onNewName,
     onRegionDrag,
     onCollapse,
+    onMoveItem,
+    onCopyItem,
+    onToggleHidden,
   }: {
     world: World | null;
     open?: boolean;
@@ -65,8 +67,14 @@
     onCreateChild?: (parentId: string) => void;
     onRandomName?: () => void;
     onNewName?: (v: string) => void;
-    onRegionDrag?: (fromId: string, hint: DropHint) => void;
+    onRegionDrag?: (fromId: string, hint: import('../../core/regionOps').DropHint) => void;
     onCollapse?: () => void;
+    /** 右键菜单：上移/下移一层（dir=-1 上移） */
+    onMoveItem?: (id: string, dir: -1 | 1) => void;
+    /** 右键菜单：复制一个 */
+    onCopyItem?: (id: string) => void;
+    /** 右键菜单：显隐切换 */
+    onToggleHidden?: (id: string) => void;
   } = $props();
 
   const meta = $derived(LAYER_META[focusLayer]);
@@ -74,6 +82,7 @@
   const isFreeLayer = $derived(
     focusLayer === 'road' || focusLayer === 'route' || focusLayer === 'river',
   );
+
   /** 自由路径层：列出 paths（与 cell 无关） */
   const pathItems = $derived(
     world && isFreeLayer
@@ -124,24 +133,7 @@
     return tops.map((r) => build(r, 0, null));
   });
 
-  const flatRows = $derived.by(() => {
-    const out: RowMeta[] = [];
-    const walk = (nodes: Node[]) => {
-      for (const n of nodes) {
-        out.push({
-          id: n.region.id,
-          depth: n.depth,
-          parentId: n.parentId,
-          nestable: n.expandable,
-        });
-        walk(n.kids);
-      }
-    };
-    walk(roots);
-    return out;
-  });
-
-  /** 展开路径上的可见行（虚拟化渲染源） */
+  /** 展开路径上的可见行（单列网格渲染源） */
   const visibleFlat = $derived.by(() => {
     const out: { node: Node; open: boolean }[] = [];
     const walk = (nodes: Node[]) => {
@@ -155,64 +147,44 @@
     return out;
   });
 
+  const flatRows = $derived(
+    visibleFlat.map((v) => ({ id: v.node.region.id, parentId: v.node.parentId }) as FlatRow),
+  );
+
+  /** 单列网格的全部格：行（ItemButton）+ 展开时的建子行（CreateBox） */
+  const cells = $derived.by(() => {
+    const acc: { kind: 'row' | 'create'; node: Node }[] = [];
+    for (const v of visibleFlat) {
+      acc.push({ kind: 'row', node: v.node });
+      if (v.open && v.node.expandable) acc.push({ kind: 'create', node: v.node });
+    }
+    return acc;
+  });
+
   let scrollTop = $state(0);
   let listH = $state(360);
   const virtualMode = $derived(
-    isFreeLayer
-      ? pathItems.length >= VIRTUAL_MIN
-      : !isFreeLayer && visibleFlat.length >= VIRTUAL_MIN,
+    isFreeLayer ? pathItems.length >= VIRTUAL_MIN : cells.length >= VIRTUAL_MIN,
   );
   const pathWin = $derived(
     isFreeLayer && pathItems.length >= VIRTUAL_MIN
       ? listWindow(pathItems.length, scrollTop, listH, ROW_EST)
       : null,
   );
-  const pathSlice = $derived(
-    pathWin ? pathItems.slice(pathWin.start, pathWin.end) : pathItems,
-  );
-  const vwin = $derived(
-    virtualMode ? listWindow(visibleFlat.length, scrollTop, listH, ROW_EST) : null,
-  );
-  const vSlice = $derived(virtualMode && vwin ? visibleFlat.slice(vwin.start, vwin.end) : []);
-  const dragRows = $derived(
-    isFreeLayer
-      ? pathItems.map(
-          (p) =>
-            ({
-              id: p.id,
-              depth: 0,
-              parentId: null,
-              nestable: false,
-            }) satisfies RowMeta,
-        )
-      : virtualMode
-        ? visibleFlat.map(
-            (v) =>
-              ({
-                id: v.node.region.id,
-                depth: v.node.depth,
-                parentId: v.node.parentId,
-                nestable: v.node.expandable,
-              }) satisfies RowMeta,
-          )
-        : flatRows,
-  );
+  const pathSlice = $derived(pathWin ? pathItems.slice(pathWin.start, pathWin.end) : pathItems);
+  const vwin = $derived(virtualMode ? listWindow(cells.length, scrollTop, listH, ROW_EST) : null);
+  const vSlice = $derived(virtualMode && vwin ? cells.slice(vwin.start, vwin.end) : cells);
 
   let enterId: string | null = $state(null);
   let createPulseParent: string | null = $state(null);
   let listEl: HTMLElement | undefined = $state();
 
-  // —— 长按拖动（区域重排）——
-  let dragId: string | null = $state(null);
-  let dropHint = $state<DropHint | null>(null);
-  let rectCache: { id: string; top: number; bottom: number; left: number; right: number }[] | null = null;
-  let dragReady = false;
-  let ghost = $state<{ x: number; y: number; name: string } | null>(null);
-
   $effect(() => {
     // 只补缺失的高度区间元素；禁止依赖 world.regions 的条件重建（会无限触发）
     if (world && isHeight) {
-      const has = world.regions.some((r) => r.layerId === 'height' && r.attributes?.kind === 'interval');
+      const has = world.regions.some(
+        (r) => r.layerId === 'height' && r.attributes?.kind === 'interval',
+      );
       if (!has) {
         rebuildHeightIntervalElements(world);
       }
@@ -225,7 +197,9 @@
 
   /** 区间型元素（attributes.kind === 'interval'，带 lo/hi/min）：滑块区间 = 元素高度区间。
    *  数据驱动——未来任何「区间型元素」都自动获得滑块；单值型元素不渲染滑块。 */
-  function intervalAttrs(r: { attributes?: Record<string, unknown> }): { lo: number; hi: number; min: number } | null {
+  function intervalAttrs(r: {
+    attributes?: Record<string, unknown>;
+  }): { lo: number; hi: number; min: number } | null {
     const a = r.attributes;
     if (!a || a.kind !== 'interval') return null;
     const lo = typeof a.lo === 'number' ? a.lo : 0;
@@ -233,24 +207,15 @@
     const min = typeof a.min === 'number' ? a.min : lo;
     return { lo, hi, min };
   }
-  /** 每元素涂改值（初始 = 区间 min） */
-  const paintValues: Record<string, number> = {};
+  /** 每元素涂改值（初始 = 区间 min）——$state 保证滑块值回显 */
+  const paintValues = $state<Record<string, number>>({});
   function paintValueOf(id: string, attrs: { min: number }): number {
     return paintValues[id] ?? attrs.min;
   }
-  function onSliderInput(id: string, e: Event) {
-    const v = Number((e.currentTarget as HTMLInputElement).value);
+  function onSliderInput(id: string, v: number) {
     paintValues[id] = v;
     handleSelect(id);
     onPaintValue?.(id, v);
-  }
-
-  /** 行简介：区间元素 = 高度范围；其余 = 描述或地块数 */
-  function descOf(r: Region): string {
-    const ia = intervalAttrs(r);
-    if (ia) return `${ia.lo}~${ia.hi}`;
-    const d = r.attributes?.description;
-    return typeof d === 'string' && d ? d : `${r.cells.length}c`;
   }
 
   function layerVisibleOf(layerId: string): boolean {
@@ -302,61 +267,144 @@
     });
   }
 
-  function collectRects() {
-    if (rectCache) return rectCache;
-    if (!listEl) return [];
-    rectCache = Array.from(listEl.querySelectorAll<HTMLElement>('[data-row-id]')).map((el) => {
-      const r = el.getBoundingClientRect();
-      return {
-        id: el.dataset.rowId!,
-        top: r.top,
-        bottom: r.bottom,
-        left: r.left,
-        right: r.right,
-      };
-    });
-    return rectCache;
+  function diploBadgeOf(r: Region): string {
+    return world && focusLayer === 'country' ? (diplomacyBadge(world, r) ?? '') : '';
   }
 
+  // —— 右键菜单 ——
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+
+  function openMenu(e: MouseEvent, id: string) {
+    const seq = isFreeLayer
+      ? pathItems.map((p) => p.id)
+      : visibleFlat.map((v) => v.node.region.id);
+    const si = seq.indexOf(id);
+    // 区间元素是派生数据（重建会冲掉复制/删除），只留显隐与排序
+    const reg = world?.regions.find((x) => x.id === id);
+    const derived = !!reg && !!intervalAttrs(reg);
+    const items: MenuItem[] = [
+      { id: 'vis', label: '显示 / 隐藏', action: () => onToggleHidden?.(id) },
+      { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveItem?.(id, -1) },
+      {
+        id: 'down',
+        label: '下移一层',
+        disabled: si < 0 || si >= seq.length - 1,
+        action: () => onMoveItem?.(id, 1),
+      },
+      {
+        id: 'copy',
+        label: derived ? '复制一个（派生项不可复制）' : '复制一个',
+        disabled: derived,
+        action: () => onCopyItem?.(id),
+      },
+      {
+        id: 'del',
+        label: derived ? '删除（派生项不可删）' : '删除',
+        danger: !derived,
+        disabled: derived,
+        action: () => onDelete(id),
+      },
+    ];
+    menu = { x: e.clientX, y: e.clientY, items };
+  }
+
+  // —— 抬起式拖动 ——
+  let dragId: string | null = $state(null);
+  let dragIndex = -1;
+  let lift = $state<{ x: number; y: number; name: string; color: string } | null>(null);
+  let offsets = $state<number[]>([]);
+  // 行内容（名称换行/改名）变化后统一行高：MutationObserver 稳定触发
+  $effect(() => {
+    const el = listEl;
+    if (!el) return;
+    slot = measureSlot(el);
+    const mo = new MutationObserver(() => {
+      slot = measureSlot(el);
+    });
+    mo.observe(el, { subtree: true, childList: true, characterData: true });
+    return () => mo.disconnect();
+  });
+
+  let rectCache: RowRect[] = [];
+  let dragReady = false;
+  let slot = SLOT;
+
+  /** 拖动按格序：行与建子行都占格；可拖的只有行。 */
+  function slotsForDrag(): FlatRow[] {
+    return isFreeLayer
+      ? pathItems.map((p) => ({ id: p.id, parentId: null }))
+      : cells.map((c) => ({ id: c.node.region.id, parentId: c.node.parentId }));
+  }
+  /** 插入语义只看行：格下标 → 行序位（跳过建子行） */
+  function rowPosOf(cellIdx: number): number {
+    if (isFreeLayer) return cellIdx;
+    let n = 0;
+    for (let i = 0; i < cellIdx && i < cells.length; i++) if (cells[i].kind === 'row') n++;
+    return n;
+  }
+  const flatRowList = $derived(
+    isFreeLayer
+      ? pathItems.map((p) => ({ id: p.id, parentId: null }) as FlatRow)
+      : cells.filter((c) => c.kind === 'row').map((c) => ({ id: c.node.region.id, parentId: c.node.parentId }) as FlatRow),
+  );
+
   async function onRowHold(id: string, start: { x: number; y: number }) {
+    const rows = slotsForDrag();
+    dragIndex = rows.findIndex((r) => r.id === id);
+    if (dragIndex < 0) return;
+    slot = measureSlot(listEl);
     dragId = id;
     dragReady = false;
-    rectCache = null;
-    const name =
-      world?.regions.find((r) => r.id === id)?.name ??
-      world?.paths?.find((p) => p.id === id)?.name ??
-      id;
-    ghost = { x: start.x + 12, y: start.y - 14, name };
+    const reg = world?.regions.find((x) => x.id === id);
+    const path = world?.paths?.find((x) => x.id === id);
+    lift = {
+      x: start.x,
+      y: start.y,
+      name: reg?.name ?? path?.name ?? id,
+      color: reg?.color ?? path?.color ?? '#888',
+    };
+    offsets = liftTransforms(rows.length, dragIndex, dragIndex, slot);
     await tick();
-    rectCache = null;
+    // 拖动起点缓存行矩形（虚拟窗口之前的行由 windowStart 兜底）
+    rectCache = [];
+    let ci = windowStart();
+    for (const el of listEl?.querySelectorAll<HTMLElement>('li.cell') ?? []) {
+      const r = el.getBoundingClientRect();
+      rectCache.push({ idx: ci++, top: r.top, bottom: r.bottom });
+    }
     dragReady = true;
   }
 
   function onRowMove(e: PointerEvent) {
-    if (!dragId) return;
-    if (ghost) ghost = { ...ghost, x: e.clientX + 12, y: e.clientY - 14 };
-    if (!dragReady) return;
-    const rects = collectRects().filter((r) => r.id !== dragId);
-    dropHint = hintAtPoint(e.clientY, rects, dragRows);
+    if (!dragId || !dragReady || !lift) return;
+    lift = { x: e.clientX, y: e.clientY, name: lift.name, color: lift.color };
+    const rows = slotsForDrag();
+    const k = insertIndex(rectCache, dragIndex, windowStart(), e.clientY);
+    offsets = liftTransforms(rows.length, dragIndex, k, slot);
   }
 
-  function onRowEnd() {
-    if (dragId && dropHint && onRegionDrag && dragReady && !isFreeLayer) {
-      onRegionDrag(dragId, dropHint);
+  function onRowEnd(e: PointerEvent) {
+    const rows = slotsForDrag();
+    if (dragId && dragReady && onRegionDrag && !isFreeLayer) {
+      const k = insertIndex(rectCache, dragIndex, windowStart(), e.clientY);
+      onRegionDrag(dragId, insertPlan(flatRowList, rowPosOf(dragIndex), rowPosOf(k)));
     }
     dragId = null;
-    dropHint = null;
-    rectCache = null;
+    dragIndex = -1;
+    lift = null;
+    offsets = [];
+    rectCache = [];
     dragReady = false;
-    ghost = null;
   }
 
-  function shellHint(id: string) {
-    return hintForShell(dropHint, id, dragRows);
+  /** 虚拟窗口首行绝对下标（窗口前的行必在指针上方） */
+  function windowStart(): number {
+    return (pathWin?.start ?? vwin?.start ?? 0) as number;
   }
 
-  function diploBadgeOf(r: Region): string {
-    return world && focusLayer === 'country' ? (diplomacyBadge(world, r) ?? '') : '';
+
+  function offsetOf(i: number): number {
+    return offsets[i] ?? 0;
   }
 </script>
 
@@ -366,7 +414,14 @@
   </PanelShell>
 {:else}
   {@const hd = activeHeader()}
-  <PanelShell title="工作区 · {hd.title}" icon={hd.icon} side="right" width={320} {open} onCollapse={onCollapse}>
+  <PanelShell
+    title="工作区 · {hd.title}"
+    icon={hd.icon}
+    side="right"
+    width={320}
+    {open}
+    onCollapse={onCollapse}
+  >
     <div class="ws" onclick={onBlankClick}>
       {#if !isHeight}
         <div class="create">
@@ -378,102 +433,92 @@
             onCreate={() => onCreate?.()}
           />
         </div>
-      {/if}
-
-      {#if isHeight}
+      {:else}
         <div class="tools">
           <label class="field inline">
-            <span>笔刷 {brushRadius.toFixed(1)}°</span>
-            <input
-              type="range"
-              min="0.3"
-              max="8"
-              step="0.1"
+            <span>笔刷</span>
+            <CapsuleSlider
+              min={0.3}
+              max={8}
+              step={0.1}
               value={brushRadius}
-              oninput={(e) => onRadius?.(Number(e.currentTarget.value))}
+              label="笔刷宽度"
+              width={140}
+              onInput={(v) => onRadius?.(v)}
             />
+            <span class="dim">{brushRadius.toFixed(1)}°</span>
           </label>
         </div>
       {/if}
 
-      {#snippet rowBtn(r: Region)}
-        {@const ia = intervalAttrs(r)}
+      {#snippet itemBtn(
+        id: string,
+        name: string,
+        color: string,
+        badge: string,
+        hidden: boolean,
+        ia: { lo: number; hi: number; min: number } | null,
+      )}
         <ItemButton
-          visible={layerVisibleOf(r.layerId)}
-          logoColor={r.color}
-          name={r.name}
-          desc={descOf(r)}
-          badge={diploBadgeOf(r)}
-          selected={selectedRegionId === r.id}
-          dragging={dragId === r.id}
+          visible={!hidden && layerVisibleOf(focusLayer)}
+          logoColor={color}
+          name={name}
+          badge={badge}
+          selected={selectedRegionId === id}
+          dragging={dragId === id}
           onClick={() => {
-            handleSelect(r.id);
-            if (ia) onPaintValue?.(r.id, paintValueOf(r.id, ia));
+            handleSelect(id);
+            if (ia) onPaintValue?.(id, paintValueOf(id, ia));
           }}
-          onHold={(s) => onRowHold(r.id, s)}
+          onMenu={(e) => openMenu(e, id)}
+          onHold={(s) => onRowHold(id, s)}
           onDragMove={onRowMove}
           onDragEnd={onRowEnd}
         >
           {#snippet control()}
             {#if ia}
-              <input
-                type="range"
+              <CapsuleSlider
                 min={ia.lo}
                 max={ia.hi}
-                step="1"
-                value={paintValueOf(r.id, ia)}
-                aria-label="{r.name} 涂改高度"
-                oninput={(e) => onSliderInput(r.id, e)}
+                step={1}
+                value={paintValueOf(id, ia)}
+                label="{name} 涂改高度"
+                width={130}
+                onInput={(v) => onSliderInput(id, v)}
               />
-              <span class="val">{paintValueOf(r.id, ia)}</span>
             {/if}
           {/snippet}
         </ItemButton>
       {/snippet}
 
-      {#snippet rowNode(n: Node)}
-        {@const open = expandedIds.has(n.region.id) && n.expandable}
+      {#snippet cellNode(c: { kind: 'row' | 'create'; node: Node }, i: number)}
+        {@const n = c.node}
         {@const id = n.region.id}
-        {@const h = shellHint(id)}
         <li
-          class="node"
-          class:gap-above={h?.kind === 'gap-top'}
-          class:gap-below={h?.kind === 'gap-bottom'}
-          class:nest-hl={h?.kind === 'nest'}
-          data-row-id={id}
-          data-kind="region"
+          class="cell"
+          class:create={c.kind === 'create'}
+          data-row-id={c.kind === 'row' ? id : undefined}
+          data-kind={c.kind === 'row' ? 'region' : 'create'}
+          style="transform:translateY({offsetOf(i)}px);padding-left:{n.depth * 14}px"
         >
-          <div class="rowwrap">
-            {@render rowBtn(n.region)}
-            <span class="actbtns">
-              {#if n.expandable}
-                <button type="button" title="展开子元素" onclick={(e) => { e.stopPropagation(); toggleExpand(id); }}>{open ? '▾' : '▸'}</button>
-              {/if}
-              <button type="button" title="删除（保留子元素）" onclick={(e) => { e.stopPropagation(); onDelete(id); }}>🗑</button>
-            </span>
-          </div>
-          {#if n.expandable}
-            <div class="branch" class:open>
-              <div class="branch-inner">
-                <div class="create-slot" class:pulse={createPulseParent === id} class:visible={open}>
-                  <CreateBox
-                    placeholder={`新${childNameOf(n.region)}`}
-                    {newName}
-                    onNewName={(v) => onNewName?.(v)}
-                    onRandom={() => onRandomName?.()}
-                    onCreate={() => handleCreateChild(id)}
-                  />
-                </div>
-                {#each n.kids as kid (kid.region.id)}
-                  <div
-                    class="kid-wrap"
-                    class:visible={open}
-                    class:enter={enterId === kid.region.id}
-                  >
-                    {@render rowNode(kid)}
-                  </div>
-                {/each}
-              </div>
+          {#if c.kind === 'row'}
+            {@render itemBtn(
+              id,
+              n.region.name,
+              n.region.color,
+              diploBadgeOf(n.region),
+              !!n.region.hidden,
+              intervalAttrs(n.region),
+            )}
+          {:else}
+            <div class="create-slot" class:pulse={createPulseParent === id}>
+              <CreateBox
+                placeholder={`新${childNameOf(n.region)}`}
+                {newName}
+                onNewName={(v) => onNewName?.(v)}
+                onRandom={() => onRandomName?.()}
+                onCreate={() => handleCreateChild(id)}
+              />
             </div>
           {/if}
         </li>
@@ -484,8 +529,7 @@
           每个元素 = 一条曲线。点工作区元素选中后再画；➕ 可新建多条。Esc 退出编辑。
         </p>
         <ul
-          class="list"
-          class:virtual={!!pathWin}
+          class="grid"
           role="list"
           bind:this={listEl}
           onscroll={(e) => {
@@ -497,24 +541,14 @@
           {#if pathWin}
             <li class="v-pad" style="height:{pathWin.padTop}px" aria-hidden="true"></li>
           {/if}
-          {#each pathWin ? pathSlice : pathItems as p (p.id)}
-            <li class="node flat" data-row-id={p.id} data-kind="path">
-              <div class="rowwrap">
-                <ItemButton
-                  visible={layerVisibleOf(p.layerId)}
-                  logoColor={p.color}
-                  name={p.name}
-                  desc=""
-                  selected={selectedRegionId === p.id}
-                  onClick={() => onSelect(p.id)}
-                  onHold={(s) => onRowHold(p.id, s)}
-                  onDragMove={onRowMove}
-                  onDragEnd={onRowEnd}
-                />
-                <span class="actbtns">
-                  <button type="button" title="删除" onclick={(e) => { e.stopPropagation(); onDelete(p.id); }}>🗑</button>
-                </span>
-              </div>
+          {#each pathWin ? pathSlice : pathItems as p, i (p.id)}
+            <li
+              class="cell"
+              data-row-id={p.id}
+              data-kind="path"
+              style="transform:translateY({offsetOf((pathWin?.start ?? 0) + i)}px)"
+            >
+              {@render itemBtn(p.id, p.name, p.color, '', !!p.hidden, null)}
             </li>
           {/each}
           {#if pathWin}
@@ -524,9 +558,9 @@
             <li class="dim-pad">暂无路径，在地图上绘制</li>
           {/if}
         </ul>
-      {:else if virtualMode && !isFreeLayer}
+      {:else if virtualMode}
         <ul
-          class="list virtual"
+          class="grid virtual"
           role="list"
           bind:this={listEl}
           onscroll={(e) => {
@@ -537,25 +571,30 @@
           {#if vwin}
             <li class="v-pad" style="height:{vwin.padTop}px" aria-hidden="true"></li>
           {/if}
-          {#each vSlice as item (item.node.region.id)}
-            {@render rowNode(item.node)}
+          {#each vSlice as c, i (c.kind + c.node.region.id)}
+            {@render cellNode(c, (vwin?.start ?? 0) + i)}
           {/each}
           {#if vwin}
             <li class="v-pad" style="height:{vwin.padBottom}px" aria-hidden="true"></li>
           {/if}
         </ul>
       {:else}
-        <ul class="list" role="list" bind:this={listEl}>
-          {#each roots as n (n.region.id)}
-            {@render rowNode(n)}
+        <ul class="grid" role="list" bind:this={listEl}>
+          {#each cells as c, i (c.kind + c.node.region.id)}
+            {@render cellNode(c, i)}
           {/each}
         </ul>
       {/if}
     </div>
-    {#if ghost}
-      <div class="drag-ghost" style="left:{ghost.x}px;top:{ghost.y}px" aria-hidden="true">
-        {ghost.name}
+
+    {#if lift && dragId}
+      <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
+        <ItemButton lift visible logoColor={lift.color} name={lift.name} />
       </div>
+    {/if}
+
+    {#if menu}
+      <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
     {/if}
   </PanelShell>
 {/if}
@@ -589,138 +628,51 @@
     font-size: 11px;
     margin: 0;
   }
-  .field.inline input {
-    width: 100px;
-  }
-  .list {
-    --gap: 4px;
+  /* 单列网格：一格 = 一个 ItemButton */
+  .grid {
     flex: 1;
     min-height: 0;
     list-style: none;
     margin: 0;
     padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    align-content: start;
   }
-  .list.virtual {
+  .grid.virtual {
     overflow: auto;
     max-height: min(52vh, 520px);
-    gap: 0;
+    scrollbar-width: none;
   }
-  .list.virtual .v-pad {
+  .grid.virtual::-webkit-scrollbar {
+    width: 0;
+    display: none;
+  }
+  .grid.virtual .v-pad {
     list-style: none;
     margin: 0;
     padding: 0;
     pointer-events: none;
   }
-  .list.virtual .node.flat {
-    height: 40px;
-    box-sizing: border-box;
+  .cell {
+    margin: 0;
+    height: var(--ibtn-h, 40px);
+    transition: transform 0.18s ease;
   }
-  /* 行卡：ItemButton 为主体，行动按钮在旁；选中黄框在按钮上 */
-  .rowwrap {
+  .cell.create {
+    height: var(--ibtn-h, 40px);
     display: flex;
     align-items: center;
-    gap: 4px;
-  }
-  .actbtns {
-    flex: 0 0 auto;
-    display: flex;
-    gap: 2px;
-  }
-  .actbtns button {
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 5px;
-    font-size: 12px;
-  }
-  .actbtns button:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  .val {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    min-width: 30px;
-    text-align: right;
-  }
-  .node {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    flex: 0 0 auto;
-  }
-  /* 拖动中相邻行让开，形成插入位 */
-  .list .node {
-    transition:
-      margin 0.18s ease,
-      padding 0.18s ease;
-  }
-  .node.gap-above {
-    margin-top: 28px;
-  }
-  .node.gap-below {
-    margin-bottom: 28px;
-  }
-  .node.nest-hl :global(.ibtn) {
-    border-color: rgba(240, 195, 106, 0.8);
-    background: rgba(240, 195, 106, 0.12);
-  }
-  .branch {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .branch.open {
-    grid-template-rows: 1fr;
-  }
-  .branch-inner {
-    overflow: hidden;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-top: 4px;
   }
   .create-slot {
-    opacity: 0;
-    transform: translateY(-10px);
-    transition:
-      opacity 0.22s ease,
-      transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .create-slot.visible {
-    opacity: 1;
-    transform: none;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    padding: 0;
   }
   .create-slot.pulse {
     animation: createDrop 0.32s ease;
-  }
-  .kid-wrap {
-    opacity: 0;
-    transform: translateY(-12px);
-    transition:
-      opacity 0.24s ease,
-      transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .kid-wrap.visible {
-    opacity: 1;
-    transform: none;
-  }
-  .kid-wrap.enter {
-    animation: kidIn 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  @keyframes kidIn {
-    from {
-      opacity: 0;
-      transform: translateY(-14px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
   }
   @keyframes createDrop {
     0% {
@@ -744,18 +696,13 @@
     color: var(--text-dim);
     font-size: 10px;
   }
-  .drag-ghost {
+  .lift {
     position: fixed;
-    z-index: 80;
+    left: 0;
+    top: 0;
+    z-index: 200;
+    width: 280px;
     pointer-events: none;
-    opacity: 0.55;
-    padding: 4px 10px;
-    border-radius: 8px;
-    background: rgba(30, 34, 44, 0.9);
-    border: 1px solid rgba(240, 195, 106, 0.65);
-    color: var(--text);
-    font-size: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-    transform: translateZ(0);
+    transition: transform 0.08s linear;
   }
 </style>

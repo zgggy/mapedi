@@ -100,7 +100,14 @@ export function updateHeightIntervalElements(
     rebuildHeightIntervalElements(world);
     return [];
   }
+  // 按区间 lo 匹配元素（不依赖数组顺序：用户可拖动改变叠放顺序）
+  const byLo = new Map<number, Region>();
+  for (const r of els) {
+    const lo = r.attributes?.lo;
+    if (typeof lo === 'number') byLo.set(lo, r);
+  }
   const out: HeightIntervalDelta[] = els.map((r) => ({ layerId: r.layerId, regionId: r.id, added: [], removed: [] }));
+  const outOf = (r: Region) => out[els.indexOf(r)];
   for (const s of samples) {
     const h0 = Math.round(s.h0);
     const h1 = Math.round(s.h1);
@@ -109,12 +116,15 @@ export function updateHeightIntervalElements(
       const lo = HEIGHT_INTERVALS[i].lo;
       const inOld = h0 >= lo;
       const inNew = h1 >= lo;
+      const el = byLo.get(lo);
+      if (!el) continue;
+      const o = outOf(el);
       if (inOld && !inNew) {
-        els[i].cells = els[i].cells.filter((id) => id !== s.id);
-        out[i].removed.push(s.id);
+        el.cells = el.cells.filter((id) => id !== s.id);
+        o.removed.push(s.id);
       } else if (!inOld && inNew) {
-        els[i].cells.push(s.id);
-        out[i].added.push(s.id);
+        el.cells.push(s.id);
+        o.added.push(s.id);
       }
     }
   }

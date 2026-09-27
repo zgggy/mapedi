@@ -84,7 +84,7 @@
   );
 </script>
 
-<PanelShell {title} icon="📝" {open} side="float" width={280} {x} {y} maxHeight="calc(100vh - 120px)" onCollapse={onCollapse}>
+<PanelShell {title} icon="📝" {open} side="float" width={280} {x} {y} onCollapse={onCollapse}>
   {#if !region}
     <p class="dim">尚未选中元素。在工作区点选一个元素查看信息。</p>
   {:else}

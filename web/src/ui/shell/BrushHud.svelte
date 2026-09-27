@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CapsuleSlider from './CapsuleSlider.svelte';
   import type { DrawSession, DrawTool } from '../../core/draw/brush';
 
   let {
@@ -31,13 +32,14 @@
     {/if}
     <label class="r">
       笔刷宽度
-      <input
-        type="range"
-        min="0.3"
-        max="8"
-        step="0.1"
+      <CapsuleSlider
+        min={0.3}
+        max={8}
+        step={0.1}
         value={draw.radiusDeg}
-        oninput={(e) => onRadius?.(Number(e.currentTarget.value))}
+        label="笔刷宽度"
+        width={130}
+        onInput={(v) => onRadius?.(v)}
       />
       <span class="dim">{draw.radiusDeg.toFixed(1)}°</span>
     </label>

@@ -47,7 +47,7 @@
   }
 </script>
 
-<PanelShell title="图层信息" icon="ℹ" {open} side="float" width={280} {x} {y} maxHeight="calc(100vh - 120px)" onCollapse={onCollapse}>
+<PanelShell title="图层信息" icon="ℹ" {open} side="float" width={280} {x} {y} onCollapse={onCollapse}>
   {#if !layer || !meta}
     <p class="dim">尚未选中图层。在图层面板点选一个图层查看信息。</p>
   {:else}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CapsuleSlider from './CapsuleSlider.svelte';
   import type { ViewMode } from './shell';
   import { HARD_MAX_DENSITY } from '../../core/world';
 
@@ -122,15 +123,15 @@
                 <option value="parchment">羊皮纸</option>
                 <option value="neon">科幻</option>
               </select>
-              <label class="sm">平滑 <input type="range" min="0" max="1" step="0.05" value={reliefSmooth} oninput={(e) => onRelief(Number(e.currentTarget.value))} /></label>
+              <label class="sm">平滑 <CapsuleSlider min={0} max={1} step={0.05} value={reliefSmooth} label="浮雕平滑" width={110} onInput={(v) => onRelief(v)} /></label>
             </div>
             {#if viewMode === 'view-globe'}
               <div class="row globe-params">
                 <label class="sm"><input type="checkbox" checked={globeShowAxis} onchange={(e) => onGlobeShowAxis?.(e.currentTarget.checked)} /> 轴/赤道</label>
                 <label class="sm"><input type="checkbox" checked={globeShowEcliptic} onchange={(e) => onGlobeShowEcliptic?.(e.currentTarget.checked)} /> 黄道</label>
                 <label class="sm"><input type="checkbox" checked={globeSpin} onchange={(e) => onGlobeSpin?.(e.currentTarget.checked)} /> 自转预览</label>
-                <label class="sm">倾角 <input type="range" min="0" max="60" step="0.5" value={globeTilt} oninput={(e) => onGlobeTilt?.(Number(e.currentTarget.value))} /> {globeTilt.toFixed(1)}°</label>
-                <label class="sm">自转 <input type="range" min="6" max="48" step="1" value={globeRotHours} oninput={(e) => onGlobeRotHours?.(Number(e.currentTarget.value))} /> {globeRotHours}h</label>
+                <label class="sm">倾角 <CapsuleSlider min={0} max={60} step={0.5} value={globeTilt} label="轴倾角" width={110} onInput={(v) => onGlobeTilt?.(v)} /> {globeTilt.toFixed(1)}°</label>
+                <label class="sm">自转 <CapsuleSlider min={6} max={48} step={1} value={globeRotHours} label="自转周期" width={110} onInput={(v) => onGlobeRotHours?.(v)} /> {globeRotHours}h</label>
               </div>
               <p class="dim">球面贴图 = 平面 2D 管线先渲染再映射，内容与平面一致。</p>
             {/if}

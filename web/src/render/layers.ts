@@ -638,6 +638,7 @@ export const pathsLayer: RenderLayer = {
     ctx.lineJoin = 'round';
 
     for (const path of world.paths) {
+      if (path.hidden) continue;
       if (!path.points || path.points.length < 2) continue;
       // 拖动中的路径由覆盖层画：原曲线虚线 + 新曲线实线，地图层不重复画
       if (env.hidePathId && path.id === env.hidePathId) continue;

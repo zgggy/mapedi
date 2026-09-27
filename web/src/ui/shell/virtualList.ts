@@ -34,29 +34,3 @@ export function listWindow(
 }
 
 export type SynthRect = { id: string; top: number; bottom: number; left: number; right: number };
-
-/** 虚拟列表：由行 id 序列 + 列表顶 y 合成命中 rect */
-export function syntheticRowRects(
-  ids: string[],
-  listTop: number,
-  rowH = ROW_EST,
-  skipId?: string | null,
-): SynthRect[] {
-  const out: SynthRect[] = [];
-  let i = 0;
-  for (const id of ids) {
-    if (skipId && id === skipId) {
-      i++;
-      continue;
-    }
-    out.push({
-      id,
-      top: listTop + i * rowH,
-      bottom: listTop + (i + 1) * rowH,
-      left: 0,
-      right: 1e6,
-    });
-    i++;
-  }
-  return out;
-}

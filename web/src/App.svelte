@@ -296,6 +296,9 @@
     onNewName={(v) => (editor.newName = v)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
     onCollapse={() => (panels.layers = false)}
+    onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
+    onCopyLayer={(id) => editor.copyItem(id)}
+    onDeleteLayer={(id) => editor.deleteItem(id)}
   />
 
   <WorkspaceDrawer
@@ -384,6 +387,9 @@
     onNewName={(n) => (editor.newName = n)}
     onRegionDrag={handleRegionDrag}
     onCollapse={() => (panels.workspace = false)}
+    onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
+    onCopyItem={(id) => editor.copyItem(id)}
+    onToggleHidden={(id) => editor.toggleItemHidden(id)}
   />
 
   <LayerInfoPanel

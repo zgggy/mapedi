@@ -1,4 +1,4 @@
-import type { LayerRenderConfig } from '../core/types';
+import type { LayerRenderConfig, Region } from '../core/types';
 import { defaultLayerRenderConfig } from '../core/types';
 import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
@@ -58,6 +58,7 @@ import {
   promoteRegionToParentLayer,
   applyRegionDrop,
   moveAmongSiblings,
+  siblingRegions,
   type DropHint,
 } from '../core/regionOps';
 import { defaultExclusiveColor } from '../core/layer/style';
@@ -623,6 +624,145 @@ export class EditorStore {
     this.touchRegions();
     this.selectedRegionId = null;
     this.status = '已删除元素（子层保留为未分配）';
+  }
+
+  /** 右键菜单：显隐切换（元素/路径级，仅显示层过滤） */
+  toggleItemHidden(id: string) {
+    if (!this.world) return;
+    const r = this.world.regions.find((x) => x.id === id);
+    if (r) {
+      r.hidden = !r.hidden;
+      this.touchRegions();
+      this.status = r.hidden ? `已隐藏「${r.name}」` : `已显示「${r.name}」`;
+      return;
+    }
+    const p = (this.world.paths ?? []).find((x) => x.id === id);
+    if (p) {
+      p.hidden = !p.hidden;
+      this.touchRegions();
+      this.status = p.hidden ? `已隐藏「${p.name}」` : `已显示「${p.name}」`;
+    }
+  }
+
+  /** 右键菜单：同父兄弟内上移/下移一层（dir=-1 上移）；图层/元素/路径通用 */
+  moveItemStep(id: string, dir: -1 | 1) {
+    if (!this.world) return;
+    // 图层：同父兄弟在 layers 数组中的顺序
+    const layer = this.world.layers.find((l) => l.id === id);
+    if (layer) {
+      const sibs = this.world.layers.filter((l) => (l.parentLayerId ?? null) === (layer.parentLayerId ?? null));
+      const i = sibs.findIndex((l) => l.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= sibs.length) return;
+      const arr = this.world.layers;
+      const ai = arr.indexOf(layer);
+      const bi = arr.indexOf(sibs[j]);
+      arr[ai] = sibs[j];
+      arr[bi] = layer;
+      this.touchWorld();
+      this.status = dir < 0 ? '已上移一层' : '已下移一层';
+      return;
+    }
+    const r = this.world.regions.find((x) => x.id === id);
+    if (r) {
+      const sibs = siblingRegions(this.world, r.layerId, r.parentId);
+      const i = sibs.findIndex((x) => x.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= sibs.length) return;
+      moveAmongSiblings(this.world, id, sibs[j].id, dir < 0 ? 'before' : 'after');
+      this.touchRegions();
+      this.status = dir < 0 ? '已上移一层' : '已下移一层';
+      return;
+    }
+    const p = (this.world.paths ?? []).find((x) => x.id === id);
+    if (p && this.world.paths) {
+      const same = this.world.paths.filter((x) => x.layerId === p.layerId);
+      const i = same.findIndex((x) => x.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= same.length) return;
+      const arr = this.world.paths;
+      const ai = arr.indexOf(p);
+      const bi = arr.indexOf(same[j]);
+      arr[ai] = same[j];
+      arr[bi] = p;
+      this.touchRegions();
+      this.status = dir < 0 ? '已上移一层' : '已下移一层';
+    }
+  }
+
+  /** 右键菜单：复制一个（元素 = 同层空胞副本；路径 = 点列副本；图层 = 新层副本） */
+  copyItem(id: string) {
+    if (!this.world) return;
+    // 图层
+    const layer = this.world.layers.find((l) => l.id === id);
+    if (layer) {
+      const n = this.world.layers.filter((l) => l.id.startsWith('custom-')).length + 1;
+      const nid = `custom-${Date.now().toString(36)}`;
+      this.world.layers.push({
+        ...layer,
+        id: nid,
+        name: `${layer.name || id} 副本`,
+        parentLayerId: layer.parentLayerId,
+      });
+      this.touchWorld();
+      this.focusLayer = nid;
+      this.status = '已复制图层（样式与设置，不含元素）';
+      return;
+    }
+    // 路径
+    const p = (this.world.paths ?? []).find((x) => x.id === id);
+    if (p && this.world.paths) {
+      const nid = `${p.layerId}-${Date.now().toString(36)}`;
+      this.world.paths.push({
+        ...p,
+        id: nid,
+        name: `${p.name} 副本`,
+        points: p.points.map((q) => ({ ...q })),
+      });
+      this.selectedRegionId = nid;
+      this.touchRegions();
+      this.status = '已复制路径';
+      return;
+    }
+    // 元素：同层同父副本（不复制 cells，避免双归属）+ 选中便于直接涂画
+    const r = this.world.regions.find((x) => x.id === id);
+    if (r) {
+      const nid = `${r.layerId}-${Date.now().toString(36)}`;
+      const copy: Region = {
+        ...r,
+        id: nid,
+        name: `${r.name} 副本`,
+        cells: [],
+        hidden: undefined,
+        adjacentElementIds: new Set<string>(),
+        overlaps: [],
+      };
+      const idx = this.world.regions.indexOf(r);
+      this.world.regions.splice(idx + 1, 0, copy);
+      this.selectedRegionId = nid;
+      this.touchRegions();
+      this.status = `已复制「${r.name}」（空胞副本，涂画填充）`;
+    }
+  }
+
+  /** 右键菜单：删除（元素/路径/自定义图层） */
+  deleteItem(id: string) {
+    if (!this.world) return;
+    if (this.world.layers.some((l) => l.id === id)) {
+      if (!id.startsWith('custom-')) {
+        this.status = '内置图层不可删除';
+        return;
+      }
+      this.world.layers = this.world.layers.filter((l) => l.id !== id);
+      this.world.regions = this.world.regions.filter((r) => r.layerId !== id);
+      this.world.layerRenderConfig?.delete(id);
+      if (this.focusLayer === id) this.focusLayer = 'cells';
+      this.touchWorld();
+      this.status = '已删除图层';
+      return;
+    }
+    this.selectedRegionId = id;
+    this.deleteSelected();
   }
 
   doAnnex(targetId: string) {

@@ -1,8 +1,9 @@
 <script lang="ts">
   /**
-   * 统一行按钮：眼睛（显隐）+ logo（图层 emoji / 元素色块）+ 名称 + 可选简介 + 可选控件。
-   * 不可直接拖动：长按 → 背景进度条从左到右填满 → 解锁拖动（onHold/onDragMove/onDragEnd）；
-   * 进度未满松手 = 单击；进度未满位移 = 取消长按（不算点击）。
+   * 统一行按钮：眼睛（显隐指示/切换）+ logo（图层 emoji / 元素色块）+ 名称 + 可选简介 + 可选控件。
+   * 所有 ItemButton 等高（40px），单列网格排布；名称换行不省略。
+   * 不可直接拖动：长按 → 背景进度条从左到右填满 → 解锁拖动（onHold / onDragMove / onDragEnd）；
+   * 右键 → onMenu 弹出具体操作。
    */
   import type { Snippet } from 'svelte';
 
@@ -16,9 +17,11 @@
     badge = '',
     selected = false,
     dragging = false,
+    lift = false,
     holdMs = 600,
     onClick,
     onDblclick,
+    onMenu,
     onHold,
     onDragMove,
     onDragEnd,
@@ -26,28 +29,32 @@
   }: {
     /** 显隐状态：睁眼 = 显示，闭眼 = 隐藏 */
     visible?: boolean;
-    /** 提供则眼睛可点击切换；缺省仅指示（元素显隐由所属图层决定） */
+    /** 提供则眼睛可点击切换；缺省仅指示 */
     onEye?: () => void;
     /** 图层 logo（emoji） */
     logo?: string;
     /** 元素 logo（颜色块） */
     logoColor?: string;
     name: string;
-    /** 可选简介（如高度区间） */
+    /** 可选简介 */
     desc?: string;
     badge?: string;
     /** 选中：黄色外框 */
     selected?: boolean;
+    /** 拖动来源行（变淡） */
     dragging?: boolean;
-    /** 长按解锁拖动所需时长（ms） */
+    /** 抬起中的浮动件（整个按钮跟指针） */
+    lift?: boolean;
     holdMs?: number;
     onClick?: (e: MouseEvent) => void;
     onDblclick?: () => void;
-    /** 进度条满 → 拖动解锁（携带按下事件与起始坐标） */
+    /** 右键菜单（坐标 + 目标） */
+    onMenu?: (e: MouseEvent) => void;
+    /** 进度条满 → 拖动解锁 */
     onHold?: (start: { x: number; y: number; e: PointerEvent }) => void;
     onDragMove?: (e: PointerEvent) => void;
     onDragEnd?: (e: PointerEvent) => void;
-    /** 可选控件（高度元素 = 滑块 + 当前值） */
+    /** 可选控件（高度元素 = 胶囊滑块） */
     control?: Snippet;
   } = $props();
 
@@ -100,11 +107,7 @@
     const wasUnlocked = unlocked;
     clearHold();
     unlocked = false;
-    if (wasUnlocked) {
-      if (moved) onDragEnd?.(e);
-      // 解锁后未位移：仍按单击处理（由 click 事件走 onClick）
-      return;
-    }
+    if (wasUnlocked && moved) onDragEnd?.(e);
   }
 
   function handleClick(e: MouseEvent) {
@@ -116,11 +119,6 @@
     }
     onClick?.(e);
   }
-
-  function onPointerCancel() {
-    clearHold();
-    unlocked = false;
-  }
 </script>
 
 <button
@@ -128,6 +126,7 @@
   class="ibtn"
   class:sel={selected}
   class:dragging
+  class:lift
   class:hold={holding}
   style="--hold-ms:{holdMs}ms"
   onclick={handleClick}
@@ -135,8 +134,15 @@
     e.preventDefault();
     if (!moved && !unlocked) onDblclick?.();
   }}
+  oncontextmenu={(e) => {
+    e.preventDefault();
+    if (!unlocked) onMenu?.(e);
+  }}
   onpointerdown={onPointerDown}
-  onpointercancel={onPointerCancel}
+  onpointercancel={() => {
+    clearHold();
+    unlocked = false;
+  }}
 >
   <span class="hold-fill" aria-hidden="true"></span>
   {#if onEye}
@@ -152,6 +158,7 @@
       }}
       onpointerdown={(e) => e.stopPropagation()}
       ondblclick={(e) => e.stopPropagation()}
+      oncontextmenu={(e) => e.stopPropagation()}
     ><span class="eyeglyph">👁</span></span>
   {:else}
     <span class="eye no-drag" class:closed={!visible} title={visible ? '显示中' : '已隐藏'}>
@@ -163,15 +170,23 @@
   {:else if logo}
     <span class="logo em">{logo}</span>
   {/if}
-  <span class="nm">{name}</span>
-  {#if badge}
-    <span class="badge" title={badge}>{badge}</span>
-  {/if}
-  {#if desc}
-    <span class="desc">{desc}</span>
-  {/if}
+  <span class="txt">
+    <span class="nm">{name}</span>
+    {#if desc}
+      <span class="desc">{desc}</span>
+    {/if}
+    {#if badge}
+      <span class="badge" title={badge}>{badge}</span>
+    {/if}
+  </span>
   {#if control}
-    <span class="ctl no-drag" onpointerdown={(e) => e.stopPropagation()} onclick={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()}>
+    <span
+      class="ctl no-drag"
+      onpointerdown={(e) => e.stopPropagation()}
+      onclick={(e) => e.stopPropagation()}
+      ondblclick={(e) => e.stopPropagation()}
+      oncontextmenu={(e) => e.stopPropagation()}
+    >
       {@render control()}
     </span>
   {/if}
@@ -181,10 +196,12 @@
   .ibtn {
     position: relative;
     width: 100%;
+    /* 等高：由列表统一测量设定（容纳最长名称换行） */
+    height: var(--ibtn-h, 40px);
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 8px;
+    padding: 0 8px;
     border: 1px solid transparent;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.04);
@@ -203,8 +220,19 @@
     border-color: #f0c36a;
     box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
   }
+  /* 被拿起来：原位留空槽（整钮由浮动件表示） */
   .ibtn.dragging {
-    opacity: 0.55;
+    visibility: hidden;
+  }
+  /* 抬起中的浮动件：整钮跟指针 */
+  .ibtn.lift {
+    position: fixed;
+    z-index: 200;
+    width: var(--lift-w, 240px);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
+    border-color: rgba(240, 195, 106, 0.7);
+    opacity: 0.95;
+    pointer-events: none;
   }
   .hold-fill {
     position: absolute;
@@ -255,12 +283,32 @@
     height: 12px;
     border-radius: 3px;
   }
-  .nm {
-    flex: 0 1 auto;
+  /* 名称区：换行显示，不做省略截断 */
+  .txt {
+    flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.25;
+    max-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .txt::-webkit-scrollbar {
+    width: 0;
+    display: none;
+  }
+  .nm {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
   }
   .badge {
     flex: 0 0 auto;
@@ -274,23 +322,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .desc {
-    flex: 0 0 auto;
-    font-size: 10px;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-  }
   .ctl {
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 6px;
-    justify-content: flex-end;
-    touch-action: none;
-  }
-  .ctl :global(input[type='range']) {
-    flex: 1;
-    min-width: 56px;
   }
 </style>

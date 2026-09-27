@@ -129,6 +129,8 @@ export interface Region {
   layerId: LayerId;
   name: string;
   cells: CellId[];
+  /** 显示开关（仅显示层过滤，不改归属/几何） */
+  hidden?: boolean;
   /** 核心地块：首都 / 省会 / 文化中心 */
   centerCellId?: CellId;
   /** 别名：与 centerCellId 同义，语义更明确 */
@@ -227,6 +229,8 @@ export interface PathFeature {
   layerId: 'road' | 'route' | 'river';
   name: string;
   points: LonLat[];
+  /** 显示开关（仅显示层过滤） */
+  hidden?: boolean;
   color: string;
   widthStart?: number;
   widthEnd?: number;

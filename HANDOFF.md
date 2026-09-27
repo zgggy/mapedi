@@ -10,6 +10,45 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-28，第三十五次）— 面板/按钮契约二轮：胶囊滑块 + 右键菜单 + 抬起式拖动 + 长名称不省略**
+
+- **用户契约（8 条）**：① 面板可拖动、高度随内容增至 ≤0.8 屏高、内滚不显条；② 图层操作说明删除；
+  ③ ItemButton 右键菜单（显示/隐藏、上移一层、下移一层、复制一个、删除），去掉行侧删除按钮；
+  ④ 所有 ItemButton 等高、名称不省略；⑤ 滑块改「大胶囊套小胶囊」样式（两端 min/max，值随小胶囊右端，
+  >50% 值在内/否则在外，拖动时右端上方气泡，整数离散/浮点连续）；⑥ 元素按钮去简介；
+  ⑦ 所有 ItemButton 用单列网格排布；⑧ 拖动 = 整个按钮被拿起来（浮动件跟指针，动画不瞬移），
+  最近格 = 临时占据格，该格与下方元素让一格。
+- **新组件**：`CapsuleSlider`（胶囊滑块，window 监听）、`ContextMenu`（右键菜单，导出 MenuItem）、
+  `liftDrag.ts`（抬起式拖动数学：liftTransforms 紧凑+目标格开口净位移 / insertIndex 指针上方中心数 /
+  insertPlan 父展开行与首子间 = nest-first）。`ItemButton` 重写（等高 var(--ibtn-h)、名称换行不省略、
+  onMenu 右键、拖动来源行 visibility:hidden=被拿起来）；`PanelShell` 重写（header 拖动、max-height 80vh、
+  scrollbar-width:none）。
+- **store 新操作**：`toggleItemHidden`（元素/路径级 hidden，displayCompose + pathsLayer 过滤）、
+  `moveItemStep`（图层/元素/路径同父兄弟内上移/下移一层）、`copyItem`（图层复制设置/元素空胞副本/路径点列副本）、
+  `deleteItem`（自定义图层 + 元素 + 路径）。Region/PathFeature 加 `hidden?: boolean`（仅显示层过滤）。
+- **根因修复（顺手）**：`updateHeightIntervalElements` 原按**下标**耦合 `HEIGHT_INTERVALS[i] ↔ els[i]`——
+  用户拖动改变区间顺序后，增量归属会写错区间。改为**按 lo 匹配**元素（顺序只影响叠放）。
+  另：区间元素是派生数据，右键菜单的复制/删除对派生项禁用（重建会冲掉）。
+- **拖动模型核对**：liftTransforms 的「紧凑 + 目标格 p 开口」净位移与用户描述的
+  「该网格和下方网格的所有元素往下让一格」在紧凑坐标系下逐位一致；命中用拖动起点缓存 rect
+  （transform 不反馈，防让位动画影响命中）。建子行同高占格；行高统一由 MutationObserver 测量
+  （measureSlot：全表取最大内容高，名称换行也等高）。
+- **验证（浏览器，100k 世界）**：面板 maxH=580px=0.8×725、滚动条隐藏、可拖动 ✓；操作说明已删 ✓；
+  单列网格 ✓；等高（40px 常规 / 长名称下全表 88px 等高）✓；长名称 5 行全显不裁剪 ✓；
+  胶囊滑块（两端 min/max、值随右端、>50% 值在内、拖动气泡 -29、松手消失、整数离散）✓；
+  右键菜单（图层：显隐/上下移/复制/删除-内置层禁删；元素：同；派生项复制/删除禁用）✓；
+  上移/下移/复制/删除逐项实测 ✓；抬起拖动（浮动件跟指针 + 让格 transform + 松手重排）✓；错误 0。
+- **测试污染清理**：自动化测试复制出的「远海 副本」已删；被拖乱的图层顺序与高度区间顺序已恢复原序
+  （图层：地块/高度/海陆/环境/植物…；区间：深海/远海/近海…）。
+- **注意**：HMR 半热态会让右键菜单等失灵（验证前必须 reload）；页面 timer 被节流时 evaluate 内长
+  setTimeout 会超 3s 预算（用拆步 evaluate + waitForTimeout）；DOM 直改不触发 Svelte 响应
+  （paintValues 曾因普通对象不回显，改 $state 修复）。
+- **待办**：死代码整包清理（Sheets/Rails/GenDock/ViewDock/ProjectPanel/SideDrawer/LayersDrawer/
+  LayerStyleBar/HeightIntervalList/SliderField/ElementList/ToolsPanel/InfoPanel/WorkbenchHost
+  + core/nature、political、relief、ring/trace、render/globeTexture；其中 ElementList 滑块是
+  CapsuleSlider 的双份旧实现）；沿上轮：拓扑翻转增量连通分量、撤销/重做一致性、生成小头、
+  100k 网格视口裁剪、阴影恢复走场图集。
+
 **本轮已处理（2026-09-27，第三十四次）— 面板/按钮统一重构（PanelShell + ItemButton + Dock + 长按拖动）+ 修图层错位回归**
 
 - **用户报告回归**：图层显示错位、图层内容全部不显示。
