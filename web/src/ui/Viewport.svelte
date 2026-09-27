@@ -47,8 +47,7 @@
   import type { LonLat } from '../core/types';
   import { resolveLayerStyle } from '../core/layer/config';
   import { editor } from '../app/store.svelte';
-  import { GpuFillRenderer } from '../render/gpuFill';
-  import { GpuElementsRenderer } from '../render/gpu/gpuElements';
+  import { MapGlRenderer } from '../render/gl/mapRenderer';
 
   let {
     world,
@@ -91,7 +90,7 @@
     onhover?: (info: HoverInfo | null) => void;
     /** 缩放级别（cam.scale / 默认 180）→ 状态栏显示 */
     onzoom?: (zoom: number) => void;
-    /** 渲染后端：gpu = WebGL2 RegionMesh 元素后端 */
+    /** 渲染后端：gpu = GL 直绘（bg/cellsMesh/元素三通道，相机 uniform 逐帧直绘） */
     renderBackend?: 'canvas' | 'gpu';
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => void;
     onradius?: (v: number) => void;
@@ -106,6 +105,7 @@
   } = $props();
 
   let canvas: HTMLCanvasElement;
+  let glCanvas: HTMLCanvasElement;
   let overlay: HTMLCanvasElement;
   let viewportRoot: HTMLDivElement;
   let cam: Camera = $state(defaultCamera());
@@ -391,6 +391,10 @@
       overlay.width = canvas.width;
       overlay.height = canvas.height;
     }
+    if (glCanvas) {
+      glCanvas.width = canvas.width;
+      glCanvas.height = canvas.height;
+    }
     requestRender();
   }
 
@@ -597,37 +601,16 @@
     }
   }
 
-  // GPU 离屏填充：只作 drawPreparedElement 的填充光栅器，按绘制序 drawImage 合成进 2d。
-  // 不是叠加层——叠加层会把所有描边压到所有填充之下，破坏 RENDER_LOGIC 的 z 序。
-  let gpuFill: GpuFillRenderer | null = null;
-  let gpuFillFailed = false;
-  function ensureGpuFill(): GpuFillRenderer | null {
-    // 性能测量期：先关 GPU，量 Canvas2D 基线
-    return null;
-    if (gpuFill) return gpuFill;
-    if (gpuFillFailed) return null;
-    try {
-      const off = document.createElement('canvas');
-      off.width = 8;
-      off.height = 8;
-      gpuFill = new GpuFillRenderer(off);
-    } catch (e) {
-      gpuFillFailed = true;
-      console.error('[gpuFill] 初始化失败，元素填充回退 Canvas2D evenodd：', e);
-      gpuFill = null;
-    }
-    return gpuFill;
-  }
-  let gpuElements: GpuElementsRenderer | null = null;
-  let gpuElementsFailed = false;
-  /** GPU 元素后端（惰性创建；显示面板切换后才启用；失败回退 Canvas2D） */
-  function ensureGpuElements(): GpuElementsRenderer | null {
+  // GL 直绘场景：惰性创建（显示面板切到 GPU 才建）；失败/异常整帧回退 Canvas2D（显示不降级）
+  let mapGl: MapGlRenderer | null = null;
+  let mapGlFailed = false;
+  function ensureMapGl(): MapGlRenderer | null {
     if (renderBackend !== 'gpu') return null;
-    if (gpuElements) return gpuElements;
-    if (gpuElementsFailed) return null;
-    gpuElements = GpuElementsRenderer.create();
-    if (!gpuElements) gpuElementsFailed = true;
-    return gpuElements;
+    if (mapGl) return mapGl.ok ? mapGl : null;
+    if (mapGlFailed || !glCanvas) return null;
+    mapGl = MapGlRenderer.create(glCanvas);
+    if (!mapGl) mapGlFailed = true;
+    return mapGl;
   }
 
   function render() {
@@ -654,8 +637,7 @@
       singleWorldCopy: pathEdit,
       displayPieces,
       isDragging: panningLive || zoomingLive,
-      gpuFill: ensureGpuFill() ?? undefined,
-      gpuElements: ensureGpuElements(),
+      glScene: ensureMapGl() ?? undefined,
       styleOf: (id: string) => resolveLayerStyle(world, id),
       borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
       showCellMesh:
@@ -738,7 +720,7 @@
     void projParams;
     void styleId;
     void cam.scale;
-    void renderBackend; // 切换渲染后端必须触发重烘焙
+    void renderBackend; // 切换渲染后端必须整帧重绘（GL 直绘 ↔ Canvas 回退）
     onzoom?.(cam.scale / 180);
     requestRender();
     requestOverlay();
@@ -767,10 +749,12 @@
 </script>
 
 <div class="viewport-root" class:draw={drawActive && !pathEdit} class:path-edit={pathEdit}>
+  <!-- GL 直绘层（渲染后端 = GPU 时用）：bg/cellsMesh/元素三通道，最底 -->
+  <canvas class="gl" bind:this={glCanvas}></canvas>
   <canvas
     bind:this={canvas}
     oncontextmenu={(e) => e.preventDefault()}
-    style="touch-action:none;user-select:none;-webkit-user-select:none;"
+    style="position:relative;z-index:1;touch-action:none;user-select:none;-webkit-user-select:none;"
     ondblclick={(e) => {
       // 双击结束路径草稿（≥2 点时提交为正式路径）
       if (!isFreeLayer || !pathDraft || pathDraft.length < 2) return;
@@ -1106,11 +1090,20 @@
   .viewport-root.path-edit canvas:not(.ovl) {
     cursor: crosshair;
   }
+  .viewport-root canvas.gl {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+  }
   .viewport-root canvas.ovl {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     pointer-events: none;
+    z-index: 2;
   }
 </style>

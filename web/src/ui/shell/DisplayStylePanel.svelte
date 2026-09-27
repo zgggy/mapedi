@@ -74,7 +74,7 @@
           <button type="button" class="seg" class:on={renderBackend === 'gpu'}
             onclick={() => onRenderBackend?.('gpu')}>GPU（实验）</button>
         </div>
-        <p class="dim">GPU = WebGL2 元素后端（RegionMesh）；显示异常可切回 Canvas2D。</p>
+        <p class="dim">GPU = GL 直绘（相机 uniform 逐帧，无烘焙）；显示异常可切回 Canvas2D。</p>
       </div>
       {#if isFreeform}
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素三通道。</p>

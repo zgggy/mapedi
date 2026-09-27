@@ -10,6 +10,31 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-27，第二十五次）— 一期：GL 直绘架构（烘焙链退役）+ 100k 上限 bug + 二期方案（实时生效）**
+
+- **回答用户「为什么感受不到 GPU 性能」**：旧 GPU 链是**烘焙架构**——每帧把世界光栅进离屏贴图再 drawImage 回 2D，缩放每 tick 全量重烘+合成回读，GPU 只当了 Canvas 的贴图打印机；而 Canvas2D 本身已被浏览器 GPU 化（Skia/Metal），所以烘焙链结构上**只能 ≤ Canvas**，"打平"就是它的天花板。真正吃到 GPU 必须**相机 uniform 逐帧直绘**（几何缓存、缩放只改 uniform、零重烘/零回读）。
+- **100k 生成 bug**：`store.generate` 隐藏 `Math.min(count, 50000)` 与 UI（软上限 100k 确认解锁 / 输入上限 200k）矛盾 → 收敛为 `core/world.HARD_MAX_DENSITY=200000` **唯一钳制点**（生成链），`SOFT_MAX_DENSITY=100000` 只是 UI 解锁策略。已验证 100000 地块生成成功。
+- **一期落地（GL 直绘）**：
+  - `render/gl/geometry.ts`：环几何缓存（fan=evenodd 奇偶 / strip=条带宽度 uniform / fade=内阴影条带）；闭合语义只取 hermite 的 closePath 条件（virtualFrom 开环不强闭）。
+  - `render/gl/mapRenderer.ts`：`MapGlRenderer` 三通道直绘（bg 清海色 / cellsMesh 共享边去重条带 / elements）。evenodd=stencil INVERT 奇偶（含副本重叠不叠色）；副本=顶点着色器 aDx 实例属性；内阴影=**Φ 剖面渐隐条带** α(u)=Φ(2−2|u|)−Φ(−2−2|u|)，与 Canvas「clip(fill)+blur(2w)」沿直线段数学等价（σ=w/2 矩形描边高斯剖面），外侧由填充 stencil 裁掉→不需要内外/洞方向判定；外框=gl.scissor；缓冲定额清扫（600 帧未用 deleteBuffer）。
+  - **样式链一处实现**：`layers.buildPieceParams`（宽度/颜色/选中放大 1.6/1.15/阴影 +0.12）同时喂 Canvas `paintPieceParams` 与 GL；禁止两后端各推一遍。
+  - **三画布**：`canvas.gl`（底，bg/cellsMesh/elements）→ `canvas`（中，paths/decorations/frame 透明底+输入）→ `canvas.ovl`（顶）。`drawWorld` 的 `glScene` 通道：GL 成功则 2D 不铺海色、不走静态烘焙；失败（shader/上下文/非纯色样式）**整帧回退 Canvas2D（显示不降级）**。
+  - **死代码已删**：`render/gpuFill.ts`、`render/gpu/*`（gpuElements/regionMesh）、`gpu-bench/`、`gpu-fill-bench/`、两个 bench html——烘焙链的 GPU 填充通道整个退役。
+  - `RENDER_LOGIC.md` 增「渲染后端（同一契约，两个光栅化器）」节。
+- **二期方案（下一阶段，核心=绘制实时生效，不是异步化）**：笔刷按住拖动时，cell 高度变化必须**同帧/下一帧**出现在地图上，松开鼠标**立即**可拖动/缩放：
+  1. **同步增量环**：笔刷只改 N 个 cell → 受影响 DisplayPiece 的 cellSet 环增量重算（边界链只在变化 cell 的邻域重接，不全量 `cellSetBoundaryRings`）；环几何（fan/strip/fade）随之只重建受影响环。
+  2. **就地重绘**：直绘架构下无需重烘——下一帧 `buildPieceParams` 直接吃到新环；GL 缓冲对新环 upload，旧环由定额清扫回收。
+  3. **松手即响应**：mouseup 不做任何全量提交（归属/拓扑已在拖动中增量维护），只落盘（IndexedDB 异步）；若有必须全量的收尾（如大陆重算）放 idle，不阻塞输入。
+  4. 关键算法债：`commitStroke` 的 Region 归属增量维护 + 增量环算法（`core/ring/build` 包一层"变化 cell 邻域重接"）是二期主体；先出最小几何案例再动。
+- **验证方法**（自动化环境坑）：rAF 被节流（3s 0 回调）→ 帧计时须 rAF+setTimeout 垫片；层显隐=**双击主按钮**（👁 只开样式面板）；浏览器验证前先看 `__gpuErr` 空 + `__gpuRan>0`（否则是静默回退 Canvas）。
+- **一期验证结果 + 一次真 bug 修复（阴影并集）**：
+  - **发现并修复**：渐隐条带最初直接 over 合成，多环邻近时**叠加求和**（阴影宽 18.5px 时条带 ±46px 几乎处处重叠 → 阴影强度叠到数倍；剖面峰值两边吻合 205/203，问题只在"求和 vs 并集"）。修复 = **渐隐场先 GL_MAX 归并进 RT，再一次 over 合成**（= Canvas「描边并集再模糊」语义）。修后决定性比对 big(>32) **12.79% → 0.06%**、纯填充 >8 从 6.5% → 1.11%（= 历史接受的阴影带口径）。
+  - **比对口径教训**：Canvas 静态烘焙在「件集变化但 layoutSig 不变」时可能做**陈旧增量**（`layoutSig` 不含 `pieceSignature`，脏矩形外沿用旧贴图）——比对前必须用「样式真值变更」强制 key 变化全量重烘，否则测的是陈旧贴图（曾误判"Canvas 无阴影/填充偏移"）。GL 直绘无贴图态，天然免疫（spec 3 优势）。
+  - **逐场景比对**（截图 + Python 网格采样，UI 区排除）：默认视图 big(>32) 0.00%；zoom22 高倍 0.00%（横线/竖线扫描 0）；跨界+内容偏移 0.00%（列突变扫描 0）；纯海区网格 maxDiff 10、>8 仅 0.02%（网格 AA 剖面形态略软，数值级差异）；拖动中帧 vs 松手帧（同相机）big(>8) 0.00% = **无残影**；极区/大阴影场景残差全部落在阴影渐变带/AA 边（内部 maxDiff≤37，>32 归零）。
+  - **性能**（rAF 垫片还原"帧即刻服务"）：用户场景连续缩放 85 tick/1.2s 全部跟上，**116.7 fps 持续**，帧成本中位 3.0ms / p90 4.2ms / max 7.1ms（GPU 提交 0.7-6ms）。对照 Canvas：拖动期 0.3ms/帧（贴图延后）但夹 77ms 烘焙尖峰 + 手势后 255-270ms 补烘（内容滞后）。100k 生成 ✓（100000 地块）。
+  - 常驻计时器：`window.__drawSamples/__drawCount`（drawWorld 咽喉点，两后端可比）。
+- **待办**：① 用户实测一期缩放手感 + 目视验收（阴影观感、网格、极区）；② 确认后默认切 GPU；③ 二期实施（实时生效）。
+
 **本轮已处理（2026-09-27，第二十四次）— GPU 缩放性能追平 Canvas（用户实测 20fps→修复）**
 
 - **用户实测**：Canvas 无阴影 110fps / 带阴影 30-80fps；GPU 无阴影 20fps / 带阴影个位数 → "走错路还是没做好？"。**结论：路没走错，是三个执行层浪费 + 一次测量教训**。

@@ -1,4 +1,3 @@
-import type { GpuFillRenderer } from './gpuFill';
 import type { World } from '../core/types';
 import type { StyleSet } from '../core/styles';
 import type { Camera } from './map2d';
@@ -13,16 +12,8 @@ import {
   getCellSetRingsCached,
 } from './borderCache';
 import { defaultExclusiveColor } from '../core/layer/style';
-import { traceMidRing } from '../core/ring/trace';
-import { chainEdgesToMidpointRings, cellSetBoundaryRings } from '../core/ring/build';
 import { prepareDisplayRings } from '../core/ring/normalize';
-import {
-  type MidRing,
-  type DisplayRing,
-  splitOuterHoleRings,
-  ringSignedArea,
-  pointInRing,
-} from '../core/ring/displayRing';
+import type { MidRing, DisplayRing } from '../core/ring/displayRing';
 import {
   frameClipInUserSpace,
   frameRect,
@@ -38,7 +29,6 @@ import { poleSideForRing } from '../core/ring/normalize';
 import type { DisplayPiece } from '../core/displayCompose';
 import { isLayerShown } from '../core/displayCompose';
 import { dataRev } from '../core/rev';
-import type { GpuElementsRenderer, GpuPieceSpec } from './gpu/gpuElements';
 
 export interface RenderEnv {
   ctx: CanvasRenderingContext2D;
@@ -88,10 +78,6 @@ export interface RenderEnv {
   styleOf?: (layerId: string) => import('../core/layer/style').ElementStyle;
   /** 边界显示样式（底部悬浮面板） */
   borderStyle?: import('../core/types').LayerRenderConfig;
-  /** GPU 离屏填充光栅器（可选；缺省走 Canvas2D evenodd） */
-  gpuFill?: GpuFillRenderer;
-  /** GPU 元素后端（RegionMesh：填充/描边/阴影整片）；缺省走 Canvas2D */
-  gpuElements?: GpuElementsRenderer | null;
 }
 
 export interface RenderLayer {
@@ -288,192 +274,244 @@ function frameYOf(env: RenderEnv) {
   return { ...fr, cylindrical: env.proj === 'mercator' || env.proj === 'behrmann' || env.proj === 'globe' };
 }
 
-/**
- * 高度层填充：嵌套区间 = 等高线。
-/**
- * 唯一样条路径：**同一 prepareDisplayRings 结果** 上做 fill / shadow / stroke。
- * 禁止 fill 用一套环、描边 unwrapChainX 另一套、阴影再 raw 环。
- */
-/** CSS 颜色 → GPU 顶点色 [r,g,b]（0..1）。CanvasGradient 走 Canvas2D 回退。 */
-function cssToRgb(c: string): [number, number, number] | null {
+/** CSS 颜色 → [r,g,b,a]（0..1）。解析不了返回 null（CanvasGradient 等走 Canvas2D 回退）。 */
+export function cssToRgba(c: string): [number, number, number, number] | null {
   const hex = /^#?([0-9a-f]{6})$/i.exec(c || '');
   if (hex) {
     const v = parseInt(hex[1], 16);
-    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1];
   }
   const short = /^#?([0-9a-f]{3})$/i.exec(c || '');
   if (short) {
     const s = short[1];
     const v = parseInt(s[0] + s[0] + s[1] + s[1] + s[2] + s[2], 16);
-    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1];
   }
-  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(c || '');
-  if (rgb) return [+rgb[1] / 255, +rgb[2] / 255, +rgb[3] / 255];
+  const rgb = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/i.exec(c || '');
+  if (rgb) return [+rgb[1] / 255, +rgb[2] / 255, +rgb[3] / 255, rgb[4] === undefined ? 1 : +rgb[4]];
   return null;
 }
 
-function drawPreparedElement(
+/** 元素显示参数（样式链唯一解析结果）：Canvas2D 回退与 GL 直绘共用同一份。 */
+export interface PieceParams {
+  key: string;
+  /** 唯一环语义源：fill / outline / 阴影都由它派生（禁止第二套环） */
+  rings: DisplayRing[];
+  /** 无环整框片（h0 全海底等）：矩形填充，无描边/阴影 */
+  fullFrame: { color: string; alpha: number; minX: number; maxX: number; minY: number; maxY: number } | null;
+  /** 是否画填充（阴影裁剪仍用同一环的填充形状） */
+  fillOn: boolean;
+  fillColor: string | CanvasGradient;
+  fillAlpha: number;
+  stroke: string;
+  /** 描边全宽（用户单位，已含选中放大 1.6）；0 = 不描 */
+  strokeW: number;
+  shadowColor: string;
+  /** 阴影半宽 w（用户单位，已含选中放大 1.15；σ = w/2 的高斯剖面）；0 = 无阴影 */
+  shadowW: number;
+  shadowAlpha: number;
+  smooth: number;
+  selected: boolean;
+  copies: number[];
+  /** px→用户单位换算 + Canvas blur 口径用的相机比例 */
+  camScale: number;
+}
+
+/**
+ * 元素显示参数解析（**样式链唯一实现**）。
+ * 两条渲染后端只准消费本结果，禁止各自再推一遍宽度 / 颜色 / 选中放大。
+ */
+export function buildPieceParams(env: RenderEnv): PieceParams[] {
+  const { world, cam, style, displayPieces, highlightRegionId } = env;
+  const out: PieceParams[] = [];
+  if (!displayPieces?.length) return out;
+  const styleOf =
+    env.styleOf ??
+    ((_id: string) =>
+      env.fillStyle ?? {
+        border: { enabled: true, width: style.border.width, color: style.border.color, smooth: 1 },
+        shadow: { enabled: false, width: 0, alpha: 0, color: '#fff' },
+        fill: { enabled: true, alpha: 0.85, color: '#888' },
+      });
+  const project = (ll: { lon: number; lat: number }) => projectPt(env, ll);
+  const fr = frameYOf(env);
+  const copies = elementCopies(env);
+  const regionById = new Map(world.regions.map((r) => [r.id, r]));
+  const seenFill = new Set<string>();
+  const seenBound = new Set<string>();
+  for (const dp of displayPieces) {
+    const es = styleOf(dp.layerId);
+    const fillOn = es.fill.enabled !== false;
+    const fillA = es.fill.alpha;
+    const elOn = es.border.enabled !== false;
+    const bw = Math.max(0, es.border.width);
+    const elColor = es.border.color;
+    const shadowOn = es.shadow.enabled !== false && es.shadow.width > 0;
+    const shadowW = shadowOn ? es.shadow.width : 0;
+    const shadowA = shadowOn ? es.shadow.alpha : 0;
+    const sm = es.border.smooth;
+
+    const rid = dp.regionId;
+    const sel = dp.regionSelected || highlightRegionId === rid;
+    const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, `piece:${dp.key}`);
+    // 跳过判定（仅对有环元素）：
+    // 1) 无环片（整框底色等）无包围盒语义，永不跳过；
+    // 2) 有环片按**周期相交**判定——元素可经 k 个世界副本平移后落入窗口，
+    //    取所有使 [b + k·per] 与脏区相交的 k（精确解，不设固定 ±2 上限）。
+    if (env.dirtyBoxes?.length && entry.rings.length) {
+      const b = entry.bbox;
+      const per = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
+      let hits = false;
+      for (const r of env.dirtyBoxes) {
+        if (b.maxY < r.minY || b.minY > r.maxY) continue;
+        const kMin = Math.ceil((r.minX - b.maxX) / per);
+        const kMax = Math.floor((r.maxX - b.minX) / per);
+        if (kMin <= kMax) {
+          hits = true;
+          break;
+        }
+      }
+      if (!hits) continue;
+    }
+    const rings = entry.rings;
+    // 湖泊/大陆都是普通元素，不特判中空
+    if (!rings.length && entry.fullWorld && fillOn && !seenFill.has(dp.key)) {
+      seenFill.add(dp.key);
+      const pad = env.periodicTilePadX ?? 0;
+      const alpha = Math.max(0, Math.min(1, fillA * (dp.opacity ?? 1)));
+      // 与 clipToMapFrame 同口径：填充须覆盖「可见带」[fr − clipDxBias]——
+      // 平移后可见带滑出绝对 ±π（副本区域），钉在 ±π 的填充会让副本带丢底色
+      const bias = env.clipDxBias ?? 0;
+      const fx = fr.minX - bias - pad;
+      const fy = fr.minY;
+      const fw = fr.maxX - fr.minX + pad * 2;
+      const fh = fr.maxY - fr.minY;
+      out.push({
+        key: dp.key,
+        rings: [],
+        fullFrame: { color: dp.color, alpha, minX: fx, maxX: fx + fw, minY: fy, maxY: fy + fh },
+        fillOn: true,
+        fillColor: dp.color,
+        fillAlpha: alpha,
+        stroke: 'transparent',
+        strokeW: 0,
+        shadowColor: '#000',
+        shadowW: 0,
+        shadowAlpha: 0,
+        smooth: sm,
+        selected: sel,
+        copies,
+        camScale: cam.scale,
+      });
+      continue;
+    }
+    if (!rings.length) continue;
+    const prepared = preparePieces(rings, fr, entry.poles);
+    if (!prepared.length) continue;
+
+    const needFill = fillOn && !seenFill.has(dp.key);
+    const needBound = !seenBound.has(dp.key) || sel;
+    if (!needFill && !needBound) continue;
+    if (needFill) seenFill.add(dp.key);
+    if (needBound && !sel) seenBound.add(dp.key);
+
+    const region = regionById.get(rid);
+    const excl =
+      region?.exclusiveColor || defaultExclusiveColor(region?.color ?? '#888888');
+    const strokeCol = region ? darkenHex(region.color, 0.7) : elColor;
+    // 选中：边界必须可见（颜色覆盖为专属色，宽度给已配置宽），与「选中元素最顶」配套
+    const strokeW = (sel || elOn) ? (bw * (sel ? 1.6 : 1)) / cam.scale : 0;
+    out.push({
+      key: dp.key,
+      rings: prepared,
+      fullFrame: null,
+      fillOn: needFill,
+      fillColor: dp.color,
+      fillAlpha: fillA * (dp.opacity ?? 1),
+      stroke: sel ? defaultExclusiveColor(region?.color ?? '#f0c36a') : (elOn ? strokeCol : 'transparent'),
+      strokeW,
+      shadowColor: excl,
+      shadowW: shadowW > 0 ? (shadowW * (sel ? 1.15 : 1)) / cam.scale : 0,
+      shadowAlpha: shadowA > 0 ? (sel ? Math.min(1, shadowA + 0.12) : shadowA) : 0,
+      smooth: sm,
+      selected: sel,
+      copies,
+      camScale: cam.scale,
+    });
+  }
+  return out;
+}
+
+/**
+ * Canvas2D 元素画法（GL 不可用时的回退路径）。
+ * 唯一样条路径：**同一 PieceParams.rings** 上做 fill / shadow / stroke。
+ * 禁止 fill 用一套环、描边 unwrapChainX 另一套、阴影再 raw 环。
+ * 内阴影 = clip(fill) + blur(2w 描边)——GL 的 Φ 剖面条带与其沿直线段数学等价。
+ */
+export function paintPieceParams(
   ctx: CanvasRenderingContext2D,
-  prepared: DisplayRing[],
-  opts: {
-    camScale: number;
-    fillColor: string | CanvasGradient;
-    fillAlpha: number;
-    gpuFill?: GpuFillRenderer;
-    fillOn: boolean;
-    hollow: boolean;
-    stroke: string;
-    widthPx: number;
-    shadowColor: string;
-    shadowWidthPx: number;
-    shadowAlpha: number;
-    smooth: number;
-    selected: boolean;
-    copies: number[];
-    /** GPU 离屏填充对齐 beginWorld 所用的相机（含 dpr） */
-    cam?: { x: number; y: number; scale: number };
-    dpr?: number;
-    /** beginWorld(skipContent) 时恒为 0；周期副本由 copies 表达 */
-    drawDx?: number;
-  },
+  piece: PieceParams,
 ): void {
-  const sc = opts.camScale;
-  const sm = opts.smooth;
-  const bw = (Math.max(0, opts.widthPx) * (opts.selected ? 1.6 : 1)) / sc;
-  const sw = (Math.max(0, opts.shadowWidthPx) * (opts.selected ? 1.15 : 1)) / sc;
-  const live = prepared.filter((p) => p.pts.length >= 2);
+  const sm = piece.smooth;
+  const sc = piece.camScale;
+  if (piece.fullFrame) {
+    const f = piece.fullFrame;
+    ctx.save();
+    ctx.globalAlpha = f.alpha;
+    ctx.fillStyle = f.color;
+    ctx.fillRect(f.minX, f.minY, f.maxX - f.minX, f.maxY - f.minY);
+    ctx.restore();
+    return;
+  }
+  const live = piece.rings.filter((p) => p.pts.length >= 2);
   if (!live.length) return;
   const fill = new Path2D();
   const outline = new Path2D();
-  for (const dx of opts.copies) {
+  for (const dx of piece.copies) {
     const transform = new DOMMatrix().translate(dx, 0);
-    for (const piece of live) {
-      if (piece.closed) {
-        const p = ringPath2D(piece, sm, 'fill');
+    for (const ring of live) {
+      if (ring.closed) {
+        const p = ringPath2D(ring, sm, 'fill');
         if (p) fill.addPath(p, transform);
       }
-      const p = ringPath2D(piece, sm, 'outline');
+      const p = ringPath2D(ring, sm, 'outline');
       if (p) outline.addPath(p, transform);
     }
   }
 
   // 所有周期副本共用一个 evenodd 遮罩，避免半透明重复着色。
-  // GPU 只做**离屏填充**，在 fill→shadow→stroke 的原位置 drawImage 合成，
-  // 保持同一元素「填充在下、内阴影/描边在上」以及 displayPieces 的 z 序。
-  // 不做 GL 叠加层批量填充：那会把所有描边压到所有填充之下，违反 RENDER_LOGIC 的 z 序。
-  if (opts.fillOn && !opts.hollow) {
-    const gpu = opts.gpuFill;
-    const rgb = typeof opts.fillColor === 'string' ? cssToRgb(opts.fillColor) : null;
-    const cam = opts.cam;
-    if (gpu && rgb && cam) {
-      const { outers, holes } = splitOuterHoleRings(live as unknown as MidRing[]);
-      const holeByOuter = new Map<DisplayRing, DisplayRing[]>();
-      for (const h of holes) {
-        const p0 = h.pts[0];
-        let best: DisplayRing | null = null;
-        let bestArea = Infinity;
-        for (const o of outers) {
-          const oa = Math.abs(ringSignedArea(o.pts));
-          if (oa >= bestArea) continue;
-          if (pointInRing(p0.x, p0.y, o.pts)) { best = o; bestArea = oa; }
-        }
-        if (best) { const arr = holeByOuter.get(best) ?? []; arr.push(h); holeByOuter.set(best, arr); }
-      }
-      const alpha = Math.max(0, Math.min(1, opts.fillAlpha));
-      const colorFn = (): [number, number, number, number] => [rgb[0], rgb[1], rgb[2], alpha];
-      const toArr = (r: { pts: Pt[] }, dx: number): Float64Array => {
-        const a = new Float64Array(r.pts.length * 2);
-        for (let i = 0; i < r.pts.length; i++) { a[i * 2] = r.pts[i].x + dx; a[i * 2 + 1] = r.pts[i].y; }
-        return a;
-      };
-      gpu.clear();
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      const mark = (r: { pts: Pt[] }, dx: number): void => {
-        for (let i = 0; i < r.pts.length; i++) {
-          const x = r.pts[i].x + dx;
-          const y = r.pts[i].y;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      };
-      for (const dx of opts.copies) {
-        for (const o of outers) {
-          if (!o.closed || o.pts.length < 3) continue;
-          const hs = (holeByOuter.get(o) ?? []).filter((h) => h.closed && h.pts.length >= 3)
-            .map((h) => toArr(h, dx));
-          gpu.addPolygonWithHoles(toArr(o, dx), hs, colorFn, o.pts);
-          mark(o, dx);
-        }
-      }
-      const tw = ctx.canvas.width;
-      const th = ctx.canvas.height;
-      if (gpu.canvas.width !== tw || gpu.canvas.height !== th) {
-        gpu.canvas.width = tw;
-        gpu.canvas.height = th;
-      }
-      gpu.render({
-        cam,
-        w: tw,
-        h: th,
-        drawDx: opts.drawDx ?? 0,
-        dpr: opts.dpr ?? 1,
-      });
-      // 只贴该元素的设备像素包围盒——整幅贴图在烘焙画布上是数千像素，逐元素全幅 drawImage 会拖死合成器
-      if (minX !== Infinity) {
-        const dpr = opts.dpr ?? 1;
-        const sc = cam.scale * dpr;
-        const sx = (minX - cam.x) * sc + tw / 2;
-        const sy = -(maxY - cam.y) * sc + th / 2;
-        const sw = (maxX - minX) * sc;
-        const sh = (maxY - minY) * sc;
-        const pad = 2;
-        const x0 = Math.max(0, Math.floor(sx - pad));
-        const y0 = Math.max(0, Math.floor(sy - pad));
-        const x1 = Math.min(tw, Math.ceil(sx + sw + pad));
-        const y1 = Math.min(th, Math.ceil(sy + sh + pad));
-        if (x1 > x0 && y1 > y0) {
-          ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.drawImage(gpu.canvas, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
-          ctx.restore();
-        }
-      }
-    } else {
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, opts.fillAlpha));
-      ctx.fillStyle = opts.fillColor;
-      ctx.fill(fill, 'evenodd');
-      ctx.restore();
-    }
+  if (piece.fillOn) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, piece.fillAlpha));
+    ctx.fillStyle = piece.fillColor;
+    ctx.fill(fill, 'evenodd');
+    ctx.restore();
   }
-
-  // 内阴影：clip 到填充 + 单遍 blur 描边（替代原 8 遍渐隐 stroke）
-  // 视觉等价：向内渐隐的软边；成本从 8 次路径光栅降到 1 次 stroke + 1 次 blur
-  if (sw > 0 && opts.shadowAlpha > 0) {
+  // 内阴影：clip 到填充 + 单遍 blur 描边
+  if (piece.shadowW > 0 && piece.shadowAlpha > 0) {
     ctx.save();
     ctx.clip(fill, 'evenodd');
-    const alpha = opts.selected ? Math.min(1, opts.shadowAlpha + 0.12) : opts.shadowAlpha;
-    const blurPx = (sw * sc) / 2;
+    const blurPx = (piece.shadowW * sc) / 2;
     ctx.filter = blurPx > 0.5 ? `blur(${blurPx.toFixed(1)}px)` : 'none';
-    ctx.strokeStyle = opts.shadowColor;
+    ctx.strokeStyle = piece.shadowColor;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = sw * 2;
+    ctx.globalAlpha = piece.shadowAlpha;
+    ctx.lineWidth = piece.shadowW * 2;
     ctx.stroke(outline);
     ctx.filter = 'none';
     ctx.restore();
   }
-  ctx.strokeStyle = opts.stroke;
-  ctx.lineWidth = bw;
-  if (opts.selected) {
-    ctx.shadowColor = opts.shadowColor;
-    ctx.shadowBlur = 6 / sc;
+  if (piece.strokeW > 0 && piece.stroke !== 'transparent') {
+    ctx.strokeStyle = piece.stroke;
+    ctx.lineWidth = piece.strokeW;
+    if (piece.selected) {
+      ctx.shadowColor = piece.shadowColor;
+      ctx.shadowBlur = 6 / sc;
+    }
+    ctx.stroke(outline);
+    ctx.shadowBlur = 0;
   }
-  ctx.stroke(outline);
-  ctx.shadowBlur = 0;
 }
 
 /** raw MidRing[] → display pieces。键含 frameY，换投影不得复用旧 unwrap/闭合 */
@@ -538,190 +576,19 @@ function elementCopies(env: RenderEnv): number[] {
  * 对所有 shown 层的每个元素：边界内填充 + 元素边界（含内缘带）。
  * 海岸线（陆海界）**默认一直画**。选中元素最后画 → 最顶。
  *
- * **fill / shadow / stroke 必须共用 preparePieces**，禁止分叉预处理。
- */
-/**
- * 唯一样条路径：**同一 prepareDisplayRings 结果** 上做 fill / shadow / stroke。
- * 禁止 fill 用一套环、描边 unwrapChainX 另一套、阴影再 raw 环。
- * 海岸 = 大陆/湖泊元素的边界描边，与所有元素同一路径，不另开 pipeline。
+ * fill / shadow / stroke 共用 `buildPieceParams` 的同一套环（禁止分叉预处理）；
+ * GL 直绘消费同一份参数（见 render/gl/mapRenderer），两后端只差光栅化。
  */
 export const elementsLayer: RenderLayer = {
   name: 'elements',
   repeat: false,
   draw(env) {
-    const { ctx, world, cam, style, displayPieces, highlightRegionId, focusLayerId, pcache } = env;
-    const styleOf =
-      env.styleOf ??
-      ((_id: string) =>
-        env.fillStyle ?? {
-          border: { enabled: true, width: style.border.width, color: style.border.color, smooth: 1 },
-          shadow: { enabled: false, width: 0, alpha: 0, color: '#fff' },
-          fill: { enabled: true, alpha: 0.85, color: '#888' },
-        });
-    const project = (ll: { lon: number; lat: number }) => projectPt(env, ll);
-    const fr = frameYOf(env);
-    const copies = elementCopies(env);
-    // GPU 后端（RegionMesh）整片渲染；失败回退 Canvas2D（闭包保存每件的画法）
-    const gpuSpecs: GpuPieceSpec[] = [];
-    const canvasFallbacks: (() => void)[] = [];
-    const useGpu = !!env.gpuElements;
-
+    const { ctx } = env;
     beginWorld(ctx, env, 0, true);
     clipToMapFrame(ctx, env, 0);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
-    // 每片用自己的 layerId 样式（无全局单例串层）
-    if (displayPieces?.length) {
-      const regionById = new Map(world.regions.map((r) => [r.id, r]));
-      const seenFill = new Set<string>();
-      const seenBound = new Set<string>();
-      for (const dp of displayPieces) {
-        const es = styleOf(dp.layerId);
-        const fillOn = es.fill.enabled !== false;
-        const fillA = es.fill.alpha;
-        const elOn = es.border.enabled !== false;
-        const bw = Math.max(0, es.border.width);
-        const elColor = es.border.color;
-        const shadowOn = es.shadow.enabled !== false && es.shadow.width > 0;
-        const shadowW = shadowOn ? es.shadow.width : 0;
-        const shadowA = shadowOn ? es.shadow.alpha : 0;
-        const sm = es.border.smooth;
-
-        const rid = dp.regionId;
-        const sel = dp.regionSelected || highlightRegionId === rid;
-        const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, `piece:${dp.key}`);
-        // 跳过判定（仅对有环元素）：
-        // 1) 无环片（整框底色等）无包围盒语义，永不跳过；
-        // 2) 有环片按**周期相交**判定——元素可经 k 个世界副本平移后落入窗口，
-        //    取所有使 [b + k·per] 与脏区相交的 k（精确解，不设固定 ±2 上限）。
-        if (env.dirtyBoxes?.length && entry.rings.length) {
-          const b = entry.bbox;
-          const per = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
-          let hits = false;
-          for (const r of env.dirtyBoxes) {
-            if (b.maxY < r.minY || b.minY > r.maxY) continue;
-            const kMin = Math.ceil((r.minX - b.maxX) / per);
-            const kMax = Math.floor((r.maxX - b.minX) / per);
-            if (kMin <= kMax) {
-              hits = true;
-              break;
-            }
-          }
-          if (!hits) continue;
-        }
-        const rings = entry.rings;
-        // 湖泊/大陆都是普通元素，不特判中空
-        if (!rings.length && entry.fullWorld && fillOn && !seenFill.has(dp.key)) {
-          seenFill.add(dp.key);
-          const pad = env.periodicTilePadX ?? 0;
-          const alpha = Math.max(0, Math.min(1, fillA * (dp.opacity ?? 1)));
-          // 与 clipToMapFrame 同口径：填充须覆盖「可见带」[fr − clipDxBias]——
-          // 平移后可见带滑出绝对 ±π（副本区域），钉在 ±π 的填充会让副本带丢底色
-          const bias = env.clipDxBias ?? 0;
-          const fx = fr.minX - bias - pad;
-          const fy = fr.minY;
-          const fw = fr.maxX - fr.minX + pad * 2;
-          const fh = fr.maxY - fr.minY;
-          const paint = () => {
-            ctx.save();
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = dp.color;
-            ctx.fillRect(fx, fy, fw, fh);
-            ctx.restore();
-          };
-          if (useGpu) {
-            gpuSpecs.push({
-              rings: [],
-              smooth: sm,
-              copies,
-              fullFrameFill: { color: dp.color, alpha, minX: fx, maxX: fx + fw, minY: fy, maxY: fy + fh },
-            });
-            canvasFallbacks.push(paint);
-          } else {
-            paint();
-          }
-        }
-        if (!rings.length) continue;
-        const prepared = preparePieces(rings, fr, entry.poles);
-        if (!prepared.length) continue;
-
-        const needFill = fillOn && !seenFill.has(dp.key);
-        const needBound = !seenBound.has(dp.key) || sel;
-        if (!needFill && !needBound) continue;
-        if (needFill) seenFill.add(dp.key);
-        if (needBound && !sel) seenBound.add(dp.key);
-
-        const region = regionById.get(rid);
-        const excl =
-          region?.exclusiveColor || defaultExclusiveColor(region?.color ?? '#888888');
-        const stroke = region ? darkenHex(region.color, 0.7) : elColor;
-        // 所有图层统一：Region.cells → fill + border。高度区间/大陆/湖泊都是普通元素，无特判。
-        const fillColor: string | CanvasGradient = dp.color;
-        const drawOpts = {
-          camScale: cam.scale,
-          fillColor,
-          fillAlpha: fillA * (dp.opacity ?? 1),
-          fillOn: needFill,
-          hollow: false,
-          stroke: sel ? defaultExclusiveColor(region?.color ?? '#f0c36a') : (elOn ? stroke : 'transparent'),
-          widthPx: elOn ? bw : 0,
-          shadowColor: excl,
-          shadowWidthPx: shadowW,
-          shadowAlpha: shadowA,
-          smooth: sm,
-          selected: sel,
-          copies,
-          gpuFill: env.gpuFill,
-          cam: env.cam,
-          dpr: env.dpr,
-          drawDx: 0,
-        };
-        const paintPiece = () => {
-          drawPreparedElement(ctx, prepared, drawOpts);
-        };
-        if (useGpu && typeof fillColor === 'string') {
-          // 宽度口径与 drawPreparedElement 内部一致（屏幕像素宽 ÷ 比例 = 用户单位）
-          const bwUser = (Math.max(0, drawOpts.widthPx) * (sel ? 1.6 : 1)) / cam.scale;
-          const swUser = (Math.max(0, drawOpts.shadowWidthPx) * (sel ? 1.15 : 1)) / cam.scale;
-          gpuSpecs.push({
-            rings: prepared,
-            fill: needFill
-              ? { color: fillColor, alpha: Math.max(0, Math.min(1, drawOpts.fillAlpha)) }
-              : undefined,
-            border:
-              bwUser > 0 && drawOpts.stroke !== 'transparent'
-                ? { color: drawOpts.stroke as string, width: bwUser }
-                : undefined,
-            shadow:
-              swUser > 0 && shadowA > 0
-                ? {
-                    color: excl,
-                    width: swUser,
-                    alpha: sel ? Math.min(1, shadowA + 0.12) : shadowA,
-                  }
-                : undefined,
-            smooth: sm,
-            copies,
-          });
-          canvasFallbacks.push(paintPiece);
-        } else {
-          paintPiece();
-        }
-      }
-    }
-    if (useGpu && gpuSpecs.length) {
-      const ok = env.gpuElements!.render(
-        ctx as unknown as Parameters<GpuElementsRenderer['render']>[0],
-        { cam: env.cam, w: env.w, h: env.h, dpr: env.dpr },
-        gpuSpecs,
-      );
-      if (!ok) {
-        for (const f of canvasFallbacks) f();
-      }
-    }
-    void focusLayerId;
-    void pcache;
+    for (const piece of buildPieceParams(env)) paintPieceParams(ctx, piece);
     ctx.restore();
     endWorld(ctx);
   },

@@ -9,8 +9,6 @@ import { styleById } from '../core/styles';
 import { getProjCache } from './projCache';
 import { getRegionIndex } from '../core/index/regionIndex';
 import { defaultPipeline, type RenderEnv, type RenderLayer } from './layers';
-import type { GpuFillRenderer } from './gpuFill';
-import type { GpuElementsRenderer } from './gpu/gpuElements';
 import { worldCopyDxs } from './space';
 import { drawPeriodicStatic } from './staticLayerCache';
 
@@ -78,26 +76,20 @@ export function drawWorld(
     fillStyle?: import('../core/layer/style').ElementStyle;
     styleOf?: (layerId: string) => import('../core/layer/style').ElementStyle;
     borderStyle?: import('../core/types').LayerRenderConfig;
-    /** P1 静态层合成缓存（默认开；路径编辑关） */
+    /** P1 静态层合成缓存（默认开；路径编辑关；GL 直绘时不走烘焙） */
     staticCache?: boolean;
     /** 平移/缩放中：跳过脏区域重烘焙（贴图 1:1 显示，不拉伸） */
     isDragging?: boolean;
-    /** GPU 填充后端（可选；缺省回退 Canvas2D evenodd） */
-    gpuFill?: GpuFillRenderer;
-    /** GPU 元素后端（RegionMesh）；缺省 Canvas2D */
-    gpuElements?: GpuElementsRenderer | null;
+    /** GL 直绘场景（bg/cellsMesh/elements 三通道）；返回 true = 已绘，2D 只画余下层（透明底） */
+    glScene?: {
+      render(env: RenderEnv, channels: { cellsMesh: boolean; elements: boolean }): boolean;
+    };
   },
 ): void {
+  const drawT0 = performance.now();
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
-  // 每帧先清屏铺海色底：贴图/图层未覆盖处不得留上一帧残影
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.restore();
   const style = styleById(opts?.styleId ?? 'dark');
-  ctx.fillStyle = style.ocean;
-  ctx.fillRect(0, 0, w, h);
   const proj = opts?.projection ?? 'mercator';
   const pp = opts?.projParams ?? defaultProjParams();
   const contentOffsetX = opts?.contentOffsetX ?? 0;
@@ -155,21 +147,36 @@ export function drawWorld(
     styleOf: opts?.styleOf,
     borderStyle: opts?.borderStyle,
     isDragging: opts?.isDragging,
-    gpuFill: opts?.gpuFill,
-    gpuElements: opts?.gpuElements,
   };
 
   const pipeline = opts?.pipeline ?? defaultPipeline;
+  const staticNames = new Set(['bg', 'cellsMesh', 'elements']);
+  // GL 直绘：bg/cellsMesh/elements 由 GL 画布逐帧直绘（相机 uniform，无烘焙/无 drawImage）；
+  // 返回 true 时 2D 画布只画余下层（透明底），底色在 GL 画布上
+  const glReady = opts?.glScene
+    ? opts.glScene.render(env, {
+        cellsMesh: pipeline.some((l) => l.name === 'cellsMesh'),
+        elements: pipeline.some((l) => l.name === 'elements'),
+      })
+    : false;
+  // 每帧先清屏：贴图/图层未覆盖处不得留上一帧残影
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
+  if (!glReady) {
+    ctx.fillStyle = style.ocean;
+    ctx.fillRect(0, 0, w, h);
+  }
 
   // A cylindrical map bakes one complete period; non-periodic/oversized views draw directly.
-  // 周期贴图：bg + cellsMesh + elements → drawImage 显示（缩放/拖动/平移用）
+  // 周期贴图：bg + cellsMesh + elements → drawImage 显示（缩放/拖动/平移用；GL 直绘不烘焙）
   // 局部重绘：样式/动作用，只更新贴图脏区域（不破坏周期贴图）
-  const useStatic = opts?.staticCache !== false && !opts?.singleWorldCopy;
-  const staticNames = new Set(['bg', 'cellsMesh', 'elements']);
+  const useStatic = !glReady && opts?.staticCache !== false && !opts?.singleWorldCopy;
   const staticLayers = useStatic
     ? pipeline.filter((l) => staticNames.has(l.name))
     : [];
-  const rest = useStatic
+  const rest = useStatic || glReady
     ? pipeline.filter((l) => !staticNames.has(l.name))
     : pipeline;
 
@@ -202,6 +209,17 @@ export function drawWorld(
     }
   }
   env.drawDx = contentOffsetX;
+  // 帧计时（两后端同一咽喉点，A/B 可比）：环形样本 + 帧计数常驻 window，验收/回归用
+  const g = globalThis as unknown as {
+    __drawMs?: number;
+    __drawSamples?: number[];
+    __drawCount?: number;
+  };
+  const ms = performance.now() - drawT0;
+  g.__drawMs = ms;
+  (g.__drawSamples ??= []).push(ms);
+  if (g.__drawSamples.length > 240) g.__drawSamples.shift();
+  g.__drawCount = (g.__drawCount ?? 0) + 1;
 }
 
 export function screenToWorld(
