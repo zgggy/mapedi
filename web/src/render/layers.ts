@@ -441,8 +441,11 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       stroke: sel ? defaultExclusiveColor(region?.color ?? '#f0c36a') : (elOn ? strokeCol : 'transparent'),
       strokeW,
       shadowColor: excl,
-      shadowW: shadowW > 0 ? (shadowW * (sel ? 1.15 : 1)) / cam.scale : 0,
-      shadowAlpha: shadowA > 0 ? (sel ? Math.min(1, shadowA + 0.12) : shadowA) : 0,
+      // 【阴影暂时停用】（用户决定：架构稳定前显示不渲染阴影）。
+      // 恢复条件：二期架构落地后按同一 Φ 剖面恢复——去掉下面的归零即可
+      // （Canvas 的 clip+blur 与 GL 的场图集实现都还在，只是不被触发）。
+      shadowW: 0,
+      shadowAlpha: 0,
       smooth: sm,
       selected: sel,
       copies,

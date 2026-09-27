@@ -27,7 +27,8 @@ import {
   type PieceParams,
   type RenderEnv,
 } from '../layers';
-import { ringGeo, buildCellMeshStrips } from './geometry';
+import { ringGeo, buildCellMeshStrips, type Pt } from './geometry';
+import { triangulateRings } from './triangulate';
 import { projectionWorldPeriod } from '../../core/project/projections';
 
 interface BBox {
@@ -39,6 +40,11 @@ interface BBox {
 
 /** 一片元素的合并几何（所有环 × 同一 smooth；副本由实例属性施加） */
 interface PieceGeo {
+  /** 填充三角形 [x,y]×3×n（直绘主路径；与 fan 同源采样） */
+  tri: Float32Array | null;
+  /** 剖分面积自检通过；false → stencil 兜底 */
+  triOk: boolean;
+  /** stencil 兜底路径用（外部参考点扇形） */
   fan: Float32Array | null;
   strip: Float32Array | null;
   fadeV: Float32Array | null;
@@ -47,6 +53,16 @@ interface PieceGeo {
 }
 
 type BufRole = 'fan' | 'strip' | 'fade';
+
+/** 阴影场图集 tile：图集坐标 + 屏幕原点（设备像素，GL 左下原点） */
+interface FieldTile {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  sx: number;
+  sy: number;
+}
 
 interface GpuBuf {
   vbo: WebGLBuffer;
@@ -145,9 +161,28 @@ float Phi(float z) {
 }
 void main() {
   float u = abs(vU);
-  float a = (Phi(2.0 - 2.0 * u) - Phi(-2.0 - 2.0 * u)) * uColor.a;
-  // 场值写入并集缓冲（各环以 MAX 归并 = Canvas「描边并集再模糊」语义，禁止叠加求和）
+  float a = Phi(2.0 - 2.0 * u) - Phi(-2.0 - 2.0 * u);
+  // 场值（纯剖面）写入并集缓冲：各环以 MAX 归并 = Canvas「描边并集再模糊」，禁止叠加求和
   outColor = vec4(a, a, a, a);
+}`;
+
+/** 填充 + 内阴影一次合成（X/A 代数 = Canvas「fill→shadow over」精确等价，af<1 也成立） */
+const FRAG_FILL_FIELD = `#version 300 es
+precision highp float;
+uniform vec4 uColor;
+uniform vec4 uShadow;
+uniform sampler2D uField;
+uniform vec4 uTile;
+out vec4 outColor;
+void main() {
+  // uTile = (图集原点 − 屏幕原点, 图集尺寸)：屏幕像素 → 图集 UV（tile 按屏幕包围盒 1:1 烘）
+  vec2 uv = (gl_FragCoord.xy + uTile.xy) / uTile.zw;
+  float s = texture(uField, uv).r * uShadow.a;
+  float af = uColor.a;
+  float A = 1.0 - (1.0 - af) * (1.0 - s);
+  if (A <= 0.0005) discard;
+  vec3 X = (uColor.rgb * af * (1.0 - s) + uShadow.rgb * s) / A;
+  outColor = vec4(X, A);
 }`;
 
 /** 渐隐场 → 阴影合成（RT 的 r = 场强，一次 over 合成到填充上） */
@@ -158,19 +193,21 @@ uniform sampler2D uField;
 uniform vec4 uColor;
 out vec4 outColor;
 void main() {
-  float a = texture(uField, vUv).r;
+  float a = texture(uField, vUv).r * uColor.a;
   outColor = vec4(uColor.rgb, a);
 }`;
 
-/** 设备像素矩形 → 全屏位置 + RT uv（渐隐场 1:1 采样） */
+/** 屏幕矩形 → 位置；图集矩形 → 场 UV（两者 1:1 对应，tile 按屏幕包围盒 1:1 烘） */
 const VERT_SCREEN = `#version 300 es
 layout(location=0) in vec2 aUnit;
 uniform vec4 uRect;
+uniform vec4 uUvRect;
 uniform vec2 uSizeDev;
+uniform vec2 uAtlas;
 out vec2 vUv;
 void main() {
   vec2 p = uRect.xy + aUnit * uRect.zw;
-  vUv = p / uSizeDev;
+  vUv = (uUvRect.xy + aUnit * uUvRect.zw) / uAtlas;
   gl_Position = vec4(p / uSizeDev * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
@@ -184,6 +221,10 @@ interface Program {
   uRect: WebGLUniformLocation | null;
   uSizeDev: WebGLUniformLocation | null;
   uField: WebGLUniformLocation | null;
+  uShadow: WebGLUniformLocation | null;
+  uTile: WebGLUniformLocation | null;
+  uUvRect: WebGLUniformLocation | null;
+  uAtlas: WebGLUniformLocation | null;
 }
 
 function compile(
@@ -239,6 +280,10 @@ function toProgram(gl: WebGL2RenderingContext, prog: WebGLProgram): Program {
     uRect: gl.getUniformLocation(prog, 'uRect'),
     uSizeDev: gl.getUniformLocation(prog, 'uSizeDev'),
     uField: gl.getUniformLocation(prog, 'uField'),
+    uShadow: gl.getUniformLocation(prog, 'uShadow'),
+    uTile: gl.getUniformLocation(prog, 'uTile'),
+    uUvRect: gl.getUniformLocation(prog, 'uUvRect'),
+    uAtlas: gl.getUniformLocation(prog, 'uAtlas'),
   };
 }
 
@@ -293,6 +338,7 @@ export class MapGlRenderer {
   private progStrip: Program;
   private progFade: Program;
   private progComposite: Program;
+  private progFillField: Program;
   private fadeTex: WebGLTexture | null = null;
   private fadeFbo: WebGLFramebuffer | null = null;
   private fadeW = 0;
@@ -317,12 +363,14 @@ export class MapGlRenderer {
     const pStrip = compile(gl, VERT_STRIP, FRAG_COLOR, 'strip');
     const pFade = compile(gl, VERT_FADE, FRAG_FADE, 'fade');
     const pComposite = compile(gl, VERT_SCREEN, FRAG_FADE_COMPOSITE, 'fadeComposite');
-    if (!pFan || !pQuad || !pStrip || !pFade || !pComposite) throw new Error('shader compile failed');
+    const pFillField = compile(gl, VERT_FAN, FRAG_FILL_FIELD, 'fillField');
+    if (!pFan || !pQuad || !pStrip || !pFade || !pComposite || !pFillField) throw new Error('shader compile failed');
     this.progFan = toProgram(gl, pFan);
     this.progQuad = toProgram(gl, pQuad);
     this.progStrip = toProgram(gl, pStrip);
     this.progFade = toProgram(gl, pFade);
     this.progComposite = toProgram(gl, pComposite);
+    this.progFillField = toProgram(gl, pFillField);
 
     this.dxsBuf = gl.createBuffer()!;
     this.quadVbo = gl.createBuffer()!;
@@ -405,7 +453,10 @@ export class MapGlRenderer {
       const pieces = channels.elements ? buildPieceParams(env) : [];
       const tSubmit = performance.now();
       if (channels.cellsMesh && env.showCellMesh) this.drawCellMesh(env);
-      for (const piece of pieces) this.drawPiece(env, piece, s);
+      // 相位 A：阴影场（整帧只绑一次场 FBO；各片的场写进图集独立 tile）
+      const tiles = this.fieldPass(env, pieces);
+      // 相位 B：场景顺序（fill+阴影一次合成 → stroke，后件盖前件）
+      for (const piece of pieces) this.drawPiece(env, piece, s, tiles);
       const tEnd = performance.now();
       const gp = globalThis as unknown as {
         __glParamsMs?: number;
@@ -587,14 +638,16 @@ export class MapGlRenderer {
     const strips: Float32Array[] = [];
     const fadeVs: Float32Array[] = [];
     const fadeIs: Uint32Array[] = [];
+    const fillEntries: { ring: DisplayRing; pts: Pt[] }[] = [];
     let bbox: BBox | null = null;
     for (const ring of rings) {
       if (ring.pts.length < 2) continue;
-      // 与 paintPieceParams 同语义：只有闭合环参与填充奇偶（fan）；开环只描边/阴影
+      // 与 paintPieceParams 同语义：只有闭合环参与填充；开环只描边/阴影
       const fill = ring.closed ? ringGeo(ring, smooth, 'fill') : null;
       const outline = ringGeo(ring, smooth, 'outline');
       const g = fill ?? outline;
       if (g) bbox = unionBox(bbox, g.bbox.minX, g.bbox.maxX, g.bbox.minY, g.bbox.maxY);
+      if (fill?.fillPts && fill.fillPts.length >= 3) fillEntries.push({ ring, pts: fill.fillPts });
       if (fill?.fan) fans.push(fill.fan);
       if (outline?.strip) strips.push(outline.strip);
       if (outline?.fade) {
@@ -603,7 +656,10 @@ export class MapGlRenderer {
       }
     }
     const merged = mergeFade(fadeVs, fadeIs);
+    const tri = triangulateRings(fillEntries);
     const geo: PieceGeo = {
+      tri: tri?.tris ?? null,
+      triOk: !!tri?.areaOk,
       fan: mergeF(fans),
       strip: mergeF(strips),
       fadeV: merged?.v ?? null,
@@ -614,12 +670,159 @@ export class MapGlRenderer {
     return geo;
   }
 
+  /**
+   * 一件元素的整段绘制（fill → 内阴影 → stroke，后件盖前件 = Canvas 同序）。
+   *
+   * 主路径（tri/剖分自检通过且副本不重叠）：**填充三角形直绘**——
+   * 有阴影时 ① 场缓冲：填充三角写 0 + 渐隐条带 MAX 归并（= 描边并集再模糊）
+   * ② 填充三角采样场值一次合成（X/A 代数与 Canvas「fill→shadow over」精确等价）。
+   * 全程无包围盒级 clear/覆盖面/扇形（旧路径的大头），也无 stencil。
+   *
+   * 兜底路径（剖分失败 / 副本几何可能重叠：件宽 ≥ 世界周期）：stencil 奇偶 +
+   * 外部参考点扇形 + 覆盖面 + 渐隐 RT 合成——语义精确（evenodd 含副本重叠不叠色），
+   * 只给罕见件用。
+   */
+  /**
+   * 相位 A：阴影场构建（**整帧只绑一次场 FBO**——FBO 切换在 tiler 上是渲染通道边界，
+   * 每片一切换曾烧掉 ~15ms/帧）。各片的场写进图集的独立 tile（gl.viewport 定位，
+   * 零成本状态切换），tile = 该片屏幕包围盒（含条带外伸）1:1。
+   * 场内容 = 填充三角写 0（覆盖旧场）→ 渐隐条带 MAX 归并（= Canvas「描边并集再模糊」）。
+   * 返回每片的 tile（null = 装箱失败/无阴影 → 场景相位走兜底或无阴影）。
+   */
+  private fieldPass(env: RenderEnv, pieces: PieceParams[]): Map<PieceParams, FieldTile | null> {
+    const out = new Map<PieceParams, FieldTile | null>();
+    const shadowed = pieces.filter(
+      (p) => !p.fullFrame && p.shadowW > 0 && p.shadowAlpha > 0 && p.rings.length,
+    );
+    if (!shadowed.length) return out;
+    const gl = this.gl;
+    const devW = Math.round(env.w * env.dpr);
+    const devH = Math.round(env.h * env.dpr);
+    const scale = env.cam.scale * env.dpr;
+    const halfW = (env.w * env.dpr) / 2;
+    const halfH = (env.h * env.dpr) / 2;
+    // 每片屏幕包围盒（含渐隐条带外伸 ±2.5w + 安全余量）
+    type Item = { piece: PieceParams; w: number; h: number; x: number; y: number };
+    const items: Item[] = [];
+    for (const p of shadowed) {
+      const geo = this.pieceGeo(p.rings, p.smooth);
+      const gbox = geo?.bbox;
+      if (!geo || !gbox || !geo.fadeV || !geo.fadeI || !geo.tri || !geo.triOk) {
+        out.set(p, null);
+        continue;
+      }
+      const margin = 2.6 * p.shadowW + 1 / env.cam.scale;
+      const all = p.copies.length ? p.copies : [0];
+      let minX = Infinity;
+      let maxX = -Infinity;
+      for (const dx of all) {
+        minX = Math.min(minX, gbox.minX + dx);
+        maxX = Math.max(maxX, gbox.maxX + dx);
+      }
+      // 只需覆盖屏幕可见部分（uv 映射以屏幕原点为基准）
+      const x0 = Math.max(0, Math.floor((minX - margin - env.cam.x) * scale + halfW));
+      const x1 = Math.min(devW, Math.ceil((maxX + margin - env.cam.x) * scale + halfW));
+      const y0 = Math.max(0, Math.floor((env.cam.y - (gbox.maxY + margin)) * scale + halfH));
+      const y1 = Math.min(devH, Math.ceil((env.cam.y - (gbox.minY - margin)) * scale + halfH));
+      const w = Math.min(Math.max(1, x1 - x0), 8192);
+      const h = Math.min(Math.max(1, y1 - y0), 8192);
+      if (w <= 0 || h <= 0) {
+        out.set(p, null);
+        continue;
+      }
+      items.push({ piece: p, w, h, x: x0, y: y0 });
+    }
+    if (!items.length) return out;
+    // 货架装箱（按高降序）；图集只增不缩
+    items.sort((a, b) => b.h - a.h);
+    let texW = 1024;
+    let texH = 1024;
+    const pack = (): Map<PieceParams, FieldTile> | null => {
+      const res = new Map<PieceParams, FieldTile>();
+      let shelfY = 0;
+      let shelfH = 0;
+      let cursorX = 0;
+      for (const it of items) {
+        if (it.w > texW || it.h > texH) return null;
+        if (cursorX + it.w > texW) {
+          shelfY += shelfH;
+          shelfH = 0;
+          cursorX = 0;
+        }
+        if (shelfY + it.h > texH) return null;
+        res.set(it.piece, { x: cursorX, y: shelfY, w: it.w, h: it.h, sx: it.x, sy: it.y });
+        cursorX += it.w;
+        shelfH = Math.max(shelfH, it.h);
+      }
+      return res;
+    };
+    let tiles = pack();
+    let grows = 0;
+    while (!tiles && grows++ < 6 && (texW < 8192 || texH < 8192)) {
+      const nw = texW <= texH ? Math.min(8192, texW * 2) : texW;
+      const nh = texW <= texH ? texH : Math.min(8192, texH * 2);
+      if (nw === texW && nh === texH) break;
+      texW = nw;
+      texH = nh;
+      tiles = pack();
+    }
+    if (!tiles) {
+      for (const it of items) out.set(it.piece, null);
+      return out;
+    }
+    this.ensureFadeRT(texW, texH);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fadeFbo);
+    // tiler 提示：附件旧内容无用 → 跳过 load（tile 每帧全覆盖重写）
+    gl.invalidateFramebuffer(gl.FRAMEBUFFER, [gl.COLOR_ATTACHMENT0]);
+    gl.disable(gl.STENCIL_TEST);
+    gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+    gl.scissor(0, 0, texW, texH);
+    for (const [piece, tile] of tiles) {
+      out.set(piece, tile);
+      const geo = this.pieceGeo(piece.rings, piece.smooth);
+      if (!geo?.fadeV || !geo.fadeI) continue;
+      const copies = piece.copies.length ? piece.copies : [0];
+      this.setDxs(copies);
+      gl.viewport(tile.x, tile.y, tile.w, tile.h);
+      gl.scissor(tile.x, tile.y, tile.w, tile.h);
+      // ① 场清零：三角形写 0（光栅=填充面积）；无三角形的兜底件退化为 tile 域 clear
+      gl.blendFunc(gl.ONE, gl.ZERO);
+      if (geo.tri) {
+        gl.useProgram(this.progFan.prog);
+        if (this.progFan.uColor) gl.uniform4f(this.progFan.uColor, 0, 0, 0, 0);
+        const tbuf = this.bufFor(geo.tri, 'fan');
+        gl.bindVertexArray(tbuf.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, tbuf.count, copies.length);
+        gl.bindVertexArray(null);
+      } else {
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+      // ② 渐隐条带 MAX 归并（= Canvas「描边并集再模糊」语义，禁止叠加求和）
+      gl.blendEquationSeparate(gl.MAX, gl.MAX);
+      gl.blendFunc(gl.ONE, gl.ONE); // MIN/MAX 方程下混合因子被忽略
+      const fbuf = this.bufFor(geo.fadeV, 'fade', geo.fadeI);
+      gl.useProgram(this.progFade.prog);
+      if (this.progFade.uHalfW) gl.uniform1f(this.progFade.uHalfW, piece.shadowW);
+      gl.bindVertexArray(fbuf.vao);
+      gl.drawElementsInstanced(gl.TRIANGLES, fbuf.count, gl.UNSIGNED_INT, 0, copies.length);
+      gl.bindVertexArray(null);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.viewport(0, 0, devW, devH);
+    return out;
+  }
+
   private drawPiece(
     env: RenderEnv,
     piece: PieceParams,
     frame: { x: number; y: number; w: number; h: number },
+    tiles: Map<PieceParams, FieldTile | null>,
   ): void {
     const gl = this.gl;
+    const devW = Math.round(env.w * env.dpr);
     const devH = Math.round(env.h * env.dpr);
     if (piece.fullFrame) {
       const f = piece.fullFrame;
@@ -629,7 +832,8 @@ export class MapGlRenderer {
       return;
     }
     const geo = this.pieceGeo(piece.rings, piece.smooth);
-    if (!geo || !geo.bbox) return;
+    const gbox = geo?.bbox;
+    if (!geo || !gbox) return;
     const shadowOn = piece.shadowW > 0 && piece.shadowAlpha > 0;
     const strokeOn = piece.strokeW > 0 && piece.stroke !== 'transparent';
     const strokeC = strokeOn ? cssToRgba(piece.stroke) : null;
@@ -637,116 +841,105 @@ export class MapGlRenderer {
     const fillC = piece.fillOn ? cssToRgba(typeof piece.fillColor === 'string' ? piece.fillColor : '') : null;
     if (!piece.fillOn && !shadowOn && !strokeOn) return;
     if ((piece.fillOn && !fillC) || (shadowOn && !shadowC) || (strokeOn && !strokeC)) {
-      // CanvasGradient 等 GL 不可表达的样式：整帧回退 Canvas2D（显示不降级）
       this.failed = true;
       pushErr(`piece ${piece.key}: 非纯色样式，回退 Canvas2D`);
       return;
     }
 
-    const copies = piece.copies.length ? piece.copies : [0];
+    const scale = env.cam.scale;
+    const viewL = env.cam.x - env.w / 2 / scale;
+    const viewR = env.cam.x + env.w / 2 / scale;
+    const all = piece.copies.length ? piece.copies : [0];
+    const copies = all.filter((dx) => gbox.maxX + dx > viewL - 1e-9 && gbox.minX + dx < viewR + 1e-9);
+    if (!copies.length) return;
     let minDx = Infinity;
     let maxDx = -Infinity;
     for (const dx of copies) {
       if (dx < minDx) minDx = dx;
       if (dx > maxDx) maxDx = dx;
     }
-    const margin = Math.max(shadowOn ? 2.6 * piece.shadowW : 0, strokeOn ? piece.strokeW : 0)
-      + 1 / env.cam.scale;
-    const bb: BBox = {
-      minX: geo.bbox.minX + minDx - margin,
-      maxX: geo.bbox.maxX + maxDx + margin,
-      minY: geo.bbox.minY - margin,
-      maxY: geo.bbox.maxY + margin,
-    };
-    const sc = this.pieceScissor(env, bb, frame, devH);
+    const period = projectionWorldPeriod(env.proj);
+    const overlap = period !== null && gbox.maxX - gbox.minX >= period;
+    const tile = tiles.get(piece);
+    const useField = shadowOn && shadowC && !!tile;
+    const fast = !!geo.tri && geo.triOk && (!shadowOn || useField);
 
-    if (piece.fillOn || shadowOn) {
-      // stencil 奇偶 = evenodd（含副本重叠不叠色）；fan 走 INVERT 累计翻转
-      gl.enable(gl.STENCIL_TEST);
-      gl.scissor(sc.x, sc.y, sc.w, sc.h);
-      gl.stencilMask(0xff);
-      gl.clearStencil(0);
-      gl.clear(gl.STENCIL_BUFFER_BIT);
-      gl.colorMask(false, false, false, false);
-      gl.stencilFunc(gl.ALWAYS, 0, 0xff);
-      gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+    if (fast) {
+      const triBuf = this.bufFor(geo.tri!, 'fan');
+      const af = piece.fillOn && fillC ? Math.max(0, Math.min(1, piece.fillAlpha)) * fillC[3] : 0;
       this.setDxs(copies);
-      if (geo.fan) {
-        const buf = this.bufFor(geo.fan, 'fan');
-        gl.useProgram(this.progFan.prog);
-        gl.bindVertexArray(buf.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, buf.count, copies.length);
+      if (overlap) {
+        const margin = Math.max(shadowOn ? 2.6 * piece.shadowW : 0, piece.strokeW) + 1 / env.cam.scale;
+        const bbx: BBox = {
+          minX: gbox.minX + minDx - margin,
+          maxX: gbox.maxX + maxDx + margin,
+          minY: gbox.minY - margin,
+          maxY: gbox.maxY + margin,
+        };
+        const scx = this.pieceScissor(env, bbx, frame, devH);
+        gl.enable(gl.STENCIL_TEST);
+        gl.scissor(scx.x, scx.y, scx.w, scx.h);
+        gl.stencilMask(0xff);
+        gl.clearStencil(0);
+        gl.clear(gl.STENCIL_BUFFER_BIT);
+        gl.colorMask(false, false, false, false);
+        gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+        gl.useProgram(this.progFan.prog); // 必须设程序：否则沿用上一件的着色器，奇偶画的是垃圾几何
+        gl.bindVertexArray(triBuf.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, triBuf.count, copies.length);
+        gl.colorMask(true, true, true, true);
+        gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
       }
-      gl.colorMask(true, true, true, true);
-      gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
-      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
-      if (piece.fillOn && fillC) {
-        this.drawQuad(
-          geo.bbox.minX + minDx,
-          geo.bbox.minY,
-          geo.bbox.maxX - geo.bbox.minX + (maxDx - minDx),
-          geo.bbox.maxY - geo.bbox.minY,
-          fillC[0],
-          fillC[1],
-          fillC[2],
-          Math.max(0, Math.min(1, piece.fillAlpha)) * fillC[3],
-        );
-      }
-      if (shadowOn && shadowC && geo.fadeV && geo.fadeI) {
-        // 内阴影 = 两步：① 各环渐隐场以 MAX 归并进场缓冲（= Canvas「描边并集再模糊」，
-        // 禁止多环条带叠加求和）② 场强一次 over 合成到填充上（fill stencil 仍裁外侧）
-        const devW = Math.round(env.w * env.dpr);
-        const devH = Math.round(env.h * env.dpr);
-        this.ensureFadeRT(devW, devH);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fadeFbo);
-        gl.viewport(0, 0, devW, devH);
-        gl.scissor(sc.x, sc.y, sc.w, sc.h);
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.blendEquationSeparate(gl.MAX, gl.MAX);
-        gl.blendFunc(gl.ONE, gl.ONE); // MIN/MAX 方程下混合因子被忽略
-        const buf = this.bufFor(geo.fadeV, 'fade', geo.fadeI);
-        gl.useProgram(this.progFade.prog);
-        if (this.progFade.uHalfW) gl.uniform1f(this.progFade.uHalfW, piece.shadowW);
-        if (this.progFade.uColor) {
-          gl.uniform4f(
-            this.progFade.uColor,
-            shadowC[0],
-            shadowC[1],
-            shadowC[2],
-            piece.shadowAlpha * shadowC[3],
-          );
+      gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.scissor(frame.x, frame.y, frame.w, frame.h);
+      if (useField) {
+        // 填充 + 内阴影一次合成（X/A = Canvas fill→shadow over 精确等价）
+        gl.useProgram(this.progFillField.prog);
+        if (this.progFillField.uColor && fillC) {
+          gl.uniform4f(this.progFillField.uColor, fillC[0], fillC[1], fillC[2], af);
+        } else if (this.progFillField.uColor) {
+          gl.uniform4f(this.progFillField.uColor, 0, 0, 0, 0);
         }
-        gl.bindVertexArray(buf.vao);
-        gl.drawElementsInstanced(gl.TRIANGLES, buf.count, gl.UNSIGNED_INT, 0, copies.length);
-        gl.bindVertexArray(null);
-        // ② 合成回主缓冲（设备像素 1:1 采样）
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, devW, devH);
-        gl.scissor(sc.x, sc.y, sc.w, sc.h);
-        gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.useProgram(this.progComposite.prog);
-        if (this.progComposite.uRect) gl.uniform4f(this.progComposite.uRect, sc.x, sc.y, sc.w, sc.h);
-        if (this.progComposite.uSizeDev) gl.uniform2f(this.progComposite.uSizeDev, devW, devH);
-        if (this.progComposite.uColor) {
-          gl.uniform4f(this.progComposite.uColor, shadowC[0], shadowC[1], shadowC[2], 1);
+        if (this.progFillField.uShadow && shadowC) {
+          gl.uniform4f(this.progFillField.uShadow, shadowC[0], shadowC[1], shadowC[2], piece.shadowAlpha * shadowC[3]);
         }
-        if (this.progComposite.uField) {
+        if (this.progFillField.uTile) {
+          gl.uniform4f(this.progFillField.uTile, tile!.x - tile!.sx, tile!.y - tile!.sy, this.fadeW || 1, this.fadeH || 1);
+        }
+        if (this.progFillField.uField) {
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, this.fadeTex);
-          gl.uniform1i(this.progComposite.uField, 0);
+          gl.uniform1i(this.progFillField.uField, 0);
         }
-        gl.bindVertexArray(this.quadVao);
-        gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+        gl.bindVertexArray(triBuf.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, triBuf.count, copies.length);
+        gl.bindVertexArray(null);
+      } else if (piece.fillOn && fillC) {
+        gl.useProgram(this.progFan.prog);
+        if (this.progFan.uColor) gl.uniform4f(this.progFan.uColor, fillC[0], fillC[1], fillC[2], af);
+        gl.bindVertexArray(triBuf.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, triBuf.count, copies.length);
         gl.bindVertexArray(null);
       }
-      gl.disable(gl.STENCIL_TEST);
+      if (overlap) gl.disable(gl.STENCIL_TEST);
     } else {
-      this.setDxs(copies);
+      this.drawPieceStencil(env, piece, geo, frame, copies, minDx, maxDx, tiles.get(piece) ?? null, {
+        devW,
+        devH,
+        fillC,
+        shadowC,
+        strokeC,
+        shadowOn,
+        strokeOn,
+      });
     }
 
     if (strokeOn && strokeC && geo.strip) {
+      gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       const buf = this.bufFor(geo.strip, 'strip');
       gl.useProgram(this.progStrip.prog);
       if (this.progStrip.uHalfW) gl.uniform1f(this.progStrip.uHalfW, piece.strokeW / 2);
@@ -757,7 +950,98 @@ export class MapGlRenderer {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, buf.count, copies.length);
       gl.bindVertexArray(null);
     }
-    // 恢复外框 scissor（下一片自行再收窄）
+    gl.scissor(frame.x, frame.y, frame.w, frame.h);
+  }
+
+  /** 三角化自检失败时的语义兜底：stencil INVERT 扇形 + 覆盖面 + 渐隐场合成（罕见件） */
+  private drawPieceStencil(
+    env: RenderEnv,
+    piece: PieceParams,
+    geo: PieceGeo,
+    frame: { x: number; y: number; w: number; h: number },
+    copies: number[],
+    minDx: number,
+    maxDx: number,
+    tile: FieldTile | null,
+    s: {
+      devW: number;
+      devH: number;
+      fillC: [number, number, number, number] | null;
+      shadowC: [number, number, number, number] | null;
+      strokeC: [number, number, number, number] | null;
+      shadowOn: boolean;
+      strokeOn: boolean;
+    },
+  ): void {
+    void s.strokeC;
+    void s.strokeOn;
+    const gbox = geo.bbox;
+    if (!gbox) return;
+    const gl = this.gl;
+    const margin = Math.max(s.shadowOn ? 2.6 * piece.shadowW : 0, piece.strokeW) + 1 / env.cam.scale;
+    const bb: BBox = {
+      minX: gbox.minX + minDx - margin,
+      maxX: gbox.maxX + maxDx + margin,
+      minY: gbox.minY - margin,
+      maxY: gbox.maxY + margin,
+    };
+    const sc = this.pieceScissor(env, bb, frame, s.devH);
+    gl.enable(gl.STENCIL_TEST);
+    gl.scissor(sc.x, sc.y, sc.w, sc.h);
+    gl.stencilMask(0xff);
+    gl.clearStencil(0);
+    gl.clear(gl.STENCIL_BUFFER_BIT);
+    gl.colorMask(false, false, false, false);
+    gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+    this.setDxs(copies);
+    if (geo.fan) {
+      const buf = this.bufFor(geo.fan, 'fan');
+      gl.useProgram(this.progFan.prog);
+      gl.bindVertexArray(buf.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, buf.count, copies.length);
+      gl.bindVertexArray(null);
+    }
+    gl.colorMask(true, true, true, true);
+    gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    if (piece.fillOn && s.fillC) {
+      this.drawQuad(
+        gbox.minX + minDx,
+        gbox.minY,
+        gbox.maxX - gbox.minX + (maxDx - minDx),
+        gbox.maxY - gbox.minY,
+        s.fillC[0],
+        s.fillC[1],
+        s.fillC[2],
+        Math.max(0, Math.min(1, piece.fillAlpha)) * s.fillC[3],
+      );
+    }
+    if (s.shadowOn && s.shadowC && tile) {
+      // 阴影场已在相位 A 建好（图集 tile）；这里只做场→填充的合成（stencil 仍裁到填充）
+      gl.useProgram(this.progComposite.prog);
+      gl.scissor(sc.x, sc.y, sc.w, sc.h);
+      if (this.progComposite.uRect) gl.uniform4f(this.progComposite.uRect, sc.x, sc.y, sc.w, sc.h);
+      if (this.progComposite.uUvRect) {
+        gl.uniform4f(this.progComposite.uUvRect, tile.x + (sc.x - tile.sx), tile.y + (sc.y - tile.sy), sc.w, sc.h);
+      }
+      if (this.progComposite.uSizeDev) gl.uniform2f(this.progComposite.uSizeDev, s.devW, s.devH);
+      if (this.progComposite.uAtlas) gl.uniform2f(this.progComposite.uAtlas, this.fadeW || 1, this.fadeH || 1);
+      if (this.progComposite.uColor) {
+        gl.uniform4f(this.progComposite.uColor, s.shadowC[0], s.shadowC[1], s.shadowC[2], piece.shadowAlpha * s.shadowC[3]);
+      }
+      if (this.progComposite.uField) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.fadeTex);
+        gl.uniform1i(this.progComposite.uField, 0);
+      }
+      gl.bindVertexArray(this.quadVao);
+      gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+      gl.bindVertexArray(null);
+    }
+    gl.disable(gl.STENCIL_TEST);
     gl.scissor(frame.x, frame.y, frame.w, frame.h);
   }
 
@@ -794,8 +1078,16 @@ export class MapGlRenderer {
       this.meshCache.set(env.pcache as unknown as object, entry);
     }
     if (!entry.buf) return;
-    const copies = env.worldDxs?.length ? env.worldDxs : [env.contentOffsetX ?? 0];
+    const scale = env.cam.scale;
+    const viewL = env.cam.x - env.w / 2 / scale;
+    const viewR = env.cam.x + env.w / 2 / scale;
+    const all = env.worldDxs?.length ? env.worldDxs : [env.contentOffsetX ?? 0];
+    const bb = env.pcache.worldBBox;
+    const copies = all.filter((dx) => bb.maxX + dx > viewL && bb.minX + dx < viewR);
+    if (!copies.length) return;
     this.setDxs(copies);
+    gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(this.progStrip.prog);
     if (this.progStrip.uHalfW) {
       gl.uniform1f(this.progStrip.uHalfW, Math.max(stroke.width, 0.35) / env.cam.scale / 2);

@@ -20,7 +20,9 @@ export interface Pt {
 }
 
 export interface RingGeo {
-  /** fill：外部参考点三角扇 (ref, p_i, p_j)×n，stride 6 */
+  /** fill 模式采样点（三角化与 fan 的同一几何来源） */
+  fillPts: Pt[] | null;
+  /** fill：外部参考点三角扇 (ref, p_i, p_j)×n，stride 6（stencil 兜底路径用） */
   fan: Float32Array | null;
   /** 描边条带 [baseX, baseY, dirX, dirY]×6/段；顶点 = base + dir·uHalfW */
   strip: Float32Array | null;
@@ -158,6 +160,7 @@ export function ringGeo(
     if (p.y > maxY) maxY = p.y;
   }
   const geo: RingGeo = {
+    fillPts: mode === 'fill' ? pts : null,
     fan: mode === 'fill' ? buildFan(pts) : null,
     strip: mode === 'outline' ? buildStripLayout(pts, willClose && pts.length >= 3) : null,
     fade: mode === 'outline' ? buildFadeRibbon(pts) : null,
