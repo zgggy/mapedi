@@ -10,6 +10,44 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-27，第三十四次）— 面板/按钮统一重构（PanelShell + ItemButton + Dock + 长按拖动）+ 修图层错位回归**
+
+- **用户报告回归**：图层显示错位、图层内容全部不显示。
+  **根因**：上一轮模板 splice 丢了 `.lp-head` 的 `</div>` → hint/`.list` 被嵌进 `.lp-head`（flex 横排），
+  列表被挤成 16px 并被 `overflow:hidden` 裁掉（行压成 2px 宽、x≈280 溢出面板）。**教训**：
+  模板 splice 后除 svelte-check 外还要量几何（DOM 在 ≠ 布局对）；验证只查 DOM 结构会漏掉这类回归。
+- **附带运行时问题（见一例修一例）**：`main.ts` 的「启动中…」占位从不移除（Svelte5 `mount` 是**追加**
+  不是清空）→ 修：mount 前 `target.innerHTML = ''`。
+- **交互契约（用户定）**：
+  1. 每个 button = 显隐眼睛（指示或切换）+ logo（图层 emoji/元素色）+ 名称 + 可选简介 + 可选控件
+     （高度元素 = 滑块「区间=元素高度范围」+ 右侧当前值；其他元素暂无控件）；
+  2. 图层信息 / 图层显示参数 / 元素信息 与图层同级：独立面板，可收起展开；
+  3. 全部面板用统一壳（header 标题**居中**、**收起按钮在最左**、下方内容区）；
+  4. 收起 = 面板消失为屏幕**左下角 Dock 图标**（从左往右排列；黄框=打开，无黄框=收起；点击切换）；
+  5. button **不可直接拖动**：长按 → 背景进度条从左到右填满 → 解锁拖动；拖动时其他元素让开成缝，
+     松手触发新顺序重算；进度未满松手=单击，进度未满位移=取消。
+- **实现**：
+  - 新增 `PanelShell.svelte`（统一壳）、`PanelDock.svelte`（左下图标栏）、`ItemButton.svelte`
+    （统一行按钮 + 长按进度条 + 拖动回调）、`EntityInfoBody.svelte`（信息内容体，从弹窗抽出）、
+    `LayerInfoPanel.svelte` / `ElementInfoPanel.svelte`（PanelShell 化信息面板，跟随焦点图层/选中元素）。
+  - `LayersPanel` / `WorkspaceDrawer` 重写为 PanelShell + ItemButton 行；拖动改长按解锁；
+    让位 = `gap-above/gap-below` 边距动画（替代 drop-line）；nest 高亮保留；松手走
+    `editor.dragLayer/dragRegion` 重排重算。区间滑块语义不变（拖滑块=选中+涂改值）。
+  - `DisplayStylePanel` 去掉自己的浮动壳/×，接 PanelShell；双击图层行 = 打开显示参数面板。
+  - App：`panels` 五态 + Dock 接线；元素信息/图层信息由**选中驱动**（行内 ℹ 按钮删除）；
+    行动区只留 ▸ 展开 / 🗑 删除（在 button 外）。
+  - 删孤儿：`EntityBox` / `EntityRowShell` / `EntityInfoModal` / `WorkspacePanel` / `PanelHeader`。
+- **验证（浏览器，100k 世界）**：回归修复（图层行 182px 名字可见）；「启动中…」残留 0；
+  header 收起钮最左+标题居中 ✓；Dock 5 图标切换开关 ✓；高度行（简介=区间+滑块+当前值）✓；
+  普通元素行（色块+名字+3123c 简介+无滑块+眼睛仅指示）✓；拖滑块 -45=选中+涂改值 ✓；
+  选中即绘制/空白退出 ✓；眼睛显隐 ✓；双击开显示参数 ✓；长按拖动（300ms 进度 92/182 → 解锁出
+  ghost → 环境/植物让位开缝 → 松手「高度」移到「环境」后）✓；运行时错误 0。
+- **待办**：① 死代码整包清理（Sheets/Rails/GenDock/ViewDock/ProjectPanel/SideDrawer/LayersDrawer/
+  LayerStyleBar/HeightIntervalList/SliderField/workbench 五件 + core/nature、political、relief、
+  ring/trace、render/globeTexture——引用图确认不可达，但属既有遗留，单独清包防误伤测试引用；
+  ElementList 与 WorkspaceDrawer 滑块是双份实现，删 ElementList）；② 沿上轮：拓扑翻转增量连通
+  分量、撤销/重做一致性、生成小头、100k 网格视口裁剪、阴影恢复走场图集。
+
 **本轮已处理（2026-09-27，第三十三次）— UI 交互重构（眼睛显隐 / 选中即绘制 / 悬浮图层面板）**
 
 - **用户定交互契约**：① 工作区**删除全部拖动功能**；② 滑块放进 button 里，**只有选中行是黄色外框**；

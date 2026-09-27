@@ -8,11 +8,13 @@
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
-  import WorkspacePanel from './ui/shell/WorkspacePanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
+  import LayerInfoPanel from './ui/shell/LayerInfoPanel.svelte';
+  import ElementInfoPanel from './ui/shell/ElementInfoPanel.svelte';
   import StatusBar from './ui/shell/StatusBar.svelte';
   import BrushHud from './ui/shell/BrushHud.svelte';
   import DisplayStylePanel from './ui/shell/DisplayStylePanel.svelte';
+  import PanelDock from './ui/shell/PanelDock.svelte';
   import ValidatorPanel from './ui/shell/ValidatorPanel.svelte';
   import { setSuzerain, toggleEnemy, toggleAlly } from './core/diplomacy';
 
@@ -27,22 +29,33 @@
   let fps = $state(0);
   let zoomScale = $state(1);
   let viewFade = $state(1);
-  let infoRegionId = $state<string | null>(null);
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
   let styleLayerId = $state<string | null>(null);
-  let lastFocusForStyle = '';
-  $effect(() => {
-    const f = focusLayer;
-    if (!styleLayerId) {
-      lastFocusForStyle = f;
-      return;
-    }
-    if (f && f !== lastFocusForStyle) {
-      lastFocusForStyle = f;
-      styleLayerId = f;
-    }
+
+  /** 五个同级面板：Dock 图标切换；黄框 = 打开 */
+  let panels = $state({
+    layers: true,
+    workspace: false,
+    layerInfo: false,
+    style: false,
+    elementInfo: false,
   });
+
+  const dockItems = $derived([
+    { id: 'layers', icon: '📚', title: '图层', open: panels.layers },
+    { id: 'workspace', icon: '🗂', title: '工作区', open: panels.workspace },
+    { id: 'layerInfo', icon: 'ℹ', title: '图层信息', open: panels.layerInfo },
+    { id: 'style', icon: '🎨', title: '显示参数', open: panels.style },
+    { id: 'elementInfo', icon: '📝', title: '元素信息', open: panels.elementInfo },
+  ]);
+
+  function togglePanel(id: string) {
+    const key = id as keyof typeof panels;
+    panels[key] = !panels[key];
+    if (key === 'style' && panels.style && !styleLayerId) styleLayerId = focusLayer;
+  }
+
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
 
@@ -51,16 +64,10 @@
   const draw = $derived(editor.draw);
   const selectedRegionId = $derived(editor.selectedRegionId);
   const newName = $derived(editor.newName);
-  const annexPick = $derived(editor.annexPick);
   const status = $derived(editor.status);
   const issues = $derived(editor.issues);
   const showValidator = $derived(editor.showValidator);
-  /** 图层父子关系：childId → parentId */
-  const layerParentOf = $derived(
-    world
-      ? Object.fromEntries(world.layers.filter((l) => l.parentLayerId).map((l) => [l.id, l.parentLayerId!]))
-      : {},
-  );
+  const styleLayer = $derived(styleLayerId ?? focusLayer);
 
   function switchView(m: ViewMode) {
     if (m === shell.viewMode) return;
@@ -70,17 +77,6 @@
     requestAnimationFrame(() => {
       viewFade = 1;
     });
-  }
-
-  function selectLayer(id: string) {
-    editor.focusLayer = id;
-    editor.selectedRegionId = null;
-    // 路/航/河：只切换图层，不自动进绘制；在工作区选中路径后再编辑
-    if (editor.draw.active && editor.draw.targetRegionId === '__path__') {
-      editor.draw = { ...editor.draw, active: false, targetRegionId: null };
-    }
-    editor.notify();
-    shell.workspaceOpen = true;
   }
 
   /** 拖拽：nest/gap/root 由编辑器统一处理（显示父子，无包含校验） */
@@ -145,7 +141,6 @@
 
   $effect(() => {
     if (!editor.projectEpoch) return;
-    infoRegionId = null;
     expandedIds = new Set();
     hover = null;
   });
@@ -174,7 +169,7 @@
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
-          workspaceOpen={shell.workspaceOpen}
+          workspaceOpen={panels.workspace}
           highlightRegionId={draw.active
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}
@@ -274,7 +269,7 @@
   />
 
   <LayersPanel
-    bind:open={shell.layersOpen}
+    open={panels.layers}
     {world}
     {focusLayer}
     leftW={shell.leftW}
@@ -284,163 +279,167 @@
         editor.clearLayerSelection();
         return;
       }
-      // 再次点击已选中图层 → 开关右侧工作区
-      if (editor.focusLayer === id) {
-        shell.workspaceOpen = !shell.workspaceOpen;
-        editor.notify();
-        return;
-      }
       editor.selectLayerTop(id);
     }}
     onToggleVisible={(id) => editor.toggleLayerVisible(id)}
     onDrawLayer={(id) => {
       editor.focusLayerForDraw(id);
-      shell.workspaceOpen = true;
+      panels.workspace = true;
     }}
     onStyleLayer={(id) => {
-      if (styleLayerId === id) {
-        styleLayerId = null;
-      } else {
-        styleLayerId = id;
-        editor.focusLayer = id;
-        lastFocusForStyle = id;
-      }
+      styleLayerId = id;
+      editor.focusLayer = id;
+      panels.style = true;
     }}
     onDragLayer={handleLayerDrag}
     onAddLayer={() => editor.addLayer()}
     onNewName={(v) => (editor.newName = v)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
+    onCollapse={() => (panels.layers = false)}
   />
 
-  <WorkspacePanel bind:open={shell.workspaceOpen} bind:width={shell.rightW}>
-    <WorkspaceDrawer
-      {world}
-      {focusLayer}
-      {selectedRegionId}
-      {newName}
-      {infoRegionId}
-      bind:expandedIds
-      drawActive={draw.active}
-      brushRadius={draw.radiusDeg}
-      onSelect={(id) => {
-        // 空白点击（id=null）= 无选中元素 = 退出绘制（与完成/Esc 同效）
-        if (id === null) {
-          editor.selectedRegionId = null;
-          editor.notify();
-          return;
-        }
-        // 高度：选中区间 = 工作区间（与其它层同一列表）
-        if (focusLayer === 'height') {
-          editor.setHeightInterval(id);
-          editor.selectedRegionId = id;
-          editor.notify();
-          return;
-        }
-        editor.selectedRegionId = id;
-        // 工作区选中路径元素 → 进入该条曲线的编辑（控件/加点）
-        const path = world?.paths?.find((p) => p.id === id);
-        if (path) {
-          editor.draw = {
-            ...editor.draw,
-            active: true,
-            targetRegionId: id,
-            tool: 'brush',
-            addMode: true,
-          };
-          editor.status = `编辑「${path.name}」：拖控制点 / 点曲线加点 / Esc 退出`;
-          editor.notify();
-          return;
-        }
-        // 选中图层元素：边界高亮 + 该层置顶显示
-        const reg = world?.regions?.find((r) => r.id === id);
-        if (reg) {
-          editor.selectLayerTop(reg.layerId);
-          editor.selectedRegionId = id;
-          editor.status = `选中「${reg.name}」`;
-          editor.notify();
-          return;
-        }
+  <WorkspaceDrawer
+    open={panels.workspace}
+    {world}
+    {focusLayer}
+    {selectedRegionId}
+    {newName}
+    bind:expandedIds
+    drawActive={draw.active}
+    brushRadius={draw.radiusDeg}
+    onSelect={(id) => {
+      // 空白点击（id=null）= 无选中元素 = 退出绘制（与完成/Esc 同效）
+      if (id === null) {
+        editor.selectedRegionId = null;
         editor.notify();
-      }}
-      onInfo={(id) => {
-        infoRegionId = infoRegionId === id ? null : id;
+        return;
+      }
+      // 高度：选中区间 = 工作区间（与其它层同一列表）
+      if (focusLayer === 'height') {
+        editor.setHeightInterval(id);
         editor.selectedRegionId = id;
-      }}
-      onDelete={(id) => {
+        editor.notify();
+        return;
+      }
+      editor.selectedRegionId = id;
+      // 工作区选中路径元素 → 进入该条曲线的编辑（控件/加点）
+      const path = world?.paths?.find((p) => p.id === id);
+      if (path) {
+        editor.draw = {
+          ...editor.draw,
+          active: true,
+          targetRegionId: id,
+          tool: 'brush',
+          addMode: true,
+        };
+        editor.status = `编辑「${path.name}」：拖控制点 / 点曲线加点 / Esc 退出`;
+        editor.notify();
+        return;
+      }
+      // 选中图层元素：边界高亮 + 该层置顶显示
+      const reg = world?.regions?.find((r) => r.id === id);
+      if (reg) {
+        editor.selectLayerTop(reg.layerId);
         editor.selectedRegionId = id;
-        editor.deleteSelected();
-      }}
-      onDraw={(id) => editor.startDraw(id)}
-      onPaintValue={(id, v) => editor.setHeightPaint(id, v)}
-      onRadius={(v) => {
-        editor.draw = { ...editor.draw, radiusDeg: v };
-      }}
-      onDrawMode={() => {
-        if (editor.draw.active) editor.endDraw();
-        else if (focusLayer === 'height') editor.startHeightDraw();
-        else if (editor.selectedRegionId) editor.startDraw(editor.selectedRegionId);
-        else editor.status = '请先选中元素';
-      }}
-      onCreate={() => {
-        editor.createRegion(editor.focusLayer);
-      }}
-      onCreateChild={(parentId) => {
-        if (!world) return;
-        const parent = world.regions.find((r) => r.id === parentId);
-        if (!parent) return;
-        const cl = world.layers.find((l) => l.parentLayerId === parent.layerId);
-        editor.createRegion(cl?.id ?? parent.layerId, parentId);
-        // 确保父元素保持展开
-        if (!expandedIds.has(parentId)) {
-          expandedIds = new Set([...expandedIds, parentId]);
-        }
-      }}
-      onRandomName={() => {
-        editor.newName = editor.randomName(
-          editor.focusLayer === 'province' ? 'province' : 'country',
-        );
-      }}
-      onNewName={(n) => (editor.newName = n)}
-      onCloseInfo={() => (infoRegionId = null)}
-      onRegionDrag={handleRegionDrag}
-      onSetSuzerain={(vid, sid) => {
-        if (!world) return;
-        if (!setSuzerain(world, vid, sid)) {
-          editor.status = '无法建立附庸（同层 / 禁止成环）';
-          return;
-        }
-        editor.touchRegions();
-        editor.status = sid ? '已设附庸' : '已解除附庸';
-      }}
-      onToggleEnemy={(a, b) => {
-        if (!world) return;
-        toggleEnemy(world, a, b);
-        editor.touchRegions();
-        editor.status = '已更新敌对关系';
-      }}
-      onToggleAlly={(a, b) => {
-        if (!world) return;
-        toggleAlly(world, a, b);
-        editor.touchRegions();
-        editor.status = '已更新同盟关系';
-      }}
-      onSaveInfo={(patch) => {
-        if (!world || !infoRegionId) return;
-        const r = world.regions.find((x) => x.id === infoRegionId);
-        if (!r) return;
-        if (patch.name) r.name = patch.name;
-        if (patch.color && !r.parentId) r.color = patch.color;
-        if (patch.exclusiveColor !== undefined) {
-          r.exclusiveColor = patch.exclusiveColor || undefined;
-        }
-        if (patch.description !== undefined)
-          r.attributes = { ...r.attributes, description: patch.description };
-        editor.touchRegions();
-        infoRegionId = null;
-        editor.status = '已保存';
-      }}
-    />
-  </WorkspacePanel>
+        editor.status = `选中「${reg.name}」`;
+        editor.notify();
+        return;
+      }
+      editor.notify();
+    }}
+    onDelete={(id) => {
+      editor.selectedRegionId = id;
+      editor.deleteSelected();
+    }}
+    onDraw={(id) => editor.startDraw(id)}
+    onPaintValue={(id, v) => editor.setHeightPaint(id, v)}
+    onRadius={(v) => {
+      editor.draw = { ...editor.draw, radiusDeg: v };
+    }}
+    onDrawMode={() => {
+      if (editor.draw.active) editor.endDraw();
+      else if (focusLayer === 'height') editor.startHeightDraw();
+      else if (editor.selectedRegionId) editor.startDraw(editor.selectedRegionId);
+      else editor.status = '请先选中元素';
+    }}
+    onCreate={() => {
+      editor.createRegion(editor.focusLayer);
+    }}
+    onCreateChild={(parentId) => {
+      if (!world) return;
+      const parent = world.regions.find((r) => r.id === parentId);
+      if (!parent) return;
+      const cl = world.layers.find((l) => l.parentLayerId === parent.layerId);
+      editor.createRegion(cl?.id ?? parent.layerId, parentId);
+      // 确保父元素保持展开
+      if (!expandedIds.has(parentId)) {
+        expandedIds = new Set([...expandedIds, parentId]);
+      }
+    }}
+    onRandomName={() => {
+      editor.newName = editor.randomName(
+        editor.focusLayer === 'province' ? 'province' : 'country',
+      );
+    }}
+    onNewName={(n) => (editor.newName = n)}
+    onRegionDrag={handleRegionDrag}
+    onCollapse={() => (panels.workspace = false)}
+  />
+
+  <LayerInfoPanel
+    {world}
+    layerId={focusLayer}
+    open={panels.layerInfo}
+    onCollapse={() => (panels.layerInfo = false)}
+    onNotice={(msg) => {
+      editor.status = msg;
+      editor.notify();
+    }}
+  />
+
+  <ElementInfoPanel
+    {world}
+    regionId={selectedRegionId}
+    open={panels.elementInfo}
+    onCollapse={() => (panels.elementInfo = false)}
+    x={250}
+    y={56}
+    onSaveInfo={(id, patch) => {
+      if (!world) return;
+      const r = world.regions.find((x) => x.id === id);
+      if (!r) return;
+      if (patch.name) r.name = patch.name;
+      if (patch.color && !r.parentId) r.color = patch.color;
+      if (patch.exclusiveColor !== undefined) {
+        r.exclusiveColor = patch.exclusiveColor || undefined;
+      }
+      if (patch.description !== undefined)
+        r.attributes = { ...r.attributes, description: patch.description };
+      editor.touchRegions();
+      editor.status = '已保存';
+    }}
+    onSetSuzerain={(vid, sid) => {
+      if (!world) return;
+      if (!setSuzerain(world, vid, sid)) {
+        editor.status = '无法建立附庸（同层 / 禁止成环）';
+        return;
+      }
+      editor.touchRegions();
+      editor.status = sid ? '已设附庸' : '已解除附庸';
+    }}
+    onToggleEnemy={(a, b) => {
+      if (!world) return;
+      toggleEnemy(world, a, b);
+      editor.touchRegions();
+      editor.status = '已更新敌对关系';
+    }}
+    onToggleAlly={(a, b) => {
+      if (!world) return;
+      toggleAlly(world, a, b);
+      editor.touchRegions();
+      editor.status = '已更新同盟关系';
+    }}
+  />
 
   <StatusBar {hover} {status} {fps} zoom={zoomScale} backend={editor.renderBackend} />
 
@@ -456,14 +455,14 @@
   />
 
   <DisplayStylePanel
-    open={!!styleLayerId}
-    layerId={styleLayerId ?? ''}
-    layerName={styleLayerId ?? ''}
-    cfg={styleLayerId ? editor.layerStyleConfig(styleLayerId) : undefined}
+    open={panels.style}
+    layerId={styleLayer}
+    layerName={world?.layers.find((l) => l.id === styleLayer)?.name ?? styleLayer}
+    cfg={editor.layerStyleConfig(styleLayer)}
     onChange={(patch) => {
-      if (styleLayerId) editor.setLayerStyle(styleLayerId, patch);
+      editor.setLayerStyle(styleLayer, patch);
     }}
-    onClose={() => (styleLayerId = null)}
+    onCollapse={() => (panels.style = false)}
     renderBackend={editor.renderBackend}
     onRenderBackend={(b) => editor.setRenderBackend(b)}
   />
@@ -478,6 +477,8 @@
       editor.showValidator = false;
     }}
   />
+
+  <PanelDock items={dockItems} onToggle={togglePanel} />
 </main>
 
 <style>

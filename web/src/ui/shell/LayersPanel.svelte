@@ -1,12 +1,16 @@
 <script lang="ts">
+  /**
+   * 图层面板：PanelShell 壳 + 统一 ItemButton 行。
+   * 行 = 眼睛（显隐）+ 图层 logo + 名称；单击选中并开工作区；双击打开显示面板。
+   * 拖动 = 长按（进度条填满解锁）；拖动时其他行让开（gap），松手触发重排重算。
+   */
   import { tick } from 'svelte';
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
-  import PanelHeader from './PanelHeader.svelte';
-  import EntityRowShell from './EntityRowShell.svelte';
-  import EntityInfoModal from './EntityInfoModal.svelte';
+  import PanelShell from './PanelShell.svelte';
+  import ItemButton from './ItemButton.svelte';
+  import CreateRow from './CreateRow.svelte';
   import {
-    DRAG_THRESHOLD,
     hintAtPoint,
     hintForShell,
     type DropHint,
@@ -16,9 +20,9 @@
 
   let {
     world,
-    open = $bindable(true),
+    open = true,
     focusLayer = 'cells',
-    leftW = 200,
+    leftW = 220,
     newName = '',
     onSelect,
     onToggleVisible,
@@ -28,6 +32,7 @@
     onAddLayer,
     onNewName,
     onRandomName,
+    onCollapse,
   }: {
     world: World | null;
     open?: boolean;
@@ -36,11 +41,11 @@
     newName?: string;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
-    /** 眼睛图标：显隐（双击 = 显示面板） */
+    /** 眼睛图标：显隐 */
     onToggleVisible?: (id: string) => void;
-    /** 🖌 绘制：打开工作区 */
+    /** 选中并打开工作区 */
     onDrawLayer?: (id: string) => void;
-    /** 🎨 显示：打开 DisplayStyle 面板 */
+    /** 双击：打开该图层显示参数面板 */
     onStyleLayer?: (id: string) => void;
     onDragLayer?: (
       fromId: string,
@@ -52,15 +57,13 @@
     onAddLayer?: () => void;
     onNewName?: (v: string) => void;
     onRandomName?: () => void;
+    onCollapse?: () => void;
   } = $props();
 
   let dragId: string | null = $state(null);
   let dropHint = $state<DropHint | null>(null);
-  let infoLayerId: string | null = $state(null);
-  let ptr = { x: 0, y: 0, id: null as string | null };
   let listEl: HTMLElement | undefined = $state();
-  let rectCache: { id: string; top: number; bottom: number; left: number; right: number }[] | null =
-    null;
+  let rectCache: { id: string; top: number; bottom: number; left: number; right: number }[] | null = null;
   /** 等 gap 布局后再测 rect，避免高亮错位 */
   let dragReady = false;
   let ghost = $state<{ x: number; y: number; name: string } | null>(null);
@@ -125,15 +128,6 @@
     })) as RowMeta[],
   );
 
-  const infoMeta = $derived(infoLayerId ? LAYER_META[infoLayerId] : null);
-  const infoLayer = $derived(
-    infoLayerId && world ? world.layers.find((l) => l.id === infoLayerId) : null,
-  );
-
-  function catLabel(c: string) {
-    return c === 'cell' ? '依赖地块' : c === 'free' ? '不依赖地块' : '自定义';
-  }
-
   function collectRects() {
     if (rectCache) return rectCache;
     if (!listEl) return [];
@@ -150,29 +144,20 @@
     return rectCache;
   }
 
-  function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    const li = (e.target as HTMLElement).closest?.('[data-row-id]') as HTMLElement | null;
-    if (!li) return;
-    ptr = { x: e.clientX, y: e.clientY, id: li.dataset.rowId ?? null };
+  /** 长按进度条满 → 拖动接管 */
+  async function onRowHold(id: string, start: { x: number; y: number }) {
+    dragId = id;
+    dragReady = false;
     rectCache = null;
+    const row = rows.find((r) => r.id === id);
+    ghost = { x: start.x + 12, y: start.y - 14, name: row?.meta.name ?? id };
+    // 等 dragging class 布局变化稳定后再测，消除高亮错位
+    await tick();
+    rectCache = null;
+    dragReady = true;
   }
 
-  async function onPointerMove(e: PointerEvent) {
-    if (!ptr.id) return;
-    const dist = Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
-    if (!dragId && dist > DRAG_THRESHOLD) {
-      dragId = ptr.id;
-      dragReady = false;
-      rectCache = null;
-      const row = rows.find((r) => r.id === ptr.id);
-      ghost = { x: e.clientX + 12, y: e.clientY - 14, name: row?.meta.name ?? ptr.id };
-      (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
-      // 等 dragging class（gap 变化）布局后再测，消除高亮错位
-      await tick();
-      rectCache = null;
-      dragReady = true;
-    }
+  function onRowMove(e: PointerEvent) {
     if (!dragId) return;
     if (ghost) ghost = { ...ghost, x: e.clientX + 12, y: e.clientY - 14 };
     if (!dragReady) return;
@@ -180,7 +165,7 @@
     dropHint = hintAtPoint(e.clientY, rects, rowMetas);
   }
 
-  function onPointerUp(e: PointerEvent) {
+  function onRowEnd() {
     if (dragId && dropHint && onDragLayer && dragReady) {
       const h = dropHint;
       if (h.kind === 'nest' || h.kind === 'nest-first') {
@@ -195,175 +180,82 @@
     }
     dragId = null;
     dropHint = null;
-    ptr.id = null;
     rectCache = null;
     dragReady = false;
     ghost = null;
-    (e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId);
   }
 
   function shellHint(id: string) {
     return hintForShell(dropHint, id, rowMetas);
   }
-  function parentHl(id: string) {
-    return !!dropHint && dropHint.kind === 'gap' && dropHint.highlightParentId === id;
-  }
-
-  /** 悬浮面板收起（左上角按钮） */
-  let collapsed = $state(false);
 
   function handleSelect(id: string) {
     onSelect?.(id);
+    onDrawLayer?.(id);
   }
-  function handleToggle(id: string) {
-    onToggleVisible?.(id);
-  }
-  function onBlankClick(e: PointerEvent | MouseEvent) {
+
+  function onBlankClick(e: MouseEvent) {
     const t = e.target as HTMLElement | null;
     if (t?.closest?.('[data-row-id]')) return;
-    if (t?.closest?.('button,input,select,textarea,.acts')) return;
+    if (t?.closest?.('button,input,select,textarea')) return;
     onSelect?.('');
   }
 </script>
 
-{#if open}
-  <aside
-    class="lp"
-    class:collapsed
-    style="width:{collapsed ? 'auto' : leftW + 'px'}"
-    onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={onPointerUp}
-    onclick={onBlankClick}
-    onpointercancel={() => {
-      dragId = null;
-      dropHint = null;
-      ptr.id = null;
-      ghost = null;
-      dragReady = false;
-    }}
-  >
-    <div class="lp-head">
-      <button
-        type="button"
-        class="collapse"
-        title={collapsed ? '展开图层面板' : '收起图层面板'}
-        aria-label={collapsed ? '展开图层面板' : '收起图层面板'}
-        onclick={() => (collapsed = !collapsed)}
-      >{collapsed ? '☰' : '⊟'}</button>
-      {#if !collapsed}
-        <PanelHeader
-          icon="📚"
-          title="图层"
-          placeholder="新图层"
-          {newName}
-          onNewName={(v) => onNewName?.(v)}
-          onRandom={() => onRandomName?.()}
-          onCreate={() => onAddLayer?.()}
+<PanelShell title="图层" icon="📚" side="left" width={leftW} {open} onCollapse={onCollapse}>
+  <div class="create">
+    <CreateRow
+      placeholder="新图层"
+      {newName}
+      onNewName={(v) => onNewName?.(v)}
+      onRandom={() => onRandomName?.()}
+      onCreate={() => onAddLayer?.()}
+    />
+  </div>
+  <p class="hint">单击选中并开工作区 · 眼睛显隐 · 双击显示面板 · 长按拖动</p>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <ul class="list" class:dragging={!!dragId} role="list" bind:this={listEl} onclick={onBlankClick}>
+    {#each rows as row (row.id)}
+      {@const h = shellHint(row.id)}
+      <li
+        class="node"
+        class:gap-above={h?.kind === 'gap-top'}
+        class:gap-below={h?.kind === 'gap-bottom'}
+        class:nest-hl={h?.kind === 'nest'}
+        data-row-id={row.id}
+        style="padding-left:{row.depth * 12}px"
+      >
+        <ItemButton
+          visible={row.visible}
+          onEye={() => onToggleVisible?.(row.id)}
+          logo={row.meta.emoji}
+          name={row.meta.name}
+          selected={focusLayer === row.id}
+          dragging={dragId === row.id}
+          onClick={() => handleSelect(row.id)}
+          onDblclick={() => onStyleLayer?.(row.id)}
+          onHold={(s) => onRowHold(row.id, s)}
+          onDragMove={onRowMove}
+          onDragEnd={onRowEnd}
         />
-        <p class="hint">单击选中并开工作区 · 眼睛显隐 · 双击显示面板 · ℹ 信息</p>
-        <ul class="list" class:dragging={!!dragId} role="list" bind:this={listEl}>
-          {#each rows as row (row.id)}
-            <li class="node" data-row-id={row.id}>
-              <EntityRowShell
-                depth={row.depth}
-                name={row.meta.name}
-                emoji={row.meta.emoji}
-                selected={focusLayer === row.id}
-                showActions={true}
-                visible={row.visible}
-                dragging={dragId === row.id}
-                hint={shellHint(row.id)}
-                parentHighlight={parentHl(row.id)}
-                nestHighlight={!!dropHint && dropHint.kind === 'nest' && dropHint.targetId === row.id}
-                onSelect={() => {
-                  handleSelect(row.id);
-                  onDrawLayer?.(row.id);
-                }}
-                onToggle={() => handleToggle(row.id)}
-                onInfo={() => (infoLayerId = row.id)}
-                onDraw={() => onDrawLayer?.(row.id)}
-                onStyle={() => onStyleLayer?.(row.id)}
-              />
-            </li>
-          {/each}
-        </ul>
-        {#if ghost}
-          <div class="drag-ghost" style="left:{ghost.x}px;top:{ghost.y}px" aria-hidden="true">
-            {ghost.name}
-          </div>
-        {/if}
-      {/if}
-  </aside>
-{/if}
-
-<EntityInfoModal
-  open={!!infoLayerId && !!(infoMeta || infoLayer)}
-  title="图层信息"
-  name={infoLayer?.name ?? infoMeta?.name ?? ''}
-  basicColor="#6b7c93"
-  exclusiveColor=""
-  basicEditable={false}
-  cellCount={world?.regions.filter((r) => r.layerId === infoLayerId).length ?? 0}
-  description={infoMeta ? `${infoMeta.emoji} ${infoMeta.kind}` : ''}
-  extra={infoMeta
-    ? [
-        { label: '分类', value: catLabel(infoMeta.category) },
-        { label: 'ID', value: infoLayerId ?? '' },
-        {
-          label: '子层',
-          value: String(rows.filter((r) => r.parentId === infoLayerId).length),
-        },
-      ]
-    : []}
-  onClose={() => (infoLayerId = null)}
-  onSave={() => (infoLayerId = null)}
-/>
+      </li>
+    {/each}
+  </ul>
+  {#if ghost}
+    <div class="drag-ghost" style="left:{ghost.x}px;top:{ghost.y}px" aria-hidden="true">
+      {ghost.name}
+    </div>
+  {/if}
+</PanelShell>
 
 <style>
-  .lp {
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-    border-radius: 12px;
-    border: 1px solid var(--panel-border);
-    background: rgba(22, 26, 34, 0.92);
-    backdrop-filter: blur(8px);
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    background: rgba(12, 14, 20, 0.94);
-    border-right: 1px solid var(--panel-border);
-    overflow: hidden;
-    font-size: 12px;
-    user-select: none;
-  }
-  .lp.collapsed {
-    width: auto !important;
-    padding: 4px;
-  }
-  .lp-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .collapse {
+  .create {
     flex: 0 0 auto;
-    border: 1px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.06);
-    color: inherit;
-    border-radius: 7px;
-    padding: 3px 7px;
-    cursor: pointer;
-    font-size: 13px;
-    line-height: 1;
-  }
-  .collapse:hover {
-    background: rgba(255, 255, 255, 0.12);
+    padding: 8px 8px 4px;
+    border-bottom: 1px solid var(--panel-border);
   }
   .hint {
+    flex: 0 0 auto;
     margin: 0;
     padding: 4px 10px 6px;
     font-size: 10px;
@@ -371,25 +263,34 @@
     border-bottom: 1px solid var(--panel-border);
   }
   .list {
-    --gap: 4px;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
     list-style: none;
     margin: 0;
     padding: 8px;
-    overflow: auto;
-    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: var(--gap);
-  }
-  /* 拖拽中不加大 gap：避免 rect 与视觉错位 */
-  .list.dragging {
-    --gap: 4px;
-  }
-  .list.dragging :global(.erow) {
-    transition: none !important;
+    gap: 4px;
   }
   .node {
     margin: 0;
+  }
+  /* 拖动中相邻行让开，形成插入位 */
+  .list.dragging .node {
+    transition:
+      margin 0.18s ease,
+      padding 0.18s ease;
+  }
+  .node.gap-above {
+    margin-top: 28px;
+  }
+  .node.gap-below {
+    margin-bottom: 28px;
+  }
+  .node.nest-hl :global(.ibtn) {
+    border-color: rgba(240, 195, 106, 0.8);
+    background: rgba(240, 195, 106, 0.12);
   }
   .drag-ghost {
     position: fixed;

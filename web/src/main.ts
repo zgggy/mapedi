@@ -36,6 +36,8 @@ window.addEventListener('error', (e) => showNonFatal(String(e.error ?? e.message
 window.addEventListener('unhandledrejection', (e) => showNonFatal(String(e.reason)));
 
 try {
+  // mount 是追加不是清空：先移除启动占位，否则「启动中…」会以 fixed 全屏残留（层序错误 / 挡交互）
+  target.innerHTML = '';
   mount(App, { target });
 } catch (e) {
   showFatal(e instanceof Error ? e.stack || e.message : String(e));

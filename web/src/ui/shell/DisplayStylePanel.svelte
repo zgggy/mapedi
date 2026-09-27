@@ -6,6 +6,7 @@
   import type { ElementStyle, ElementStylePatch } from '../../core/layer/style';
   import { defaultElementStyle, patchElementStyle } from '../../core/layer/style';
   import { markDirtyCells } from '../../render/staticLayerCache';
+  import PanelShell from './PanelShell.svelte';
 
   let {
     open = false,
@@ -13,7 +14,7 @@
     layerName = '',
     cfg,
     onChange,
-    onClose,
+    onCollapse,
     renderBackend = 'canvas',
     onRenderBackend,
   }: {
@@ -22,7 +23,7 @@
     layerName?: string;
     cfg?: ElementStyle;
     onChange?: (patch: ElementStylePatch) => void;
-    onClose?: () => void;
+    onCollapse?: () => void;
     /** 渲染后端（全局）：canvas / gpu */
     renderBackend?: 'canvas' | 'gpu';
     onRenderBackend?: (b: 'canvas' | 'gpu') => void;
@@ -56,15 +57,7 @@
   }
 </script>
 
-{#if open}
-  <div class="dsp" role="dialog" aria-label="显示样式">
-    <div class="hd">
-      <span class="lab">DisplayStyle · {layerName}</span>
-      {#if onClose}
-        <button type="button" class="x" title="关闭" onclick={onClose}>×</button>
-      {/if}
-    </div>
-
+<PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} x={250} y={56} maxHeight="calc(100vh - 120px)" onCollapse={onCollapse}>
     <div class="body">
       <div class="grp">
         <div class="grp-hd">渲染后端（全局）</div>
@@ -158,8 +151,7 @@
       </div>
       {/if}
     </div>
-  </div>
-{/if}
+</PanelShell>
 
 <style>
   .row {
@@ -179,40 +171,6 @@
   .seg.on {
     background: var(--accent, #4a7ab0);
     border-color: var(--accent, #4a7ab0);
-  }
-  .dsp {
-    position: fixed;
-    left: 210px;
-    top: 50px;
-    z-index: 55;
-    width: 220px;
-    max-height: calc(100vh - 100px);
-    overflow-y: auto;
-    background: rgba(18, 20, 26, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 12px;
-    font-size: 12px;
-    color: var(--text);
-    backdrop-filter: blur(8px);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  }
-  .hd {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-  .lab {
-    color: var(--text-dim);
-    font-size: 11px;
-  }
-  .x {
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 14px;
   }
   .body {
     padding: 8px 12px 12px;
