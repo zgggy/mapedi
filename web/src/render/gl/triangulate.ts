@@ -131,7 +131,7 @@ export function triangulateRings(entries: RingSample[]): PieceFill | null {
     const holesKey = holeFlats.map((f) => `${f.length / 2}@${f[0]},${f[1]}`).join(';');
     const cached = groupCache.get(o as unknown as object);
     if (cached && cached.holesKey === holesKey) {
-      if (cached.tris.length) parts.push(...cached.tris);
+      for (let t = 0; t < cached.tris.length; t++) parts.push(cached.tris[t]);
       expectArea += Math.abs(signedAreaFlat(outerFlat));
       for (const f of holeFlats) expectArea -= Math.abs(signedAreaFlat(f));
       if (!cached.areaOk) return { tris: Float32Array.from(parts), areaOk: false };

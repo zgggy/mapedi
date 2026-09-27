@@ -330,12 +330,16 @@ export class EditorStore {
   private heightDirtyIds: Set<number> | null = null;
   private heightNotifyQueued = false;
 
-  /** full=true 全清环缓存（拓扑翻转/撤销）；false 只做定向失效（笔刷 tick 已增量维护件环） */
-  touchHeight(full = true) {
+  /**
+   * 高度笔刷的失效：**永不全清环缓存**（全清 = 下一帧重建所有可见件 = 秒级冻结）。
+   * forward：tick 已增量维护高度件 → 只定向失效 landsea 件（拓扑翻转重塑大陆）；
+   * undo：区间归属被反向套用而未打补丁 → 定向失效高度件。
+   */
+  touchHeight(full = false) {
     invalidateRegionIndex();
     invalidateCellGrid();
-    if (full) invalidateBorderCache();
-    else invalidatePieceEntries('piece:landsea:');
+    if (full) invalidatePieceEntries('piece:height:');
+    invalidatePieceEntries('piece:landsea:');
     invalidateStaticLayer();
     bumpHeightRev();
     bumpRegionsRev();
@@ -1118,7 +1122,7 @@ export class EditorStore {
         this.markHeightDirty(dirtyIds);
         // 归属已由 tick 增量维护 → 跳过二次套用；拓扑翻转只定向失效 landsea 件
         this.flushHeightRegions(samples, true);
-        this.touchHeight(topoChanged);
+        this.touchHeight(false);
       };
       cmd.afterRevert = () => {
         this.markHeightDirty(dirtyIds);

@@ -790,11 +790,12 @@
     requestOverlay();
   });
 
-  // 世界变化后调度预热（切层顺滑）
+  // 预热只跟「世界令牌」（seed+cellCount：载入/生成才变）。
+  // 严禁挂在 world 对象身份上——笔刷每 tick 都会 {...world} 换新对象，
+  // 预热会被反复触发并在松手后连续阻塞主线程（4s 冻结的真凶）。
   $effect(() => {
+    void world.meta.seed;
     void world.cells.length;
-    void world.regions.length;
-    void world.layers.length;
     scheduleWarm();
   });
 
