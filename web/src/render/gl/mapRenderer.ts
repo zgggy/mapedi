@@ -401,10 +401,21 @@ export class MapGlRenderer {
       this.setCam(env, this.progStrip);
       this.setCam(env, this.progFade);
 
+      const tParams = performance.now();
+      const pieces = channels.elements ? buildPieceParams(env) : [];
+      const tSubmit = performance.now();
       if (channels.cellsMesh && env.showCellMesh) this.drawCellMesh(env);
-      if (channels.elements) {
-        for (const piece of buildPieceParams(env)) this.drawPiece(env, piece, s);
-      }
+      for (const piece of pieces) this.drawPiece(env, piece, s);
+      const tEnd = performance.now();
+      const gp = globalThis as unknown as {
+        __glParamsMs?: number;
+        __glSubmitMs?: number;
+        __glSeg?: { params: number; submit: number }[];
+      };
+      gp.__glParamsMs = tSubmit - tParams;
+      gp.__glSubmitMs = tEnd - tSubmit;
+      (gp.__glSeg ??= []).push({ params: tSubmit - tParams, submit: tEnd - tSubmit });
+      if (gp.__glSeg.length > 240) gp.__glSeg.shift();
       gl.disable(gl.SCISSOR_TEST);
       gl.flush();
       const w = globalThis as unknown as { __gpuMs?: number; __gpuRan?: number };

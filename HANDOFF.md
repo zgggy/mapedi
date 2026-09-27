@@ -10,6 +10,17 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-27，第二十六次）— 拖动跟手：热路径 O(n) 指纹清除 + 状态栏后端标识**
+
+- **用户反馈**：GPU 缩放已与 2D 持平，但**中键平移/右键内容拖动仍 2D 更流畅（GPU 不跟手、掉帧）**；状态栏要显示当前后端。要求从整体设计层面考虑。
+- **分段计时定位**（常驻 `window.__glSeg/__restSeg`：params=内容构建 / submit=GL 提交 / rest=2D 余层）：三层+阴影+100k 下每帧 3.3ms 里 **params 占 2.5ms（75-80%）**，GL 提交仅 0.2-0.3ms——**不是 GPU 慢，是每帧在 CPU 侧重建内容**。
+- **根因（正是 AGENTS.md §8/9 的"热路径 O(n) 指纹扫描"）**：`borderCache.ringCacheKey` 每帧对每个件的**全部 cellIds 做 O(n) FNV 指纹**（10 万 id/帧 = 2.5ms）；而件集数组跨帧引用稳定（`composeShownPieces` 已 rev 缓存）。修复 = **cellIds 指纹按「数组引用 + dataRev」WeakMap 记忆**（一次 O(n)/rev；长度校验兜底；前提与 composePieces 缓存相同：cellIds 内容变化必伴随 dataRev）。另把 `styleOf` 按层每帧解析一次（原按件×帧做对象合并）。
+- **效果**（同场景同手势）：params 2.5→**0.2ms**、帧总中位 3.3→**0.8-1.0ms**、尖峰 18.8→**2.3-2.8ms**。对照 Canvas：中位 0.2-0.4ms 但**平移尖峰 13-15ms**（烘焙/GC），GPU 反而更稳（max 2.8 vs 15.4）。用户"拖动不跟手/掉帧"的直接原因 = 旧 GPU 的 3.3ms CPU/帧 + 18ms 尖峰阻塞输入。
+- **状态栏**：显示当前渲染后端（`GPU` 高亮 / `Canvas2D`），App → StatusBar 传 `editor.renderBackend`。
+- **回归**：比色 big(>32) 0.01%（远离边界 >32 为 0）、横线/竖线扫描 0——rev 记忆无陈旧。
+- **遗留观察项**（ROADMAP）：副本出窗裁剪/扇形光栅面积目前不是瓶颈（submit 0.2ms），件数若增 10× 再做；二期（笔刷实时生效）不变。
+- **测量口径**：本环境一次性 rAF 会饿死（合成器不出帧），所有帧计时在 `window.requestAnimationFrame = setTimeout(0)` 垫片下测得；用户真机无此问题。
+
 **本轮已处理（2026-09-27，第二十五次）— 一期：GL 直绘架构（烘焙链退役）+ 100k 上限 bug + 二期方案（实时生效）**
 
 - **回答用户「为什么感受不到 GPU 性能」**：旧 GPU 链是**烘焙架构**——每帧把世界光栅进离屏贴图再 drawImage 回 2D，缩放每 tick 全量重烘+合成回读，GPU 只当了 Canvas 的贴图打印机；而 Canvas2D 本身已被浏览器 GPU 化（Skia/Metal），所以烘焙链结构上**只能 ≤ Canvas**，"打平"就是它的天花板。真正吃到 GPU 必须**相机 uniform 逐帧直绘**（几何缓存、缩放只改 uniform、零重烘/零回读）。

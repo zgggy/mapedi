@@ -339,8 +339,18 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
   const regionById = new Map(world.regions.map((r) => [r.id, r]));
   const seenFill = new Set<string>();
   const seenBound = new Set<string>();
+  // 同层多件共享一次样式解析（styleOf 可能做对象合并，按件×帧重算是热路径浪费）
+  const styleByLayer = new Map<string, ReturnType<typeof styleOf>>();
+  const styleOnce = (id: string) => {
+    let hit = styleByLayer.get(id);
+    if (!hit) {
+      hit = styleOf(id);
+      styleByLayer.set(id, hit);
+    }
+    return hit;
+  };
   for (const dp of displayPieces) {
-    const es = styleOf(dp.layerId);
+    const es = styleOnce(dp.layerId);
     const fillOn = es.fill.enabled !== false;
     const fillA = es.fill.alpha;
     const elOn = es.border.enabled !== false;

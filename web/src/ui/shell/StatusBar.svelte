@@ -4,12 +4,15 @@
     status = '',
     fps = 0,
     zoom = 1,
+    backend = 'canvas',
   }: {
     hover?: { cellId: number; lon: number; lat: number; height: number } | null;
     status?: string;
     fps?: number;
     /** 缩放级别（相对默认视野的倍率） */
     zoom?: number;
+    /** 渲染后端标识（gpu / canvas） */
+    backend?: 'canvas' | 'gpu';
   } = $props();
 </script>
 
@@ -21,6 +24,7 @@
     <span class="dim">{hover.height > 0 ? '陆地' : hover.height === 0 ? '海平面' : '海洋'}</span>
   {/if}
   <span class="st">{status}</span>
+  <span class="be" class:gpu={backend === 'gpu'}>{backend === 'gpu' ? 'GPU' : 'Canvas2D'}</span>
   <span class="dim">×{zoom.toFixed(2)}</span>
   <span class="fps">{fps}</span>
 </div>
@@ -48,6 +52,13 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 40vw;
+  }
+  .be {
+    opacity: 0.75;
+    font-size: 11px;
+  }
+  .be.gpu {
+    color: var(--accent, #7ec8ff);
   }
   .fps {
     color: var(--text-dim);

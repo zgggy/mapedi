@@ -197,6 +197,7 @@ export function drawWorld(
       }
     }
   }
+  const restT0 = performance.now();
   for (const layer of rest) {
     if (!layer.repeat) {
       env.drawDx = contentOffsetX;
@@ -207,6 +208,13 @@ export function drawWorld(
       env.drawDx = dx;
       layer.draw(env);
     }
+  }
+  {
+    const g = globalThis as unknown as { __restMs?: number; __restSeg?: number[] };
+    const ms = performance.now() - restT0;
+    g.__restMs = ms;
+    (g.__restSeg ??= []).push(ms);
+    if (g.__restSeg.length > 240) g.__restSeg.shift();
   }
   env.drawDx = contentOffsetX;
   // 帧计时（两后端同一咽喉点，A/B 可比）：环形样本 + 帧计数常驻 window，验收/回归用

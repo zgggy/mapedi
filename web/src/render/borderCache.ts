@@ -62,14 +62,30 @@ function ensureRev(world: World): string {
 /** 键 = 调用方提示 + 内容指纹（长度/和/FNV）+ 几何域：
  *  不含 dataRev——未变化的 cell 集跨修订号命中（提交只重链变化的元素）；
  *  几何域变（重生/导入）则全部重链。 */
-function ringCacheKey(setKey: string, projKey: string, cellIds: CellId[]): string {
+/**
+ * cellIds 指纹：按**数组引用 + dataRev** 记忆（WeakMap）。
+ * 热路径纪律（AGENTS.md §8/9）：失效用 rev 计数，不做逐帧 O(n) 全量指纹——
+ * 件集数组跨帧引用稳定（composePieces 已 rev 缓存），指纹一次 O(n)/rev，不再每帧扫 10 万 id。
+ * 前提：cellIds 内容变化必伴随 dataRev 提升（与 composePieces 缓存同一前提）；长度另校验兜底。
+ */
+const cellSetFpMemo = new WeakMap<object, { rev: string; n: number; fp: string }>();
+function cellSetFingerprint(cellIds: CellId[]): string {
+  const rev = dataRev();
+  const hit = cellSetFpMemo.get(cellIds as unknown as object);
+  if (hit && hit.rev === rev && hit.n === cellIds.length) return hit.fp;
   let h = 2166136261;
   let sum = 0;
   for (const id of cellIds) {
     h = Math.imul(h ^ id, 16777619);
     sum += id;
   }
-  return `${setKey}|${projKey}|${geomRev()}|${cellIds.length}|${sum}|${h >>> 0}`;
+  const fp = `${cellIds.length}|${sum}|${h >>> 0}`;
+  cellSetFpMemo.set(cellIds as unknown as object, { rev, n: cellIds.length, fp });
+  return fp;
+}
+
+function ringCacheKey(setKey: string, projKey: string, cellIds: CellId[]): string {
+  return `${setKey}|${projKey}|${geomRev()}|${cellSetFingerprint(cellIds)}`;
 }
 
 export function getCellSetRingsCached(

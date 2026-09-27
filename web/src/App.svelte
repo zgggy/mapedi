@@ -434,7 +434,7 @@
     />
   </WorkspacePanel>
 
-  <StatusBar {hover} {status} {fps} zoom={zoomScale} />
+  <StatusBar {hover} {status} {fps} zoom={zoomScale} backend={editor.renderBackend} />
 
   <BrushHud
     {draw}
