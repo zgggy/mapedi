@@ -8,8 +8,10 @@ import {
 import { styleById } from '../core/styles';
 import { getProjCache } from './projCache';
 import { getRegionIndex } from '../core/index/regionIndex';
-import { defaultPipeline, type RenderEnv, type RenderLayer } from './layers';
+import { buildPieceParams, defaultPipeline, type RenderEnv, type RenderLayer } from './layers';
 import { worldCopyDxs } from './space';
+import { composeShownPieces } from '../core/displayCompose';
+import { ringPath2D } from '../core/ring/path2d';
 import { drawPeriodicStatic } from './staticLayerCache';
 
 /** cellId → 国家色（RegionIndex 缓存） */
@@ -50,6 +52,128 @@ export interface HoverInfo {
  * - 本函数用 space.worldCopyDxs 决定要画哪些世界副本，组合 contentOffsetX。
  * - 外框/frame 层不参与副本；裁剪只在外框 clip 内发生。
  */
+/** 构造渲染环境（drawWorld 与预热共用；内容构建与绘制分离） */
+export function buildRenderEnv(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  cam: Camera,
+  hoverId: number | null,
+  dpr: number,
+  opts?: Parameters<typeof drawWorld>[5],
+): RenderEnv {
+  const w = ctx.canvas.width / dpr;
+  const h = ctx.canvas.height / dpr;
+  const style = styleById(opts?.styleId ?? 'dark');
+  const proj = opts?.projection ?? 'mercator';
+  const pp = opts?.projParams ?? defaultProjParams();
+  const contentOffsetX = opts?.contentOffsetX ?? 0;
+  const period = projectionWorldPeriod(proj);
+  const pcache = getProjCache(world, proj, pp);
+  const rawDxs = opts?.singleWorldCopy || period === null
+    ? [contentOffsetX]
+    : worldCopyDxs(contentOffsetX, cam, w, period, pcache.worldBBox);
+  const padX = 4 / Math.max(cam.scale, 1e-6);
+  const padY = 4 / Math.max(cam.scale, 1e-6);
+  const bb = pcache.worldBBox;
+  const halfW = w / 2 / Math.max(cam.scale, 1e-6);
+  const halfH = h / 2 / Math.max(cam.scale, 1e-6);
+  let dxs = rawDxs.filter((dx) => {
+    const viewL = cam.x - dx - halfW - padX;
+    const viewR = cam.x - dx + halfW + padX;
+    const viewT = cam.y + halfH + padY;
+    const viewB = cam.y - halfH - padY;
+    return !(bb.maxX < viewL || bb.minX > viewR || bb.maxY < viewB || bb.minY > viewT);
+  });
+  if (!dxs.length) dxs = [rawDxs.length ? rawDxs[0] : contentOffsetX];
+  return {
+    ctx,
+    world,
+    cam,
+    hoverId,
+    dpr,
+    w,
+    h,
+    style,
+    focus: opts?.focusLayer ?? 'height',
+    proj,
+    pp,
+    smooth: opts?.reliefSmooth ?? 0,
+    pcache,
+    showLabels: opts?.showLabels,
+    contentOffsetX,
+    drawDx: contentOffsetX,
+    worldDxs: dxs,
+    highlightRegionId: opts?.highlightRegionId,
+    hidePathId: opts?.hidePathId,
+    displayPieces: opts?.displayPieces,
+    showCellMesh: opts?.showCellMesh,
+    useDefaultRegions: opts?.useDefaultRegions,
+    focusLayerId: opts?.focusLayerId ?? opts?.focusLayer,
+    fillStyle: opts?.fillStyle,
+    styleOf: opts?.styleOf,
+    borderStyle: opts?.borderStyle,
+    isDragging: opts?.isDragging,
+  };
+}
+
+/**
+ * 切层顺滑：世界就绪后**逐件**预热件几何（环/样条/三角化/Path2D），切层命中缓存不再付一次性重建。
+ * 分片纪律：一件一个空闲片（requestIdleCallback，超时 100ms 兜底），任何单件不长时间占住主线程；
+ * 失效：dataRev/成员变化后缓存自然 miss（rev 纪律），本预热只是暖启动。
+ */
+export function warmLayerGeometry(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  cam: Camera,
+  dpr: number,
+  opts: Parameters<typeof drawWorld>[5],
+  layerIds: string[],
+  primer?: (pieces: import('./layers').PieceParams[]) => void,
+  onDone?: (layerId: string) => void,
+): void {
+  type Job = { env: RenderEnv; piece: import('../core/displayCompose').DisplayPiece };
+  const jobs: Job[] = [];
+  for (const layerId of layerIds) {
+    try {
+      const pieces = composeShownPieces(world, layerId, null);
+      const env = buildRenderEnv(ctx, world, cam, null, dpr, {
+        ...opts,
+        focusLayer: layerId,
+        focusLayerId: layerId,
+        displayPieces: pieces,
+      });
+      for (const piece of pieces) jobs.push({ env, piece });
+    } catch (e) {
+      console.warn('[warm] 层预热装配失败', layerId, e);
+    }
+  }
+  let i = 0;
+  const idle: (fn: () => void) => void =
+    typeof requestIdleCallback === 'function'
+      ? (fn) => requestIdleCallback(() => fn(), { timeout: 100 })
+      : (fn) => setTimeout(fn, 0);
+  const step = (): void => {
+    if (i >= jobs.length) return;
+    const { env, piece } = jobs[i++];
+    try {
+      // 逐件：单件参数解析 + 逐件几何（Path2D/GL 缓存）
+      const params = buildPieceParams({ ...env, displayPieces: [piece] });
+      for (const p of params) {
+        for (const ring of p.rings) {
+          ringPath2D(ring, p.smooth, 'fill');
+          ringPath2D(ring, p.smooth, 'outline');
+        }
+      }
+      primer?.(params);
+    } catch (e) {
+      console.warn('[warm] 件预热失败', piece.key, e);
+    }
+    if (i === jobs.length) onDone?.('all');
+    idle(step);
+  };
+  idle(step);
+}
+
 export function drawWorld(
   ctx: CanvasRenderingContext2D,
   world: World,
@@ -119,35 +243,7 @@ export function drawWorld(
     return !(bb.maxX < viewL || bb.minX > viewR || bb.maxY < viewB || bb.minY > viewT);
   });
   if (!dxs.length) dxs = [rawDxs.length ? rawDxs[0] : contentOffsetX];
-  const env: RenderEnv = {
-    ctx,
-    world,
-    cam,
-    hoverId,
-    dpr,
-    w,
-    h,
-    style,
-    focus: opts?.focusLayer ?? 'height',
-    proj,
-    pp,
-    smooth: opts?.reliefSmooth ?? 0,
-    pcache,
-    showLabels: opts?.showLabels,
-    contentOffsetX,
-    drawDx: contentOffsetX,
-    worldDxs: dxs,
-    highlightRegionId: opts?.highlightRegionId,
-    hidePathId: opts?.hidePathId,
-    displayPieces: opts?.displayPieces,
-    showCellMesh: opts?.showCellMesh,
-    useDefaultRegions: opts?.useDefaultRegions,
-    focusLayerId: opts?.focusLayerId ?? opts?.focusLayer,
-    fillStyle: opts?.fillStyle,
-    styleOf: opts?.styleOf,
-    borderStyle: opts?.borderStyle,
-    isDragging: opts?.isDragging,
-  };
+  const env = buildRenderEnv(ctx, world, cam, hoverId, dpr, opts);
 
   const pipeline = opts?.pipeline ?? defaultPipeline;
   const staticNames = new Set(['bg', 'cellsMesh', 'elements']);

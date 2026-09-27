@@ -10,6 +10,37 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-27，第二十八次）— 二期开工：笔刷实时生效 + 切层顺滑 + 默认 100k**
+
+- **用户四项**：① 手感达标确认（160fps/拖动几乎不掉/缩放 110）；② 切图层要顺滑；③ 运行时错误见一例修一例；
+  ④ 开工二期；⑤（附带）默认参数改 100000，调试基准 100k。
+- **默认密度 100000**：`core/world.DEFAULT_DENSITY`、store、TopBar、GenDock 五处一致 + AGENTS.md §6 同步。
+- **二期核心落地（笔刷实时生效）**：
+  - `core/ring/incremental.ts`：**BoundaryBook**——成员变化 Δ 只翻转 Δ 的关联边（O(|Δ|·deg)），
+    环由 `edgeListToRings` 重链（O(边界)），**环恒等匹配**让未变环复用旧对象（下游 hermite/三角化缓存命中）。
+  - `borderCache`：环缓存键去掉 O(n) 内容指纹（热路径反模式），改为 **setKey|projKey|geomRev**；
+    不变量：`region.cells` 变化要么 `invalidateBorderCache`（全清）要么 `patchPieceEntry`（增量），二者互斥必居其一。
+    `patchPieceEntry` = 增量补丁入口；`invalidatePieceEntries(prefix)` = 定向失效。
+  - 笔刷链路：`paintHeight` 每 tick 调 `updateHeightIntervalElements`（区间归属增量）+ Δ 入队；
+    Viewport 渲染前消费 Δ 打件环补丁（渲染层持投影器）。**每 tick 0.2-0.4ms，涂中即见**（涂前/涂中/涂后三帧验证）。
+  - `updateHeightIntervalElements` 改为返回每区增减 + 基线语义（多次触碰用「上次基线→当前」净差）。
+  - **commit 路径两修复**：① tick 已增量应用归属，commit 严禁二次套用（会重复入列）→ `flushHeightRegions(skipIntervals)`；
+  ② `touchHeight` 全清环缓存 = 松手卡顿 → 非拓扑笔刷只定向失效 landsea 件（`invalidatePieceEntries`）。
+    实测：松手 handler **0.7ms** ✓（spec ≤0.2ms 的"能做操作"达标）。
+  - **三角化组缓存**：按「外环+其洞签名」缓存（tick 只重建受牵连组）。
+- **切层顺滑（逐件空闲预热）**：`warmLayerGeometry` 按件分片（requestIdleCallback，timeout 100ms 兜底）预热
+  环/样条/Path2D/三角化；实测冷启动切层 1.2-1.7s → 预热后 **0.4-2.4ms/层**（params 0.2-0.3ms、submit 0.2-2.1ms）。
+  逐件分片是必须的：逐层预热本身会 1-2s 阻塞（首版教训）。
+- **cellSetBoundaryEdges 伪边表**：第二循环原为 O(全部边) 解析 ek（60 万/件）→ `pseudoEdgeList` 一次构建
+  （不在任何 neighbor 表里的边，极区补边等），每件只扫小表。
+- **运行时错误（见一例修一例）**：`setPointerCapture/releasePointerCapture` 对已释放/合成指针抛
+  NotFoundError 炸穿 handler ×2 → `capturePointer/releasePointer` 安全包装（捕获失败不影响拖动状态机）。
+- **二期剩余（下轮）**：① 拓扑翻转笔刷（造陆/造海）的陆海重建仍 O(n)（`rebuildLandSeaRegions` 全量 flood +
+  件重建 ~1s/次，只发生在松手）——**增量连通分量**是核心算法缺口；② 涂改时 landsea 件的实时更新（现延到松手）；
+  ③ 撤销/重做的增量一致性验证。
+- **验证口径**：100k 调试基准 ✓（用户重新生成 + 默认 100k）；涂改三帧（涂前/涂中/涂后）像素级验证实时性 ✓；
+  运行时错误收集器 0 残留 ✓。
+
 **本轮已处理（2026-09-27，第二十七次）— 阴影废弃 + 填充回归修复（奇偶漏绑着色器）**
 
 - **用户两项**：① 阴影整体废弃（后续显示不考虑阴影，架构搭好后最后再做；所有优化按无阴影前提）；

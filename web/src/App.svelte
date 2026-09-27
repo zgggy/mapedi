@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Viewport from './ui/Viewport.svelte';
   import { defaultProjParams } from './core/project/projections';
+  import { DEFAULT_DENSITY } from './core/world';
   import type { HoverInfo } from './render/map2d';
   import { editor } from './app/store.svelte';
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
@@ -102,7 +103,7 @@
       editor
         .tryRestore()
         .then((ok) => {
-          if (!ok) return editor.generate(Number(editor.seedInput) || 1, editor.densityInput || 30000);
+          if (!ok) return editor.generate(Number(editor.seedInput) || 1, editor.densityInput || DEFAULT_DENSITY);
         })
         .catch((e) => {
           bootError = `自动存档无法恢复，原存档未覆盖：${e}`;

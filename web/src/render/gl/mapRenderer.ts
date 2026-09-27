@@ -415,6 +415,14 @@ export class MapGlRenderer {
     return !this.failed;
   }
 
+  /** 预热：为件集构建环几何/三角化缓存（切层顺滑；缓存按环对象存续） */
+  prime(pieces: PieceParams[]): void {
+    for (const p of pieces) {
+      if (p.fullFrame || !p.rings.length) continue;
+      this.pieceGeo(p.rings, p.smooth);
+    }
+  }
+
   /** 逐帧直绘：bg + cellsMesh + elements。true = 已绘；false = 调用方回退 Canvas2D */
   render(env: RenderEnv, channels: { cellsMesh: boolean; elements: boolean }): boolean {
     if (this.failed) return false;

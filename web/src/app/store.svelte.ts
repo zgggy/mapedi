@@ -3,7 +3,7 @@ import { defaultLayerRenderConfig } from '../core/types';
 import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
 import { invalidateProjCache } from '../render/projCache';
-import { invalidateBorderCache } from '../render/borderCache';
+import { invalidateBorderCache, invalidatePieceEntries } from '../render/borderCache';
 import { invalidateStaticLayer, markDirtyCells } from '../render/staticLayerCache';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
@@ -49,6 +49,7 @@ import {
   materializeParentCells,
 } from '../core/displayCompose';
 import { bumpAllRev, bumpHeightRev, bumpRegionsRev } from '../core/rev';
+import { DEFAULT_DENSITY } from '../core/world';
 import { generateWorldAsync } from '../core/generate/runGenerate';
 import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
 import { defaultPathColor } from '../core/paths';
@@ -103,7 +104,7 @@ const ui = $state({
   genProgress: 0,
   genStep: '',
   seedInput: String(Math.floor(Math.random() * 1e9)),
-  densityInput: 30000,
+  densityInput: DEFAULT_DENSITY,
   densityUnlocked: false,
   focusLayer: 'cells',
   selectedRegionId: null as string | null,
@@ -329,10 +330,12 @@ export class EditorStore {
   private heightDirtyIds: Set<number> | null = null;
   private heightNotifyQueued = false;
 
-  touchHeight() {
+  /** full=true 全清环缓存（拓扑翻转/撤销）；false 只做定向失效（笔刷 tick 已增量维护件环） */
+  touchHeight(full = true) {
     invalidateRegionIndex();
     invalidateCellGrid();
-    invalidateBorderCache();
+    if (full) invalidateBorderCache();
+    else invalidatePieceEntries('piece:landsea:');
     invalidateStaticLayer();
     bumpHeightRev();
     bumpRegionsRev();
@@ -348,11 +351,14 @@ export class EditorStore {
   }
 
   /** commit 后：拓扑变才 rebuild；尽量增量 */
-  private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]) {
+  private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[], skipIntervals = false) {
     if (!this.world) return;
     const sampleIds = samples?.map((s) => s.id) ?? null;
-    // 区间嵌套归属：有 samples 时增量更新（只动受影响区间），否则全量重建
-    if (samples && samples.length) {
+    // 区间嵌套归属：有 samples 时增量更新（只动受影响区间），否则全量重建。
+    // skipIntervals：归属已由笔刷 tick 增量维护（二期），commit 严禁二次套用（会重复入列）
+    if (skipIntervals) {
+      // 归属已是最新
+    } else if (samples && samples.length) {
       updateHeightIntervalElements(this.world, samples);
     } else {
       rebuildHeightIntervalElements(this.world);
@@ -374,6 +380,18 @@ export class EditorStore {
     this.heightDirtyIds = null;
     bumpHeightRev();
     bumpRegionsRev();
+  }
+
+  /** 二期：笔刷 tick 的区间增减队列（渲染侧消费后打件环补丁） */
+  private pendingHeightDeltas: import('../core/layer/heightElements').HeightIntervalDelta[] = [];
+  /** 每 stroke 的区间基线：上次区间更新后的高度（净差正确性关键） */
+  private intervalBaseline = new Map<number, number>();
+
+  consumeHeightDeltas(): import('../core/layer/heightElements').HeightIntervalDelta[] | null {
+    if (!this.pendingHeightDeltas.length) return null;
+    const out = this.pendingHeightDeltas;
+    this.pendingHeightDeltas = [];
+    return out;
   }
 
   private touchPaint() {
@@ -1051,12 +1069,27 @@ export class EditorStore {
       touched: this.heightTouched ?? new Set(),
     };
     heightDrawStroke(this.world, input);
+    const tickSamples: { id: number; h0: number; h1: number }[] = [];
     for (const id of hits) {
       const c = this.world.cells[id];
       if (!c) continue;
       if (c.isOcean) releaseOceanCell(this.world, c.id);
       else absorbLandCell(this.world, c.id);
       this.markHeightDirty([c.id]);
+      // 二期：区间归属每 tick 增量生效（基线 = 上次区间更新后的高度）
+      const base = this.intervalBaseline.has(id)
+        ? this.intervalBaseline.get(id)!
+        : (this.heightStroke?.find((s) => s.id === id)?.h ?? c.height);
+      tickSamples.push({ id, h0: base, h1: c.height });
+      this.intervalBaseline.set(id, c.height);
+    }
+    if (tickSamples.length && this.world) {
+      const deltas = updateHeightIntervalElements(this.world, tickSamples);
+      if (deltas.length) {
+        this.pendingHeightDeltas.push(...deltas);
+        bumpHeightRev();
+        bumpRegionsRev();
+      }
     }
     if (!this.heightNotifyQueued) {
       this.heightNotifyQueued = true;
@@ -1080,23 +1113,26 @@ export class EditorStore {
       const w = this.world!;
       const dirtyIds = samples.map((s) => s.id);
       const cmd = new HeightStrokeCommand(samples, '高度笔刷');
+      const topoChanged = heightTopologyChanged(samples);
       cmd.afterApply = () => {
         this.markHeightDirty(dirtyIds);
-        this.flushHeightRegions(samples);
-        this.touchHeight();
+        // 归属已由 tick 增量维护 → 跳过二次套用；拓扑翻转只定向失效 landsea 件
+        this.flushHeightRegions(samples, true);
+        this.touchHeight(topoChanged);
       };
       cmd.afterRevert = () => {
         this.markHeightDirty(dirtyIds);
-        this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })));
-        this.touchHeight();
+        this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })), false);
+        this.touchHeight(true);
       };
       history.run(w, cmd, { alreadyApplied: true });
       this.heightStroke = null;
       this.strokeRegionId = null;
       this.paintDirty = false;
+      this.intervalBaseline.clear();
       this.markHeightDirty(dirtyIds);
       // 拓扑翻转会重塑远处边界 → 全量；纯高度微调只重烘 stroke 波及 cell
-      markDirtyCells(heightTopologyChanged(samples) ? 'all' : dirtyIds);
+      markDirtyCells(topoChanged ? 'all' : dirtyIds);
       this.flushHeightRegions(samples);
       if (this.world) this.world = { ...this.world };
       this.notify();

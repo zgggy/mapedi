@@ -63,12 +63,35 @@ export function indexEdgesByPair(world: World): Map<string, BoundEdge> {
 }
 
 /** 集合边界边：恰好一端在 cellSet 内 */
+/**
+ * 不在任何 cell.neighbors 表里的边（极区补边/框边等）——只随 pairEdgeCache 构建一次。
+ * 命中：cellSetBoundaryEdges 的第二循环只扫这张小表，不再 O(全部边) 解析 ek。
+ */
+export function pseudoEdgeList(
+  world: World,
+  pair: Map<string, BoundEdge>,
+): BoundEdge[] {
+  const seen = new Set<string>();
+  for (const cell of world.cells) {
+    for (const n of cell.neighbors) {
+      const ek = cell.id < n ? `${cell.id}-${n}` : `${n}-${cell.id}`;
+      seen.add(ek);
+    }
+  }
+  const out: BoundEdge[] = [];
+  for (const [ek, e] of pair) {
+    if (!seen.has(ek)) out.push(e);
+  }
+  return out;
+}
+
 export function cellSetBoundaryEdges(
   world: World,
-  cellIds: Iterable<CellId>,
+  cellIds: Iterable<CellId> | Set<CellId>,
   edgeByPair?: Map<string, BoundEdge>,
+  pseudo?: BoundEdge[],
 ): BoundEdge[] {
-  const set = new Set(cellIds);
+  const set = cellIds instanceof Set ? cellIds : new Set(cellIds);
   const out: BoundEdge[] = [];
   if (!set.size) return out;
   const pair = edgeByPair ?? indexEdgesByPair(world);
@@ -88,12 +111,23 @@ export function cellSetBoundaryEdges(
       if (e) push(e);
     }
   }
-  for (const [ek, e] of pair) {
-    const dash = ek.indexOf('-');
-    if (dash < 0) continue;
-    const i = +ek.slice(0, dash);
-    const j = +ek.slice(dash + 1);
-    if (set.has(i) !== set.has(j)) push(e);
+  // 伪边（极区补边等）：小表直扫；缺省则退回全 pair 扫（正确优先）
+  if (pseudo) {
+    for (const e of pseudo) {
+      const dash = e.ek.indexOf('-');
+      if (dash < 0) continue;
+      const i = +e.ek.slice(0, dash);
+      const j = +e.ek.slice(dash + 1);
+      if (set.has(i) !== set.has(j)) push(e);
+    }
+  } else {
+    for (const [ek, e] of pair) {
+      const dash = ek.indexOf('-');
+      if (dash < 0) continue;
+      const i = +ek.slice(0, dash);
+      const j = +ek.slice(dash + 1);
+      if (set.has(i) !== set.has(j)) push(e);
+    }
   }
   return out;
 }
@@ -230,7 +264,7 @@ export function chainEdgesToMidpointRings(
   return rings;
 }
 
-function edgeListToRings(
+export function edgeListToRings(
   edgeSrc: BoundEdge[],
   project: (ll: LonLat) => Pt,
   period: number,
@@ -259,7 +293,7 @@ export function cellSetBoundaryRings(
   edgeSrc?: BoundEdge[],
   period = Math.PI * 2,
 ): MidRing[] {
-  const set = new Set(cellIds);
-  const edges = edgeSrc ?? cellSetBoundaryEdges(world, set);
+  // 给定边集（增量路径）时禁止再建 Set：链化只依赖边，O(边界) 而非 O(cell)
+  const edges = edgeSrc ?? cellSetBoundaryEdges(world, cellIds);
   return edgeListToRings(edges, project, period);
 }

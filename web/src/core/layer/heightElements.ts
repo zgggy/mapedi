@@ -79,15 +79,28 @@ export function heightIntervalRegions(world: World): Region[] {
  * 增量更新高度区间：只动被改 cell 所属的区间，不全量重扫。
  * 每个区间是嵌套集（h ≥ lo），cell 在 old→new 间迁移时只影响中间几档。
  */
+export interface HeightIntervalDelta {
+  layerId: string;
+  regionId: string;
+  added: number[];
+  removed: number[];
+}
+
+/**
+ * 增量更新区间归属；返回每区增减（二期：供件环补丁）。
+ * h0 = 上次区间更新后的高度（调用方维护基线），h1 = 当前高度——多次触碰同一 cell 必须
+ * 用「上次基线→当前」的净差，否则来回涂改会漏归属。
+ */
 export function updateHeightIntervalElements(
   world: World,
   samples: { id: number; h0: number; h1: number }[],
-): void {
+): HeightIntervalDelta[] {
   const els = heightIntervalRegions(world);
   if (els.length !== 12) {
     rebuildHeightIntervalElements(world);
-    return;
+    return [];
   }
+  const out: HeightIntervalDelta[] = els.map((r) => ({ layerId: r.layerId, regionId: r.id, added: [], removed: [] }));
   for (const s of samples) {
     const h0 = Math.round(s.h0);
     const h1 = Math.round(s.h1);
@@ -98,9 +111,12 @@ export function updateHeightIntervalElements(
       const inNew = h1 >= lo;
       if (inOld && !inNew) {
         els[i].cells = els[i].cells.filter((id) => id !== s.id);
+        out[i].removed.push(s.id);
       } else if (!inOld && inNew) {
         els[i].cells.push(s.id);
+        out[i].added.push(s.id);
       }
     }
   }
+  return out.filter((d) => d.added.length || d.removed.length);
 }

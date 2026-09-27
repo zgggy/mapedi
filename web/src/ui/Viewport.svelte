@@ -4,6 +4,7 @@
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
   import { markDirtyCells } from '../render/staticLayerCache';
+  import { patchPieceEntry } from '../render/borderCache';
   import {
     unproject,
     project,
@@ -15,6 +16,7 @@
     defaultCamera,
     drawWorld,
     screenToWorld,
+    warmLayerGeometry,
     type Camera,
     type HoverInfo,
   } from '../render/map2d';
@@ -601,6 +603,38 @@
     }
   }
 
+  // 切层顺滑：世界稳定后预热各层件几何（环/样条/三角化/Path2D），切层命中缓存
+  let warmTimer = 0;
+  function scheduleWarm() {
+    clearTimeout(warmTimer);
+    warmTimer = setTimeout(() => {
+      if (!canvas || !world.cells.length) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const gl = ensureMapGl();
+      warmLayerGeometry(
+        ctx,
+        world,
+        cam,
+        dpr,
+        {
+          focusLayer,
+          focusLayerId: focusLayer,
+          projection,
+          projParams,
+          reliefSmooth,
+          styleId,
+          displayPieces: undefined,
+          showCellMesh: false,
+          styleOf: (id: string) => resolveLayerStyle(world, id),
+        },
+        world.layers.map((l) => l.id),
+        (pieces) => gl?.prime(pieces),
+      );
+    }, 600);
+  }
+
   // GL 直绘场景：惰性创建（显示面板切到 GPU 才建）；失败/异常整帧回退 Canvas2D（显示不降级）
   let mapGl: MapGlRenderer | null = null;
   let mapGlFailed = false;
@@ -613,9 +647,39 @@
     return mapGl;
   }
 
+  /** 指针捕获对已释放/合成指针抛 NotFoundError——不得炸穿 handler（运行时错误见一例修一例） */
+  function capturePointer(c: HTMLCanvasElement, id: number) {
+    try {
+      c.setPointerCapture(id);
+    } catch {
+      /* 捕获失败不影响拖动状态机 */
+    }
+  }
+  function releasePointer(c: HTMLCanvasElement, id: number) {
+    try {
+      if (c.hasPointerCapture?.(id)) c.releasePointerCapture(id);
+    } catch {
+      /* 同上 */
+    }
+  }
+
   function render() {
     if (!canvas) return;
     syncBackingStore();
+    // 二期：笔刷 Δ → 件环就地补丁（O(|Δ|·deg + 受牵连环)），渲染层持有投影器故在此消费
+    const deltas = editor.consumeHeightDeltas();
+    if (deltas?.length) {
+      for (const d of deltas) {
+        patchPieceEntry(
+          world,
+          `piece:${d.layerId}:${d.regionId}:0`,
+          projection,
+          (ll) => project(ll, projection, projParams ?? defaultProjParams()),
+          d.added,
+          d.removed,
+        );
+      }
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
@@ -726,6 +790,14 @@
     requestOverlay();
   });
 
+  // 世界变化后调度预热（切层顺滑）
+  $effect(() => {
+    void world.cells.length;
+    void world.regions.length;
+    void world.layers.length;
+    scheduleWarm();
+  });
+
   // hover 只刷覆盖层（高度标注/笔刷反馈）；地图管线无 hover 消费者，不重绘
   $effect(() => {
     void hoverId;
@@ -792,7 +864,7 @@
         panningLive = true;
         lastX = e.clientX;
         lastY = e.clientY;
-        canvas.setPointerCapture(e.pointerId);
+        capturePointer(canvas, e.pointerId);
         return;
       }
       // 右键：拖动地图内容相对于矩形的偏移
@@ -800,7 +872,7 @@
         panningMode = 'content';
         lastX = e.clientX;
         lastY = e.clientY;
-        canvas.setPointerCapture(e.pointerId);
+        capturePointer(canvas, e.pointerId);
         e.preventDefault();
         return;
       }
@@ -854,7 +926,7 @@
               editor.selectedRegionId = hitPath.id;
               editor.draw = { ...editor.draw, targetRegionId: hitPath.id };
             }
-            canvas.setPointerCapture(e.pointerId);
+            capturePointer(canvas, e.pointerId);
             requestOverlay();
             return;
           }
@@ -878,7 +950,7 @@
               dragPathIdx = world.paths.indexOf(path);
               dragPtIdx = 1;
               dragGhostPts = null;
-              canvas.setPointerCapture(e.pointerId);
+              capturePointer(canvas, e.pointerId);
               editor.touchWorld();
               requestRender();
             }
@@ -894,7 +966,7 @@
             path.points = nextPts;
             dragPathIdx = world.paths.indexOf(path);
             dragPtIdx = index;
-            canvas.setPointerCapture(e.pointerId);
+            capturePointer(canvas, e.pointerId);
             editor.touchWorld();
             requestRender();
           }
@@ -905,7 +977,7 @@
           const ep = nearestEndpoint(ll.lon, ll.lat);
           if (ep !== null) {
             dragEndpoint = ep;
-            canvas.setPointerCapture(e.pointerId);
+            capturePointer(canvas, e.pointerId);
             onendpoint?.(ep, ll.lon, ll.lat, 'start');
             return;
           }
@@ -917,7 +989,7 @@
           brushSx = e.clientX - rect.left;
           brushSy = e.clientY - rect.top;
         }
-        canvas.setPointerCapture(e.pointerId);
+        capturePointer(canvas, e.pointerId);
         paintAt(e);
       }
     }}
@@ -1020,7 +1092,7 @@
       panningLive = false;
       panningMode = null;
       painting = false;
-      canvas.releasePointerCapture?.(e.pointerId);
+      releasePointer(canvas, e.pointerId);
       requestRender();
     }}
     onpointerleave={() => {

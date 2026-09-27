@@ -12,7 +12,7 @@
     genProgress = 0,
     genStep = '',
     seedInput = '1',
-    densityInput = 30000,
+    densityInput = 100000,
     autosaveAt = '',
     /* 球面参数（顶栏内展示） */
     globeShowAxis = true,

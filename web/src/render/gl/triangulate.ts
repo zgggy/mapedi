@@ -64,6 +64,9 @@ function flatOf(pts: { x: number; y: number }[]): number[] {
   return out;
 }
 
+/** 组级剖分缓存：同一外环（含其洞签名）不重复 earcut（笔刷 tick 只重建受牵连组） */
+const groupCache = new WeakMap<object, { holesKey: string; tris: Float32Array; areaOk: boolean }>();
+
 export interface PieceFill {
   /** 三角形顶点 [x,y]×3×n（直绘） */
   tris: Float32Array;
@@ -120,15 +123,22 @@ export function triangulateRings(entries: RingSample[]): PieceFill | null {
   const parts: number[] = [];
   let expectArea = 0;
   for (const o of outers) {
+    const op0 = sampled.get(o) ?? o.pts;
     const op = sampled.get(o) ?? o.pts;
     if (op.length < 3) continue;
     const outerFlat = cleanPoly(flatOf(op));
+    const holeFlats = (holeByOuter.get(o) ?? []).map((hp) => cleanPoly(flatOf(hp)));
+    const holesKey = holeFlats.map((f) => `${f.length / 2}@${f[0]},${f[1]}`).join(';');
+    const cached = groupCache.get(o as unknown as object);
+    if (cached && cached.holesKey === holesKey) {
+      if (cached.tris.length) parts.push(...cached.tris);
+      expectArea += Math.abs(signedAreaFlat(outerFlat));
+      for (const f of holeFlats) expectArea -= Math.abs(signedAreaFlat(f));
+      if (!cached.areaOk) return { tris: Float32Array.from(parts), areaOk: false };
+      continue;
+    }
     expectArea += Math.abs(signedAreaFlat(outerFlat));
-    const holeFlats = (holeByOuter.get(o) ?? []).map((hp) => {
-      const f = cleanPoly(flatOf(hp));
-      expectArea -= Math.abs(signedAreaFlat(f));
-      return f;
-    });
+    for (const f of holeFlats) expectArea -= Math.abs(signedAreaFlat(f));
     // 顶点布局 = [外环..., 洞1..., 洞2...]，与 triangulateShape 的索引空间一致
     const verts: number[] = outerFlat.slice();
     const holePts: Vector2[][] = [];
@@ -143,11 +153,18 @@ export function triangulateRings(entries: RingSample[]): PieceFill | null {
     for (let i = 0; i < outerFlat.length; i += 2) contour.push(new Vector2(outerFlat[i], outerFlat[i + 1]));
     // three.ShapeUtils（内含 mapbox Earcut）：带洞三角化，O(n log n)、复杂边界稳健
     const faces = ShapeUtils.triangulateShape(contour, holePts);
+    const groupTris: number[] = [];
     for (const [a, b, c] of faces) {
       for (const k of [a, b, c]) {
-        parts.push(verts[k * 2], verts[k * 2 + 1]);
+        groupTris.push(verts[k * 2], verts[k * 2 + 1]);
       }
     }
+    groupCache.set(o as unknown as object, {
+      holesKey,
+      tris: Float32Array.from(groupTris),
+      areaOk: true, // 组级自检在总自检里过；分组缓存只挡重复剖分
+    });
+    for (const v of groupTris) parts.push(v);
   }
   if (!parts.length) return null;
   const tris = Float32Array.from(parts);

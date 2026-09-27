@@ -10,36 +10,101 @@ import {
   type BoundEdge,
 } from '../core/ring/build';
 import type { MidRing } from '../core/ring/displayRing';
-import type { Pt } from '../render/space';
+import type { Pt, LonLat } from '../render/space';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
 import { landSeaKindOf } from '../core/layer/landSea';
 import { projectionWorldPeriod, type ProjectionId } from '../core/project/projections';
 import { polarCellIds } from '../core/voronoi';
+import {
+  buildIncidentEdges,
+  patchBoundaryBook,
+  ringsFromBook,
+  type BoundaryBook,
+  type IncidentEdges,
+} from '../core/ring/incremental';
+import { pseudoEdgeList } from '../core/ring/build';
 
 export type Ring = MidRing;
 
-type Entry = {
+export type Entry = {
   rings: Ring[];
   poles: { north: boolean; south: boolean };
   fullWorld: boolean;
   bbox: { minX: number; maxX: number; minY: number; maxY: number };
+  /** 增量维护载体（二期：笔刷实时生效）；补丁路径就地更新 set/edges/rings */
+  book?: BoundaryBook;
 };
 
 let ringsCache = new Map<string, Entry>();
 let pairEdgeCache: Map<string, BoundEdge> | null = null;
+let pseudoEdgeCache: BoundEdge[] | null = null;
 let pairEdgeGeomRev = -1;
 let continentCentersCache: { sig: string; centers: { x: number; y: number }[] } | null = null;
 let baseRev = '';
 let cachedWorld: World | null = null;
 
+/** 按 setKey 前缀失效（如拓扑翻转只清 landsea 件）——避免全清的松手卡顿 */
+export function invalidatePieceEntries(prefix: string): void {
+  for (const k of ringsCache.keys()) {
+    if (k.startsWith(prefix)) ringsCache.delete(k);
+  }
+}
+
 export function invalidateBorderCache(): void {
   ringsCache = new Map();
   pairEdgeCache = null;
+  pseudoEdgeCache = null;
   pairEdgeGeomRev = -1;
   continentCentersCache = null;
   baseRev = '';
   cachedWorld = null;
+}
+
+
+
+/** 关联边索引（cell → 边）；与 pairEdgeCache 同代构建 */
+let incidentCache: IncidentEdges | null = null;
+
+/**
+ * 增量补丁（二期）：成员变化后**就地**更新件的边集/环。
+ * O(|Δ|·deg + 受牵连环链化)；未变环复用旧对象（下游 hermite/三角化缓存命中）。
+ * 调用约定：`set` 已是新归属；未缓存的件无需补丁（下次常规构建）。
+ */
+export function patchPieceEntry(
+  world: World,
+  setKey: string,
+  projKey: ProjectionId,
+  project: (ll: LonLat) => Pt,
+  added: CellId[],
+  removed: CellId[],
+): boolean {
+  const key = ringCacheKey(setKey, projKey);
+  const entry = ringsCache.get(key);
+  if (!entry?.book) return false;
+  if (!pairEdgeCache) {
+    pairEdgeCache = indexEdgesByPair(world);
+    pseudoEdgeCache = pseudoEdgeList(world, pairEdgeCache);
+    incidentCache = null;
+  }
+  if (!incidentCache) incidentCache = buildIncidentEdges(world, pairEdgeCache);
+  const b = entry.book;
+  for (const id of added) b.set.add(id);
+  for (const id of removed) b.set.delete(id);
+  const changed = [...added, ...removed];
+  if (!changed.length || !patchBoundaryBook(b, incidentCache, changed)) return false;
+  entry.rings = ringsFromBook(
+    entry.book,
+    world,
+    project,
+    projectionWorldPeriod(projKey) ?? Math.PI * 2,
+    entry.rings,
+  );
+  const owners = polarCellIds(world.cells);
+  entry.poles = { north: b.set.has(owners.north), south: b.set.has(owners.south) };
+  entry.fullWorld = world.cells.length > 0 && b.set.size === world.cells.length;
+  entry.bbox = ringBBox(entry.rings);
+  return true;
 }
 
 function ensureRev(world: World): string {
@@ -63,29 +128,13 @@ function ensureRev(world: World): string {
  *  不含 dataRev——未变化的 cell 集跨修订号命中（提交只重链变化的元素）；
  *  几何域变（重生/导入）则全部重链。 */
 /**
- * cellIds 指纹：按**数组引用 + dataRev** 记忆（WeakMap）。
- * 热路径纪律（AGENTS.md §8/9）：失效用 rev 计数，不做逐帧 O(n) 全量指纹——
- * 件集数组跨帧引用稳定（composePieces 已 rev 缓存），指纹一次 O(n)/rev，不再每帧扫 10 万 id。
- * 前提：cellIds 内容变化必伴随 dataRev 提升（与 composePieces 缓存同一前提）；长度另校验兜底。
+ * 环缓存键：setKey（`piece:${dp.key}`）+ 投影 + geomRev。
+ * **不含内容指纹**（O(n) 指纹是热路径反模式，AGENTS.md §8/9）。
+ * 不变量：`region.cells` 变化要么走 `invalidateBorderCache()`（全量），
+ * 要么走 `patchPieceEntry()`（增量补丁）——二者互斥且必居其一。
  */
-const cellSetFpMemo = new WeakMap<object, { rev: string; n: number; fp: string }>();
-function cellSetFingerprint(cellIds: CellId[]): string {
-  const rev = dataRev();
-  const hit = cellSetFpMemo.get(cellIds as unknown as object);
-  if (hit && hit.rev === rev && hit.n === cellIds.length) return hit.fp;
-  let h = 2166136261;
-  let sum = 0;
-  for (const id of cellIds) {
-    h = Math.imul(h ^ id, 16777619);
-    sum += id;
-  }
-  const fp = `${cellIds.length}|${sum}|${h >>> 0}`;
-  cellSetFpMemo.set(cellIds as unknown as object, { rev, n: cellIds.length, fp });
-  return fp;
-}
-
-function ringCacheKey(setKey: string, projKey: string, cellIds: CellId[]): string {
-  return `${setKey}|${projKey}|${geomRev()}|${cellSetFingerprint(cellIds)}`;
+function ringCacheKey(setKey: string, projKey: string): string {
+  return `${setKey}|${projKey}|${geomRev()}`;
 }
 
 export function getCellSetRingsCached(
@@ -96,7 +145,7 @@ export function getCellSetRingsCached(
   setKey = '',
 ): Entry {
   ensureRev(world);
-  const key = ringCacheKey(setKey, projKey, cellIds);
+  const key = ringCacheKey(setKey, projKey);
   const hit = ringsCache.get(key);
   if (hit) return hit;
   // 有界增长：按插入序淘汰最旧（变化元素每修订只新增少量条目）
@@ -108,18 +157,24 @@ export function getCellSetRingsCached(
   }
   if (!pairEdgeCache) {
     pairEdgeCache = indexEdgesByPair(world);
+    pseudoEdgeCache = pseudoEdgeList(world, pairEdgeCache);
   }
-  const edges = cellSetBoundaryEdges(world, cellIds, pairEdgeCache);
+  const set = cellIds instanceof Set ? cellIds : new Set(cellIds);
+  const edges = cellSetBoundaryEdges(world, set, pairEdgeCache, pseudoEdgeCache ?? undefined);
   const rings = cellSetBoundaryRings(
-    world, cellIds, project, edges, projectionWorldPeriod(projKey) ?? Math.PI * 2,
+    world, set, project, edges, projectionWorldPeriod(projKey) ?? Math.PI * 2,
   );
   const owners = polarCellIds(world.cells);
-  const set = new Set(cellIds);
   const entry: Entry = {
     rings,
     poles: { north: set.has(owners.north), south: set.has(owners.south) },
     fullWorld: world.cells.length > 0 && set.size === world.cells.length,
     bbox: ringBBox(rings),
+    // 增量载体：边集/成员集在建缓存时零成本播种；补丁路径就地维护
+    book: {
+      set,
+      edges: new Map(edges.map((e) => [e.ek, e])),
+    },
   };
   ringsCache.set(key, entry);
   return entry;

@@ -3,7 +3,7 @@
 
   let {
     seedInput = $bindable(''),
-    densityInput = $bindable(30000),
+    densityInput = $bindable(100000),
     generating = false,
     genProgress = 0,
     genStep = '',
