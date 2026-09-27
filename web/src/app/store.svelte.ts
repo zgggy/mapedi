@@ -227,6 +227,9 @@ export class EditorStore {
 
   private paintDirty = false;
   private strokeRegionId: string | null = null;
+  private strokeRegionLayer: string | null = null;
+  /** 提交后需定向失效的件前缀（渲染侧消费；守「全清/补丁」不变量） */
+  private pendingPieceInvalidations: string[] = [];
   private strokeAdd: number[] = [];
   private strokeRm: number[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -355,15 +358,13 @@ export class EditorStore {
   }
 
   /** commit 后：拓扑变才 rebuild；尽量增量 */
-  private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[], skipIntervals = false) {
+  private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]) {
     if (!this.world) return;
     const sampleIds = samples?.map((s) => s.id) ?? null;
-    // 区间嵌套归属：有 samples 时增量更新（只动受影响区间），否则全量重建。
-    // skipIntervals：归属已由笔刷 tick 增量维护（二期），commit 严禁二次套用（会重复入列）
-    if (skipIntervals) {
-      // 归属已是最新
-    } else if (samples && samples.length) {
-      updateHeightIntervalElements(this.world, samples);
+    // 【绘制模型】区间归属只在松手时一次重算；Δ 交给渲染侧打件环补丁
+    if (samples && samples.length) {
+      const deltas = updateHeightIntervalElements(this.world, samples);
+      if (deltas.length) this.pendingHeightDeltas.push(...deltas);
     } else {
       rebuildHeightIntervalElements(this.world);
     }
@@ -388,8 +389,12 @@ export class EditorStore {
 
   /** 二期：笔刷 tick 的区间增减队列（渲染侧消费后打件环补丁） */
   private pendingHeightDeltas: import('../core/layer/heightElements').HeightIntervalDelta[] = [];
-  /** 每 stroke 的区间基线：上次区间更新后的高度（净差正确性关键） */
-  private intervalBaseline = new Map<number, number>();
+  consumePieceInvalidations(): string[] | null {
+    if (!this.pendingPieceInvalidations.length) return null;
+    const out = this.pendingPieceInvalidations;
+    this.pendingPieceInvalidations = [];
+    return out;
+  }
 
   consumeHeightDeltas(): import('../core/layer/heightElements').HeightIntervalDelta[] | null {
     if (!this.pendingHeightDeltas.length) return null;
@@ -1014,17 +1019,23 @@ export class EditorStore {
     }
   }
 
-  paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0) {
-    if (!this.world || !this.draw.active) return;
+  paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): number[] | null {
+    if (!this.world || !this.draw.active) return null;
     const resolved = resolveDrawTarget(this.world, this.draw);
-    if (!resolved) return;
+    if (!resolved) return null;
     if (resolved === 'height') {
-      this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 ? 'right' : 'left');
-      return;
+      return this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 ? 'right' : 'left');
     }
     const pointer = button === 2 || shift ? 'right' : 'left';
     const hits = cellsInBrush(this.world, lon, lat, this.draw.radiusDeg);
-    if (!hits.length) return;
+    if (!hits.length) return null;
+    if (!this.paintDirty) {
+      this.strokeRegionId = resolved.region.id;
+      this.strokeRegionLayer = resolved.region.layerId;
+      this.strokeAdd = [];
+      this.strokeRm = [];
+      this.paintDirty = true;
+    }
     const lcfg = defaultLayerConfig(resolved.region.layerId);
     const actor: DrawActor = {
       layerId: resolved.region.layerId,
@@ -1042,18 +1053,26 @@ export class EditorStore {
     });
     if (result.membershipChanges.length) {
       this.selectedRegionId = resolved.region.id;
-      this.touchPaint();
+      // 记录本 stroke 的增减（撤销/重做 + 提交定向失效都靠它）
+      for (const ch of result.membershipChanges) {
+        if (ch.toElementId === resolved.region.id && !this.strokeAdd.includes(ch.cellId)) {
+          this.strokeAdd.push(ch.cellId);
+        } else if (ch.fromElementId === resolved.region.id && !this.strokeRm.includes(ch.cellId)) {
+          this.strokeRm.push(ch.cellId);
+        }
+      }
     }
     void placementAllows;
     void ctrl;
+    return hits;
   }
 
   /** 高度笔刷：HeightDraw 整数语义 */
-  paintHeight(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, pointer: 'left' | 'right' = 'left') {
-    if (!this.world) return;
+  paintHeight(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, pointer: 'left' | 'right' = 'left'): number[] | null {
+    if (!this.world) return null;
     const radius = this.draw.radiusDeg || 1.2;
     const hits = cellsInBrush(this.world, lon, lat, radius);
-    if (!hits.length) return;
+    if (!hits.length) return null;
     const intervalId = this.heightIntervalId ?? 'h6';
     if (!this.paintDirty) {
       this.strokeRegionId = '__height__';
@@ -1073,37 +1092,16 @@ export class EditorStore {
       touched: this.heightTouched ?? new Set(),
     };
     heightDrawStroke(this.world, input);
-    const tickSamples: { id: number; h0: number; h1: number }[] = [];
     for (const id of hits) {
       const c = this.world.cells[id];
       if (!c) continue;
       if (c.isOcean) releaseOceanCell(this.world, c.id);
       else absorbLandCell(this.world, c.id);
       this.markHeightDirty([c.id]);
-      // 二期：区间归属每 tick 增量生效（基线 = 上次区间更新后的高度）
-      const base = this.intervalBaseline.has(id)
-        ? this.intervalBaseline.get(id)!
-        : (this.heightStroke?.find((s) => s.id === id)?.h ?? c.height);
-      tickSamples.push({ id, h0: base, h1: c.height });
-      this.intervalBaseline.set(id, c.height);
     }
-    if (tickSamples.length && this.world) {
-      const deltas = updateHeightIntervalElements(this.world, tickSamples);
-      if (deltas.length) {
-        this.pendingHeightDeltas.push(...deltas);
-        bumpHeightRev();
-        bumpRegionsRev();
-      }
-    }
-    if (!this.heightNotifyQueued) {
-      this.heightNotifyQueued = true;
-      requestAnimationFrame(() => {
-        this.heightNotifyQueued = false;
-        if (!this.world) return;
-        this.world = { ...this.world };
-        this.notify();
-      });
-    }
+    // 【绘制模型】拖动中零重算：只回传命中 cell 供色块高亮；
+    // 区间归属/件环/rev 的重算在 commitStroke 一次完成（用户定：先高亮，松手才重算）
+    return hits;
   }
 
   commitStroke() {
@@ -1120,20 +1118,19 @@ export class EditorStore {
       const topoChanged = heightTopologyChanged(samples);
       cmd.afterApply = () => {
         this.markHeightDirty(dirtyIds);
-        // 归属已由 tick 增量维护 → 跳过二次套用；拓扑翻转只定向失效 landsea 件
-        this.flushHeightRegions(samples, true);
+        this.flushHeightRegions(samples);
         this.touchHeight(false);
       };
       cmd.afterRevert = () => {
         this.markHeightDirty(dirtyIds);
-        this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })), false);
+        this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })));
         this.touchHeight(true);
       };
       history.run(w, cmd, { alreadyApplied: true });
       this.heightStroke = null;
       this.strokeRegionId = null;
+      this.strokeRegionLayer = null;
       this.paintDirty = false;
-      this.intervalBaseline.clear();
       this.markHeightDirty(dirtyIds);
       // 拓扑翻转会重塑远处边界 → 全量；纯高度微调只重烘 stroke 波及 cell
       markDirtyCells(topoChanged ? 'all' : dirtyIds);
@@ -1150,14 +1147,20 @@ export class EditorStore {
         { alreadyApplied: true },
       );
     }
+    const committedRegion = this.strokeRegionId;
+    const committedLayer = this.strokeRegionLayer;
     this.strokeRegionId = null;
+    this.strokeRegionLayer = null;
     this.strokeAdd = [];
     this.strokeRm = [];
     this.paintDirty = false;
-    // 归属提交：脏矩形增量重烘（只重画 stroke 波及的 cell）；几何/投影缓存不变
+    // 归属提交：定向失效本区域件（指纹已废，「全清/补丁」二选一的不变量必须在这里兑现）
     if (strokeDirty.length) {
       markDirtyCells(strokeDirty);
       this.touchRegionsIncremental();
+      if (committedLayer && committedRegion) {
+        this.pendingPieceInvalidations.push(`piece:${committedLayer}:${committedRegion}:`);
+      }
     } else {
       this.touchRegions();
     }

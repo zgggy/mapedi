@@ -10,6 +10,7 @@ import {
 import type { ProjCache } from './projCache';
 import {
   getCellSetRingsCached,
+  hasPieceEntry,
 } from './borderCache';
 import { defaultExclusiveColor } from '../core/layer/style';
 import { prepareDisplayRings } from '../core/ring/normalize';
@@ -53,6 +54,8 @@ export interface RenderEnv {
   worldDxs?: number[];
   /** 平移/缩放中：跳过脏区域重烘焙（贴图本身仍 1:1，不拉伸） */
   isDragging?: boolean;
+  /** 渐现：冷件（环未预热）跳过并入队，空闲补热后由 onGeometryReady 触发重绘 */
+  warmQueue?: DisplayPiece[];
   /** 单周期贴图的接缝余量；仅扩展离屏绘制裁剪，不改变地图外框 */
   periodicTilePadX?: number;
   /** 烘焙代理的裁剪补偿：viewport 模式内容位移折进了相机，裁剪需补内容偏移；
@@ -363,7 +366,13 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
 
     const rid = dp.regionId;
     const sel = dp.regionSelected || highlightRegionId === rid;
-    const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, `piece:${dp.key}`);
+    const setKey = `piece:${dp.key}`;
+    // 渐现：环未预热的件先跳过（拖缓元素出现，不阻塞交互）；入队由空闲补热
+    if (env.warmQueue && !hasPieceEntry(setKey, env.proj)) {
+      env.warmQueue.push(dp);
+      continue;
+    }
+    const entry = getCellSetRingsCached(world, dp.cellIds, project, env.proj, setKey);
     // 跳过判定（仅对有环元素）：
     // 1) 无环片（整框底色等）无包围盒语义，永不跳过；
     // 2) 有环片按**周期相交**判定——元素可经 k 个世界副本平移后落入窗口，

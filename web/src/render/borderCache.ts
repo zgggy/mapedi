@@ -44,6 +44,11 @@ let continentCentersCache: { sig: string; centers: { x: number; y: number }[] } 
 let baseRev = '';
 let cachedWorld: World | null = null;
 
+/** 件环条目是否已就绪（渐现：冷件先跳过，由空闲预热补） */
+export function hasPieceEntry(setKey: string, projKey: ProjectionId): boolean {
+  return ringsCache.has(ringCacheKey(setKey, projKey));
+}
+
 /** 按 setKey 前缀失效（如拓扑翻转只清 landsea 件）——避免全清的松手卡顿 */
 export function invalidatePieceEntries(prefix: string): void {
   for (const k of ringsCache.keys()) {

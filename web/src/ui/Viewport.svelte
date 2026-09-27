@@ -4,7 +4,7 @@
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
   import { markDirtyCells } from '../render/staticLayerCache';
-  import { patchPieceEntry } from '../render/borderCache';
+  import { patchPieceEntry, invalidatePieceEntries } from '../render/borderCache';
   import {
     unproject,
     project,
@@ -94,7 +94,7 @@
     onzoom?: (zoom: number) => void;
     /** 渲染后端：gpu = GL 直绘（bg/cellsMesh/元素三通道，相机 uniform 逐帧直绘） */
     renderBackend?: 'canvas' | 'gpu';
-    onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => void;
+    onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => number[] | null;
     onradius?: (v: number) => void;
     onstrokeend?: () => void;
     onendpoint?: (
@@ -271,9 +271,24 @@
     ta.remove();
   }
 
+  /** 【绘制模型】拖动中的 cell 色块高亮（零重算即时反馈）；松手后真实重算落地即清除。
+   *  只存 cell id——投影在渲染时做，色块跟随相机（拖动中不预烘屏幕坐标） */
+  let paintPreview = new Set<number>();
+  let paintPreviewCommitted = false;
+
   function paintAt(e: PointerEvent) {
     const ll = llAt(e);
-    onpaint?.(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
+    const hits = onpaint?.(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
+    if (hits?.length) {
+      let grew = false;
+      for (const id of hits) {
+        if (!paintPreview.has(id)) {
+          paintPreview.add(id);
+          grew = true;
+        }
+      }
+      if (grew) requestOverlay();
+    }
     brushLon = ll.lon;
     brushLat = ll.lat;
   }
@@ -447,6 +462,30 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, overlay.width / dpr, overlay.height / dpr);
     const rect = canvas.getBoundingClientRect();
+    const toScreen = (x: number, y: number) => toScreenXY(x, y, rect);
+
+    // —— 【绘制模型】cell 色块高亮：拖动中即时反馈，松手后真实重算落地即清 ——
+    if (paintPreview.size) {
+      const ppp = projParams ?? defaultProjParams();
+      ctx.fillStyle = 'rgba(240, 195, 106, 0.38)';
+      ctx.strokeStyle = 'rgba(255, 230, 140, 0.85)';
+      ctx.lineWidth = 1;
+      for (const id of paintPreview) {
+        const cell = world.cells[id];
+        const poly = cell?.polygon;
+        if (!poly?.length) continue;
+        const p = new Path2D();
+        for (let i = 0; i < poly.length; i++) {
+          const q = project(poly[i], projection, ppp);
+          const s = toScreen(q.x, q.y);
+          if (i === 0) p.moveTo(s.sx, s.sy);
+          else p.lineTo(s.sx, s.sy);
+        }
+        p.closePath();
+        ctx.fill(p);
+        ctx.stroke(p);
+      }
+    }
 
     // —— 地块高度值（仅笔刷覆盖到的 cell） ——
     const showHLabels =
@@ -516,7 +555,6 @@
       list.push({ pts: pathDraft, pi: -1 });
     }
 
-    const toScreen = (x: number, y: number) => toScreenXY(x, y, rect);
 
     // 拖点时：原曲线 → 虚线幽灵
     if (dragGhostPts && dragGhostPts.length >= 2) {
@@ -680,6 +718,19 @@
         );
       }
     }
+    // 成员笔刷提交的定向失效（守「全清/补丁」不变量）
+    const invs = editor.consumePieceInvalidations();
+    if (invs?.length) {
+      for (const prefix of invs) invalidatePieceEntries(prefix);
+    }
+    // 松手重算已落地 → 清色块高亮（元素由真实件接替出现）
+    if (paintPreviewCommitted) {
+      paintPreviewCommitted = false;
+      if (paintPreview.size) {
+        paintPreview = new Set();
+        requestOverlay();
+      }
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
@@ -702,6 +753,7 @@
       displayPieces,
       isDragging: panningLive || zoomingLive,
       glScene: ensureMapGl() ?? undefined,
+      onGeometryReady: requestRender,
       styleOf: (id: string) => resolveLayerStyle(world, id),
       borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
       showCellMesh:
@@ -1088,7 +1140,11 @@
         onendpoint?.(dragEndpoint, ll.lon, ll.lat, 'end');
         dragEndpoint = null;
       }
-      if (painting) onstrokeend?.();
+      if (painting) {
+        onstrokeend?.();
+        paintPreviewCommitted = true;
+        requestOverlay();
+      }
       panning = false;
       panningLive = false;
       panningMode = null;
@@ -1097,7 +1153,11 @@
       requestRender();
     }}
     onpointerleave={() => {
-      if (painting) onstrokeend?.();
+      if (painting) {
+        onstrokeend?.();
+        paintPreviewCommitted = true;
+        requestOverlay();
+      }
       panning = false;
       panningMode = null;
       painting = false;

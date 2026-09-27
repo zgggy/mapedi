@@ -93,6 +93,7 @@ export function buildRenderEnv(
     dpr,
     w,
     h,
+    warmQueue: [],
     style,
     focus: opts?.focusLayer ?? 'height',
     proj,
@@ -204,6 +205,8 @@ export function drawWorld(
     staticCache?: boolean;
     /** 平移/缩放中：跳过脏区域重烘焙（贴图 1:1 显示，不拉伸） */
     isDragging?: boolean;
+    /** 冷件补热就绪回调（渐现：触发重绘让元素出现） */
+    onGeometryReady?: () => void;
     /** GL 直绘场景（bg/cellsMesh/elements 三通道）；返回 true = 已绘，2D 只画余下层（透明底） */
     glScene?: {
       render(env: RenderEnv, channels: { cellsMesh: boolean; elements: boolean }): boolean;
@@ -313,6 +316,26 @@ export function drawWorld(
     if (g.__restSeg.length > 240) g.__restSeg.shift();
   }
   env.drawDx = contentOffsetX;
+  // 渐现：冷件（环未预热）已跳过——空闲补热，就绪即重绘（拖缓元素出现，不阻塞交互）
+  if (env.warmQueue?.length) {
+    const cold = env.warmQueue.slice();
+    env.warmQueue.length = 0;
+    const idle: (fn: () => void) => void =
+      typeof requestIdleCallback === 'function'
+        ? (fn) => requestIdleCallback(() => fn(), { timeout: 400 })
+        : (fn) => setTimeout(fn, 0);
+    let i = 0;
+    const warmStep = (): void => {
+      if (i >= cold.length) {
+        opts?.onGeometryReady?.();
+        return;
+      }
+      buildPieceParams({ ...env, displayPieces: [cold[i++]], warmQueue: undefined });
+      opts?.onGeometryReady?.();
+      idle(warmStep);
+    };
+    idle(warmStep);
+  }
   // 帧计时（两后端同一咽喉点，A/B 可比）：环形样本 + 帧计数常驻 window，验收/回归用
   const g = globalThis as unknown as {
     __drawMs?: number;
