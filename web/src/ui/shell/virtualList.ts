@@ -34,3 +34,20 @@ export function listWindow(
 }
 
 export type SynthRect = { id: string; top: number; bottom: number; left: number; right: number };
+
+/** 测试/预览助手：按 id 序合成行矩形（可跳过被拖行），行高 rowH 自 startTop 起排 */
+export function syntheticRowRects(
+  ids: string[],
+  startTop: number,
+  rowH: number,
+  skipId?: string,
+): SynthRect[] {
+  const out: SynthRect[] = [];
+  let top = startTop;
+  for (const id of ids) {
+    if (id === skipId) continue;
+    out.push({ id, top, bottom: top + rowH, left: 0, right: 100 });
+    top += rowH;
+  }
+  return out;
+}

@@ -12,6 +12,7 @@ import {
 import type { MidRing } from '../core/ring/displayRing';
 import { frameRect, type Pt, type LonLat } from '../render/space';
 import { poleSideForRing, prepareDisplayRings } from '../core/ring/normalize';
+import { sampleMidRing } from '../core/ring/hermite';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
 import { landSeaKindOf } from '../core/layer/landSea';
@@ -147,7 +148,7 @@ export function getCellSetRingsCached(
   cellIds: CellId[],
   project: (ll: { lon: number; lat: number }) => Pt,
   projKey: ProjectionId,
-  setKey = '',
+  setKey: string,
 ): Entry {
   ensureRev(world);
   const key = ringCacheKey(setKey, projKey);
@@ -229,6 +230,9 @@ function computeFrameFlip(
   for (const r of rings) {
     for (const d of prepareDisplayRings(r, frameY, poleSideForRing(r))) closed.push(d);
   }
+  // 探针用**采样后**的折线（与绘制同一形状）：中点折线在尖角处切角/自交，
+  // 与真实填充区域有系统性偏差——那正是单点探针被边界点一票否决的来源。
+  const sampled: Ring[] = closed.map((d) => ({ pts: sampleMidRing(d, 1, 'fill'), verts: [], closed: true }));
   let plain = 0;
   let flip = 0;
   const VOTES = 64;
@@ -237,7 +241,7 @@ function computeFrameFlip(
     const c = world.cells[cellIds[i]];
     if (!c) continue;
     const p = project(c.center);
-    if (ringParity(closed, p.x, p.y)) plain++;
+    if (ringParity(sampled, p.x, p.y)) plain++;
     else flip++;
   }
   if (set.size < n) {
@@ -248,7 +252,7 @@ function computeFrameFlip(
       const c = world.cells[i];
       if (!c) continue;
       const p = project(c.center);
-      if (ringParity(closed, p.x, p.y)) flip++;
+      if (ringParity(sampled, p.x, p.y)) flip++;
       else plain++;
       seen++;
     }

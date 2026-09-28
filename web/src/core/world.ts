@@ -1,6 +1,7 @@
 import type { Cell, World, LayerDef, ClimateParams, BiomeId, CellClimate, LayerRenderConfig, LonLat } from './types';
 import { normalizeStyle } from './layer/style';
 import { generateVoronoiCells } from './voronoi';
+import { bumpGeomRev } from './rev';
 import { defaultClimate } from './types';
 import { migrateToPathFeature } from './paths';
 import { getCellGrid, invalidateCellGrid } from './index/cellGrid';
@@ -204,6 +205,9 @@ export function createWorld(
     c.height = 0;
   }
   onProgress?.('地块就绪', 1);
+  // **新世界 = 新几何**：几何域缓存（pairEdgeCache/环缓存…）按 geomRev 失效，
+  // 建世界必须记几何账，否则跨世界沿用旧边表（0 环/错环）。
+  bumpGeomRev();
   return {
     meta: {
       seed: opts.seed,
@@ -464,6 +468,8 @@ export function deserializeWorld(json: string): World {
   if (!world.sharedEdges?.size && world.cells?.length) {
     world.sharedEdges = rebuildSharedEdgesFromCells(world);
   }
+  // 反序列化 = 新几何域（同 createWorld）
+  bumpGeomRev();
   return ensureBuiltinLayers(world);
 }
 

@@ -295,6 +295,20 @@ export function chainEdgesToMidpointRings(
       if (r.pts.length >= 2) rings.push(r);
     }
   }
+  // **强制定向**：统一有向面积 > 0（规范手性）——外环/洞分类、三角化、调试对照
+  // 都以同一手性工作；反转时 verts 与 pts 同步换位（verts[i] 恒在 pts[i]→pts[i+1] 之间）。
+  for (const r of rings) {
+    const n = r.pts.length;
+    if (n < 3) continue;
+    let a2 = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      a2 += r.pts[j].x * r.pts[i].y - r.pts[i].x * r.pts[j].y;
+    }
+    if (a2 >= 0) continue;
+    r.pts.reverse();
+    const old = r.verts.slice();
+    for (let i = 0; i < n; i++) r.verts[i] = old[(n - 2 - i + n) % n];
+  }
   return rings;
 }
 
