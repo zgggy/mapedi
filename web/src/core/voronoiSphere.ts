@@ -412,8 +412,38 @@ function convexHullTriangles(
   }
   if (i3 < 0) return [];
 
-  type Face = { a: number; b: number; c: number; dead: boolean };
+  type Face = { a: number; b: number; c: number; dead: boolean; nx: number; ny: number; nz: number };
   const faces: Face[] = [];
+  /** 法线随面缓存（planeDist 是热路径：每步 4 次平面测试，重算法线是超线性主因之一） */
+  // 方向桶：法线 → 桶（播种用：球面点的可见域 = 法线朝向它的面，桶命中即可见 → 行走 O(1)）
+  const DG = 32;
+  const dirBuckets = new Map<number, number[]>();
+  const dirKey = (nx: number, ny: number, nz: number): number => {
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const gx = Math.min(DG - 1, Math.max(0, Math.floor(((nx / l) * 0.5 + 0.5) * DG)));
+    const gy = Math.min(DG - 1, Math.max(0, Math.floor(((ny / l) * 0.5 + 0.5) * DG)));
+    const gz = Math.min(DG - 1, Math.max(0, Math.floor(((nz / l) * 0.5 + 0.5) * DG)));
+    return (gx * DG + gy) * DG + gz;
+  };
+  const makeFace = (a: number, b: number, c: number): Face => {
+    const p = pts[a];
+    const q = pts[b];
+    const r = pts[c];
+    const f: Face = {
+      a,
+      b,
+      c,
+      dead: false,
+      nx: (q[1] - p[1]) * (r[2] - p[2]) - (q[2] - p[2]) * (r[1] - p[1]),
+      ny: (q[2] - p[2]) * (r[0] - p[0]) - (q[0] - p[0]) * (r[2] - p[2]),
+      nz: (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]),
+    };
+    const k = dirKey(f.nx, f.ny, f.nz);
+    const arr = dirBuckets.get(k);
+    if (arr) arr.push(faces.length);
+    else dirBuckets.set(k, [faces.length]);
+    return f;
+  };
   // 外向：法线背离四面体内部（用未在面上的点定向）
   const addFace = (a: number, b: number, c: number, out: number) => {
     const p = pts[a];
@@ -425,28 +455,17 @@ function convexHullTriangles(
     );
     const o = pts[out];
     const d = nrm[0] * (o[0] - p[0]) + nrm[1] * (o[1] - p[1]) + nrm[2] * (o[2] - p[2]);
-    if (d > 0) faces.push({ a, b: c, c: b, dead: false });
-    else faces.push({ a, b, c, dead: false });
+    faces.push(d > 0 ? makeFace(a, c, b) : makeFace(a, b, c));
   };
   addFace(i0, i1, i2, i3);
   addFace(i0, i1, i3, i2);
   addFace(i0, i2, i3, i1);
   addFace(i1, i2, i3, i0);
 
-  const faceNormal = (f: Face): Vec3 => {
-    const p = pts[f.a];
-    const q = pts[f.b];
-    const r = pts[f.c];
-    return cross(
-      [q[0] - p[0], q[1] - p[1], q[2] - p[2]],
-      [r[0] - p[0], r[1] - p[1], r[2] - p[2]],
-    );
-  };
   const planeDist = (f: Face, i: number) => {
-    const nrm = faceNormal(f);
     const p = pts[f.a];
     const q = pts[i];
-    return nrm[0] * (q[0] - p[0]) + nrm[1] * (q[1] - p[1]) + nrm[2] * (q[2] - p[2]);
+    return f.nx * (q[0] - p[0]) + f.ny * (q[1] - p[1]) + f.nz * (q[2] - p[2]);
   };
 
   const used = new Uint8Array(n);
@@ -567,7 +586,39 @@ function convexHullTriangles(
   for (const pi of order) {
     used[pi] = 1;
     // 1) 播种行走：hint → 失败则最近新建面 FIFO 重播种（Morton 局部性）→ 再失败全扫兜底
-    let seedFace = walkFrom(hint, pi);
+    // 1) 方向桶播种：法线朝向 pi 的面即可见面（近球面点成立）；桶邻域兜底
+    let seedFace = -1;
+    {
+      const q = pts[pi];
+      const bx = Math.min(DG - 1, Math.max(0, Math.floor((q[0] * 0.5 + 0.5) * DG)));
+      const by = Math.min(DG - 1, Math.max(0, Math.floor((q[1] * 0.5 + 0.5) * DG)));
+      const bz = Math.min(DG - 1, Math.max(0, Math.floor((q[2] * 0.5 + 0.5) * DG)));
+      outer: for (let dz = -1; dz <= 1; dz++) {
+        const gz = bz + dz;
+        if (gz < 0 || gz >= DG) continue;
+        for (let dy = -1; dy <= 1; dy++) {
+          const gy = by + dy;
+          if (gy < 0 || gy >= DG) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const gx = bx + dx;
+            if (gx < 0 || gx >= DG) continue;
+            const arr = dirBuckets.get((gx * DG + gy) * DG + gz);
+            if (!arr) continue;
+            for (let t = arr.length - 1; t >= 0; t--) {
+              const g = arr[t];
+              const gf = faces[g];
+              if (!gf || gf.dead) continue;
+              if (planeDist(gf, pi) > 1e-12) {
+                seedFace = g;
+                break outer;
+              }
+            }
+          }
+        }
+      }
+    }
+    // 2) 桶未命中 → hint / recent 行走；再不行全扫兜底
+    if (seedFace < 0) seedFace = walkFrom(hint, pi);
     if (seedFace < 0) {
       for (let ri = recent.length - 1; ri >= 0 && seedFace < 0; ri--) {
         seedFace = walkFrom(recent[ri], pi);
@@ -632,7 +683,7 @@ function convexHullTriangles(
     let lastNew = -1;
     for (const e of edgeCount.values()) {
       if (e.c !== 1) continue;
-      faces.push({ a: e.u, b: e.v, c: pi, dead: false });
+      faces.push(makeFace(e.u, e.v, pi));
       lastNew = faces.length - 1;
       register(faces[lastNew], lastNew);
     }

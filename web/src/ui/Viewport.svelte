@@ -1079,8 +1079,8 @@
           lastPaintRender = now;
           requestRender();
         }
-        // 绘制中同步 hover 高度标签
-        if (focusLayer === 'height') {
+        // 绘制中同步 hover（所有层；原仅高度层，语义层绘制时悬停信息不更新）
+        {
           const ll = llAt(e);
           const cell = pickCell(world, ll.lon, ll.lat);
           hoverId = cell?.id ?? null;
