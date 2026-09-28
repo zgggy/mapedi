@@ -27,7 +27,7 @@ import {
   type PieceParams,
   type RenderEnv,
 } from '../layers';
-import { ringGeo, buildCellMeshStrips, type Pt } from './geometry';
+import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geometry';
 import { triangulateRings } from './triangulate';
 import { projectionWorldPeriod } from '../../core/project/projections';
 
@@ -352,7 +352,7 @@ export class MapGlRenderer {
   private frame = 0;
   /** 环数组 → 合并几何（同一环集跨帧复用，副本变化不影响它） */
   private geoCache = new WeakMap<object, Map<string, PieceGeo>>();
-  private meshCache = new WeakMap<object, { buf: GpuBuf | null }>();
+  private meshCache = new WeakMap<object, { buf: GpuBuf | null; geo: CellMeshGeo }>();
   private failed = false;
 
   private constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
@@ -1077,18 +1077,20 @@ export class MapGlRenderer {
     const stroke = env.style.cellStroke;
     const color = cssToRgba(stroke.color);
     if (!color) return;
-    // 每 pcache 构建一次网格条带（共享边去重）；相机变化只改 uniform
+    // 每 pcache 构建一次网格条带（共享边去重 + 桶化）；相机变化只改 uniform
     let entry = this.meshCache.get(env.pcache as unknown as object);
     if (!entry) {
       const period = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
-      const strips = buildCellMeshStrips(env.pcache.polys, env.pcache.polarOutlines, period);
-      entry = { buf: strips.length ? this.bufFor(strips, 'strip') : null };
+      const geo = buildCellMeshStrips(env.pcache.polys, env.pcache.polarOutlines, period);
+      entry = { geo, buf: geo.data.length ? this.bufFor(geo.data, 'strip') : null };
       this.meshCache.set(env.pcache as unknown as object, entry);
     }
     if (!entry.buf) return;
     const scale = env.cam.scale;
     const viewL = env.cam.x - env.w / 2 / scale;
     const viewR = env.cam.x + env.w / 2 / scale;
+    const viewT = env.cam.y + env.h / 2 / scale;
+    const viewB = env.cam.y - env.h / 2 / scale;
     const all = env.worldDxs?.length ? env.worldDxs : [env.contentOffsetX ?? 0];
     const bb = env.pcache.worldBBox;
     const copies = all.filter((dx) => bb.maxX + dx > viewL && bb.minX + dx < viewR);
@@ -1104,7 +1106,35 @@ export class MapGlRenderer {
       gl.uniform4f(this.progStrip.uColor, color[0], color[1], color[2], color[3]);
     }
     gl.bindVertexArray(entry.buf.vao);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, entry.buf.count, copies.length);
+    // 视口行段裁剪：桶行主序 → 每可见行一个连续顶点段；副本平移只影响 x，取并集（只多画不少画）
+    const g = entry.geo;
+    const pad = Math.max(stroke.width, 0.35) / scale / 2 + g.cell;
+    let uL = Infinity;
+    let uR = -Infinity;
+    for (const dx of copies) {
+      const l = viewL - dx;
+      const r = viewR - dx;
+      if (l < uL) uL = l;
+      if (r > uR) uR = r;
+    }
+    const ci = (x: number) => Math.max(0, Math.min(g.cols - 1, Math.floor((x - g.minX) / g.cell)));
+    const cj = (y: number) => Math.max(0, Math.min(g.rows - 1, Math.floor((y - g.minY) / g.cell)));
+    const i0 = ci(uL - pad);
+    const i1 = ci(uR + pad);
+    const j0 = cj(viewB - pad);
+    const j1 = cj(viewT + pad);
+    for (let j = j0; j <= j1; j++) {
+      const a = (j * g.cols + i0) * 2;
+      const b = (j * g.cols + i1) * 2;
+      const first = g.ranges[a] >> 2; // 顶点单位（每顶点 4 float）
+      const end = (g.ranges[b] + g.ranges[b + 1]) >> 2;
+      const count = end - first;
+      if (count > 0) gl.drawArraysInstanced(gl.TRIANGLES, first, count, copies.length);
+    }
+    // 长线段（极区框边等）不入桶：任何视口都画
+    if (g.wide[1] > 0) {
+      gl.drawArraysInstanced(gl.TRIANGLES, g.wide[0] >> 2, g.wide[1] >> 2, copies.length);
+    }
     gl.bindVertexArray(null);
   }
 }

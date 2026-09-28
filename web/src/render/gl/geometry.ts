@@ -170,24 +170,43 @@ export function ringGeo(
   return geo;
 }
 
+/** cell 网格几何：条带顶点（按桶序）+ 均匀网格桶（视口裁剪用） */
+export interface CellMeshGeo {
+  data: Float32Array;
+  /** 桶网格（投影空间；每桶顶点段连续，行主序） */
+  minX: number;
+  minY: number;
+  cell: number;
+  cols: number;
+  rows: number;
+  /** cols*rows*2：[vertStart, vertCount]（float 单位） */
+  ranges: Int32Array;
+  /** 长线段（跨度>桶格；极区框边等）不入桶——任何视口都画（float 单位 [start, count]） */
+  wide: [number, number];
+}
+
 /**
  * cell 网格条带（按共享边去重——Canvas 单次 stroke 不双混，GL 重叠四边形会）。
  * 共享顶点经 projCache 的 snap 保证坐标逐位相同 → 原始值字符串键即可去重。
+ * 按均匀桶收集（行主序、每桶段连续）→ 画前只取可见桶行，禁止整表直绘。
  */
 export function buildCellMeshStrips(
   polys: (Float64Array | undefined)[],
   polarOutlines: Map<number, Float64Array>,
   period: number,
-): Float32Array {
+): CellMeshGeo {
   const seen = new Set<string>();
-  const parts: Float32Array[] = [];
-  let total = 0;
+  const CELL = 0.35;
+  // 先收集去重后的线段（含中点），再按桶归置；跨度>桶格的进 wide 段（防边界误裁）
+  const segs: { s: Float32Array; mx: number; my: number }[] = [];
+  const wides: Float32Array[] = [];
+  let wideTotal = 0;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (let id = 0; id < polys.length; id++) {
     const xy = polarOutlines.get(id) ?? polys[id];
     if (!xy || xy.length < 4) continue;
     const n = xy.length >> 1;
-    const segs = n; // cell 多边形闭合
-    for (let i = 0; i < segs; i++) {
+    for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
       let x1 = xy[i * 2], y1 = xy[i * 2 + 1];
       let x2 = xy[j * 2], y2 = xy[j * 2 + 1];
@@ -200,18 +219,76 @@ export function buildCellMeshStrips(
       const key = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const seg = buildStripLayout([{ x: x1, y: y1 }, { x: x2, y: y2 }], false);
-      parts.push(seg);
-      total += seg.length;
+      const s = buildStripLayout([{ x: x1, y: y1 }, { x: x2, y: y2 }], false);
+      if (Math.abs(x1 - x2) > CELL || Math.abs(y1 - y2) > CELL) {
+        wides.push(s);
+        wideTotal += s.length;
+      } else {
+        segs.push({ s, mx: (x1 + x2) / 2, my: (y1 + y2) / 2 });
+      }
+      if (x1 < minX) minX = x1;
+      if (x2 < minX) minX = x2;
+      if (x1 > maxX) maxX = x1;
+      if (x2 > maxX) maxX = x2;
+      if (y1 < minY) minY = y1;
+      if (y2 < minY) minY = y2;
+      if (y1 > maxY) maxY = y1;
+      if (y2 > maxY) maxY = y2;
     }
   }
-  const out = new Float32Array(total);
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
+  if (!segs.length) {
+    const wdata = new Float32Array(wideTotal);
+    let wo = 0;
+    for (const w of wides) {
+      wdata.set(w, wo);
+      wo += w.length;
+    }
+    return {
+      data: wdata,
+      minX: 0, minY: 0, cell: 1, cols: 1, rows: 1,
+      ranges: new Int32Array(2),
+      wide: [0, wideTotal],
+    };
   }
-  return out;
+  const cell = CELL;
+  const cols = Math.max(1, Math.ceil((maxX - minX) / cell) + 1);
+  const rows = Math.max(1, Math.ceil((maxY - minY) / cell) + 1);
+  const buckets: { s: Float32Array; mx: number; my: number }[][] = new Array(cols * rows);
+  for (const e of segs) {
+    const i = Math.max(0, Math.min(cols - 1, Math.floor((e.mx - minX) / cell)));
+    const j = Math.max(0, Math.min(rows - 1, Math.floor((e.my - minY) / cell)));
+    const k = j * cols + i;
+    let b = buckets[k];
+    if (!b) {
+      b = [];
+      buckets[k] = b;
+    }
+    b.push(e);
+  }
+  let total = wideTotal;
+  for (const e of segs) total += e.s.length;
+  const data = new Float32Array(total);
+  const ranges = new Int32Array(cols * rows * 2);
+  let o = 0;
+  for (let k = 0; k < cols * rows; k++) {
+    const b = buckets[k];
+    ranges[k * 2] = o;
+    let cnt = 0;
+    if (b) {
+      for (const e of b) {
+        data.set(e.s, o);
+        o += e.s.length;
+        cnt += e.s.length;
+      }
+    }
+    ranges[k * 2 + 1] = cnt;
+  }
+  const wideStart = o;
+  for (const w of wides) {
+    data.set(w, o);
+    o += w.length;
+  }
+  return { data, minX, minY, cell, cols, rows, ranges, wide: [wideStart, wideTotal] };
 }
 
 function unwrapDelta(refX: number, x: number, period: number): number {
