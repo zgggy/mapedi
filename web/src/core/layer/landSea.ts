@@ -572,11 +572,18 @@ function assembleLandSea(
   };
 
   const next: Region[] = [];
+  // 定义序 = 叠放序（低者先画）：海 → 陆 → 湖，与高度层 h0..h11 同一规则
+  for (const e of restEntryList) {
+    if (e.kind !== 'ocean') continue;
+    const r = build(e);
+    if (r) next.push(r);
+  }
   for (const e of landEntries) {
     const r = build(e);
     if (r) next.push(r);
   }
   for (const e of restEntryList) {
+    if (e.kind !== 'lake') continue;
     const r = build(e);
     if (r) next.push(r);
   }

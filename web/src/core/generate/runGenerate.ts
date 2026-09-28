@@ -1,18 +1,16 @@
 import { deserializeWorld } from '../world';
 import type { World } from '../types';
+import type { ProjCache } from '../../render/projCache';
 
 export type GenProgress = { label: string; progress: number };
 
-/**
- * 在 Worker 中级联生成；主线程只收进度与最终 JSON。
- * 无 Worker 环境时回退同步（小地图）。
- */
-export function generateWorldAsync(
-  seed: number,
-  count: number,
+type DonePayload = { type: 'done'; world: World; projCache: ProjCache };
+export type WorldWithCache = { world: World; projCache?: ProjCache };
+
+function runWorker(
+  req: { seed: number; count: number; profileParams?: Record<string, Record<string, number | string | boolean>>; loadJson?: string },
   onProgress?: (p: GenProgress) => void,
-  profileParams?: Record<string, Record<string, number | string | boolean>>,
-): Promise<World> {
+): Promise<WorldWithCache> {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') {
       reject(new Error('Worker unavailable'));
@@ -24,7 +22,7 @@ export function generateWorldAsync(
     worker.onmessage = (
       ev: MessageEvent<
         | { type: 'progress'; label: string; progress: number }
-        | { type: 'done'; json: string }
+        | DonePayload
         | { type: 'error'; message: string }
       >,
     ) => {
@@ -34,14 +32,8 @@ export function generateWorldAsync(
         return;
       }
       if (d.type === 'done') {
-        try {
-          const world = deserializeWorld(d.json);
-          worker.terminate();
-          resolve(world);
-        } catch (e) {
-          worker.terminate();
-          reject(e);
-        }
+        worker.terminate();
+        resolve({ world: d.world, projCache: d.projCache });
         return;
       }
       worker.terminate();
@@ -51,6 +43,32 @@ export function generateWorldAsync(
       worker.terminate();
       reject(e.error ?? new Error(e.message));
     };
-    worker.postMessage({ seed, count, profileParams });
+    worker.postMessage(req);
   });
+}
+
+/**
+ * 在 Worker 中级联生成；主线程只收进度与结构化世界 + 预建投影缓存。
+ * 无 Worker 环境时回退同步（小地图）。
+ */
+export function generateWorldAsync(
+  seed: number,
+  count: number,
+  onProgress?: (p: GenProgress) => void,
+  profileParams?: Record<string, Record<string, number | string | boolean>>,
+): Promise<WorldWithCache> {
+  return runWorker({ seed, count, profileParams }, onProgress);
+}
+
+/** 恢复路径：JSON → Worker 反序列化 + 预建投影缓存（主线程免双卡顿） */
+export function loadWorldAsync(
+  json: string,
+  onProgress?: (p: GenProgress) => void,
+): Promise<WorldWithCache> {
+  return runWorker({ seed: 0, count: 0, loadJson: json }, onProgress);
+}
+
+/** 无 Worker 回退：主线程同步反序列化（无 projCache 预建） */
+export function loadWorldSync(json: string): World {
+  return deserializeWorld(json);
 }

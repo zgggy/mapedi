@@ -245,35 +245,49 @@ export function buildTerrain(
     h.set(next);
   }
 
-  // 刻度映射：海平面 = 最终场的 landRatio 分位（占比精确）；
-  // 端点用**真极值**（落差 = max−min 精确；分位端点会把顶端压成平台）；
-  // 平整率 = 向海平面的有符号幂收拢（保序、连续，不造平台）。
+  // 刻度映射（**排名域**）：海陆按 landRatio 分位切开后，各侧独立按分位铺满整个
+  // 高程域——顶峰到深海都被照顾到、逐值自然过渡（排名对场单调 → 空间结构保持）；
+  // 平整率 = 分位幂弯（越大越贴海平面）。占比与落差仍然精确。
   onProgress?.('刻度', 0.92);
   const gamma = 1 + 1.2 * Math.max(0, Math.min(1, shape.flatness));
   const H = Math.max(10, Math.min(127, shape.relief)) / 2;
   const shift = quantile(h, 1 - p);
-  let landTop = 1e-6;
-  let seaBottom = -1e-6;
-  for (let i = 0; i < n; i++) {
-    const v = h[i] - shift;
-    if (v > landTop) landTop = v;
-    if (v < seaBottom) seaBottom = v;
-  }
-
-  for (let i = 0; i < n; i++) {
-    const c = cells[i];
-    const v = h[i] - shift;
-    let out: number;
-    if (v >= 0) {
-      const u = Math.pow(v / landTop, gamma);
-      out = 1 + u * (H - 1);
-    } else {
-      const u = Math.pow(v / seaBottom, gamma);
-      out = -(1 + u * (H - 1));
+  const land: number[] = [];
+  const sea: number[] = [];
+  for (let i = 0; i < n; i++) (h[i] - shift >= 0 ? land : sea).push(i);
+  land.sort((a, b) => h[a] - h[b] || a - b); // 低 → 高
+  sea.sort((a, b) => h[b] - h[a] || a - b); // 浅 → 深
+  const paint = (list: number[], sign: 1 | -1) => {
+    const m = list.length;
+    for (let r = 0; r < m; r++) {
+      const t = m > 1 ? r / (m - 1) : 1;
+      const u = Math.pow(t, gamma);
+      const c = cells[list[r]];
+      c.height = Math.max(-63, Math.min(64, Math.round(sign * (1 + u * (H - 1)))));
+      c.isOcean = isOcean(c);
     }
-    c.height = Math.max(-63, Math.min(64, Math.round(out)));
-    if (c.height === 0) c.height = v >= 0 ? 1 : -1; // 海平面不落 0 歧义
-    c.isOcean = isOcean(c);
+  };
+  paint(land, 1);
+  paint(sea, -1);
+
+  // 整数域去尖刺：排名拉伸会放大局部梯度，孤立格（峰顶零散点）再向邻域收拢一次
+  for (let pass = 0; pass < 2; pass++) {
+    for (const c of cells) {
+      const nb = c.neighbors;
+      if (nb.length < 3) continue;
+      let sum = 0;
+      for (const nid of nb) sum += cells[nid].height;
+      const mean = sum / nb.length;
+      const hv = c.height;
+      const dv = hv - mean;
+      if (Math.abs(dv) <= 6) continue;
+      let far = dv > 0 ? Infinity : -Infinity;
+      for (const nid of nb) far = dv > 0 ? Math.min(far, cells[nid].height) : Math.max(far, cells[nid].height);
+      const extreme = dv > 0 ? hv > far : hv < far;
+      if (!extreme) continue;
+      c.height = Math.max(-63, Math.min(64, Math.round(mean + Math.sign(dv) * 6)));
+      c.isOcean = isOcean(c);
+    }
   }
   onProgress?.('完成', 1);
 }

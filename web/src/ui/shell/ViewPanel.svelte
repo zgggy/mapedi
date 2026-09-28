@@ -17,7 +17,6 @@
     globeSpin = true,
     globeTilt = 23.4,
     globeRotHours = 24,
-    globeFov = 45,
     onSwitchView,
     onStyle,
     onRelief,
@@ -26,7 +25,6 @@
     onGlobeSpin,
     onGlobeTilt,
     onGlobeRotHours,
-    onGlobeFov,
   }: {
     open?: boolean;
     viewMode?: ViewMode;
@@ -37,7 +35,6 @@
     globeSpin?: boolean;
     globeTilt?: number;
     globeRotHours?: number;
-    globeFov?: number;
     onSwitchView: (m: ViewMode) => void;
     onStyle: (s: string) => void;
     onRelief: (v: number) => void;
@@ -46,7 +43,6 @@
     onGlobeSpin?: (v: boolean) => void;
     onGlobeTilt?: (v: number) => void;
     onGlobeRotHours?: (v: number) => void;
-    onGlobeFov?: (v: number) => void;
   } = $props();
 </script>
 
@@ -79,10 +75,7 @@
           <label class="sm">倾角 <CapsuleSlider min={0} max={60} step={0.5} value={globeTilt} label="轴倾角" width={110} onInput={(v) => onGlobeTilt?.(v)} /> {globeTilt.toFixed(1)}°</label>
           <label class="sm">自转 <CapsuleSlider min={6} max={48} step={1} value={globeRotHours} label="自转周期" width={110} onInput={(v) => onGlobeRotHours?.(v)} /> {globeRotHours}h</label>
         </div>
-        <div class="row">
-          <label class="sm">视野 <CapsuleSlider min={18} max={150} step={2} value={globeFov} label="相机视野（FOV，越大看得越广）" width={130} onInput={(v) => onGlobeFov?.(v)} /> {Math.round(globeFov)}°</label>
-        </div>
-        <p class="dim">球面原生渲染（不经平面贴图）；Shift+滚轮 = 视野（FOV）+ 超半球压扁，滚轮 = 缩放距离，拖动 = 环绕。</p>
+        <p class="dim">球面为纯展示：高度随半径凸起（陆上凸、海下凹），图层叠加与平面同源；滚轮 = 缩放，拖动 = 环绕。</p>
       </section>
     {/if}
   </div>

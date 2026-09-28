@@ -25,7 +25,6 @@
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
   let globeSpin = $state(true);
-  let globeFov = $state(45);
   let projParams = $state(defaultProjParams());
   let fps = $state(0);
   let zoomScale = $state(1);
@@ -201,23 +200,13 @@
           <Globe
             {world}
             {focusLayer}
-            drawActive={draw.active}
             rev={globeRev}
             climate={editor.climateDraft}
             astro={editor.astro ?? undefined}
-            {styleId}
-            {reliefSmooth}
             highlightRegionId={selectedRegionId}
             showAxis={globeAxis}
             showEcliptic={globeEcliptic}
             spinPreview={globeSpin}
-            fov={globeFov}
-            onPatchAstro={(patch) => editor.patchAstro(patch)}
-            onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
-            onpick={(lon, lat) => {
-              editor.status = `${lon.toFixed(1)}° ${lat.toFixed(1)}°`;
-            }}
-            onstrokeend={() => editor.commitStroke()}
           />
         {/await}
       {/if}
@@ -268,7 +257,6 @@
     globeSpin={globeSpin}
     globeTilt={editor.climateDraft.axialTiltDeg}
     globeRotHours={editor.climateDraft.rotationHours}
-    globeFov={globeFov}
     onSwitchView={switchView}
     onStyle={(s) => (styleId = s)}
     onRelief={(v) => (reliefSmooth = v)}
@@ -281,7 +269,6 @@
     onGlobeRotHours={(v) => {
       editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
     }}
-    onGlobeFov={(v) => (globeFov = v)}
   />
 
   <LayersPanel

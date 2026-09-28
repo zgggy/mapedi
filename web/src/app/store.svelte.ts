@@ -2,7 +2,7 @@ import type { LayerRenderConfig, Region } from '../core/types';
 import { defaultLayerRenderConfig } from '../core/types';
 import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
-import { invalidateProjCache } from '../render/projCache';
+import { invalidateProjCache, installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateBorderCache } from '../render/borderCache';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
@@ -49,7 +49,7 @@ import {
 } from '../core/displayCompose';
 import { bumpAllRev, bumpHeightRev, bumpRegionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
-import { generateWorldAsync } from '../core/generate/runGenerate';
+import { generateWorldAsync, loadWorldAsync } from '../core/generate/runGenerate';
 import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
 import { defaultPathColor } from '../core/paths';
 import {
@@ -462,13 +462,15 @@ export class EditorStore {
     // profile 面板参数随 Worker 下发（否则面板旋钮只在主线程回退路径生效）
     const params: Record<string, Record<string, number | string | boolean>> = {};
     for (const p of this.profiles) params[p.layerId] = p.params;
-    const world = await generateWorldAsync(seed, count, (p) => {
+    const got = await generateWorldAsync(seed, count, (p) => {
       if (seq !== this.generationSeq) return;
       this.genProgress = p.progress;
       this.status = `${p.label}… ${p.progress}%`;
       this.notify();
     }, params);
     if (seq !== this.generationSeq) return;
+    const world = got.world;
+    if (got.projCache) installProjCache(got.projCache);
     for (const r of world.regions) {
       if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
     }
@@ -624,7 +626,18 @@ export class EditorStore {
     const json = await idbLoad();
     if (seq !== this.generationSeq) return true;
     if (!json) return false;
-    const w = deserializeWorld(json);
+    // Worker 反序列化 + 预建投影缓存（主线程免 0.8s 反序列化 + 1s 首建）；失败回退主线程
+    let w: World;
+    let projCache: ProjCache | undefined;
+    try {
+      const got = await loadWorldAsync(json);
+      if (seq !== this.generationSeq) return true;
+      w = got.world;
+      projCache = got.projCache;
+    } catch {
+      w = deserializeWorld(json);
+    }
+    if (projCache) installProjCache(projCache);
     // 旧档区间嵌套累积（h≥lo）→ 精确档归一（成员由高度重导，对象/命名保留）
     normalizeHeightIntervalElements(w);
     ensureBuiltinLayers(w);

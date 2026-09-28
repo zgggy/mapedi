@@ -72,6 +72,23 @@ export function getProjCache(
   // 只按 key 失效：key 含 seed/cellCount/proj/pp，覆盖几何与投影变化。
   // 不按 world 引用失效——store 浅拷贝 {…world} 会换引用但几何没变，全量重建 O(N) 太贵。
   if (cache && cache.key === key) return cache;
+  cache = buildProjCache(world, proj, pp);
+  return cache;
+}
+
+/** Worker 预建结果落盘（同 key 才接受；转移对象免主线程 O(N) 首建） */
+export function installProjCache(next: ProjCache): void {
+  if (cache && cache.key === next.key) return;
+  cache = next;
+}
+
+/** 纯构建（生成/加载 Worker 与同步回退共用同一实现） */
+export function buildProjCache(
+  world: World,
+  proj: ProjectionId,
+  pp: ProjectionParams,
+): ProjCache {
+  const key = cacheKey(world, proj, pp);
   const n = world.cells.length;
   const polys: Float64Array[] = new Array(n);
   const polarOutlines = new Map<number, Float64Array>();
@@ -175,8 +192,8 @@ export function getProjCache(
     }
   });
 
-  cache = { key, polys, polarOutlines, centers, bboxes, worldBBox, view };
-  return cache;
+  const result: ProjCache = { key, polys, polarOutlines, centers, bboxes, worldBBox, view };
+  return result;
 }
 
 export function invalidateProjCache(): void {
