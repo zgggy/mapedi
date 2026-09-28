@@ -72,7 +72,7 @@
 |---|---|---|
 | **拖动 / 绘制卡顿** | 包 1-4 ✅ 全部落地（失效域拆分 / 增量烘焙 / 实时层缓存 / hover 覆盖层） | 剩余卡点 = 缩放动画（依赖 GPU）；红线：不抽稀、不关阴影、不降 smooth、**零瞬态折扣** |
 | **100k 级 cell 目标** | CPU 侧交互（平移/绘制/选中/悬停）已按 100k 优化；**缩放动画达标唯一路径 = GPU 后端** | GPU 后端设计（RegionMesh/WebGL）待与用户敲定后立项 |
-| **笔刷区间重建** | `flushHeightRegions` 拓扑变化时 `rebuildLandSeaRegions` 全量；非拓扑走 `updateHeightIntervalElements` 增量 ✓ | 归入卡顿包 2（脏矩形重烘焙）一并处理 |
+| **笔刷区间重建** | ✅ 拓扑翻转已增量（第三十六次）：触及实体局部拆分/并查集成组 + 未触及保留 + 关系划分快路径；100k warm 松手 ≈ 23-32ms（原 255ms，且不再超线性）；非拓扑走 `updateHeightIntervalElements` 增量 ✓ | 余量 = 大洋件 cells 物化 O(n)（模型固有），如需再快走件环补丁 |
 | **getProjCache 首次重建** | 已改 key 失效 ✓；端点拖动反复触发已消除（包 1）✓；首次 O(N) 30000 cell ≈ 591ms（100k ~2s，一次性） | 可 Worker 化 |
 | **GPU 后端** | ✅ 第一版已落地（`a7d184b`）：WebGL2 RegionMesh 元素渲染（填充 stencil 奇偶/阴影纹理 blur/描边四边形），显示面板可切换，像素级对齐 Canvas（×1/×6 对照 0 差异） | 用户验收后默认切 GPU → 100k 压测 → 视需要烘焙期 GL 直渲纹理 |
 

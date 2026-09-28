@@ -10,6 +10,46 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-28，第三十六次）— 拓扑翻转增量连通分量 + 修「区间绘制」与「翻转后 UI 停更」两回归**
+
+- **拓扑翻转松手 O(n) 重建 → 增量连通分量**（本包核心）：
+  - **问题**：造陆/造海松手重建与全量同价（实测 dirty=20 → 255ms ≈ 全量 250ms；dirty=556 超线性
+    2405ms）。根因四条：dirty 分支仍跑 3× 全图 floodComponents；pickOld 对每个新块扫全部旧 region
+    （二次）；computeRelationships 成对 Set 重建 O(els²×cells)（94ms）；keepOld 恒空（newCells 含全部
+    新块 cells）。
+  - **原理**：① 触及 = 含翻转格或翻转格邻居的旧实体（其 cells 可能变化的全部）；未触及实体原样保留
+    （身份/命名/颜色稳定）。② 免全扫分裂判据：区域连通 ⇒ kept 子图每件必含 removed 的 kept 邻居
+    （front）→ 从 front[0] BFS 到达全部 front 即单件（早停不扫全图）；否则逐 front 起件。③ 翻转格与
+    同标签邻接（kept 块/翻转格）并查集成组合并。④ pickOld 只在触及候选里认领身份。⑤ manual 海不拆
+    不并（enclave 合法）；rest comp 邻接 manual 归并改为**最大邻接 manual 海（join 前大小）**——旧
+    实现取扫描序第一个，双路径不确定，注释本来就写「最大邻接」。⑥ 排序/命名平手取最小 cell id。
+    ⑦ computeRelationships 划分快路径：cells 互不相交（海陆层不变量）时整型 owner 扫描 + 重叠恒空，
+    双属即回退通用版；通用版重叠改单次 owners 对扫描（输出敏感）。
+  - **等价性**（/tmp/eq_landsea.mjs，非仓库测试）：8 场景（海岸造陆/远海造岛/切陆桥/挖大湖/无翻转/
+    manual 海拆分+join/连续 6 笔/小世界乱翻）对拍全量重建——分区、种类、manual 身份、关系签名
+    （相邻+重叠，与 id 无关）全等；不变量全过（id 唯一、覆盖恰一、continentId 索引=数组序、非
+    manual 连通、关系对称）。
+  - **性能**（100k，warm）：incr dirty=2 ≈ 23-32ms（原 255ms）；dirty 规模不敏感（原 dirty=556 超线性）；
+    全量 ≈ 43-57ms（原 250ms）。默认 30k 约 1/3。/tmp/bench_landsea.mjs、bench_loop.mjs 可复跑。
+- **修回归①「点区间不进高度绘制」**（92ac586「选中即绘制/删绘制按钮」时引入）：点高度区间行走
+  `startDraw` 通用区域归属，值直刷（`__height__` 协议）丢失——实测悬停高度不变。修：`startDraw` 对
+  `kind==='interval'` 元素路由 `startHeightDraw`（数据驱动规则，未来区间型元素同语义）。
+- **修回归②「翻转后 UI 停更」**（本包新代码引入，已根治）：重建输出**复用旧 Region 对象**（原地改写
+  $state 代理 + 旧代理混入新 regions 数组）→ Svelte 更新管线静默停摆：状态全对（selectLayerTop 等
+  日志正常）但 DOM 不再刷新、undo 的 redoStack.push 被跳过。修：**重建输出一律新对象**（字段级保
+  id/名称/颜色/属性），manual 补丁落在输出副本上。教训：**热路径不要复用 $state 树里的对象引用**，
+  重建产物与旧状态解耦（旧全量路径本来就是全新建对象）。
+- **命名防撞**：铸造名避让已有名（kept/自定义名不改）——修复「两个大陆 8」与跳号。
+- **撤销/重做一致性复验 ✓**：Ctrl+Z → 高度回退 + 增量重建溶解大陆（land:0）；Ctrl+Shift+Z → 复原
+  （land:1）。浏览器实测 + 临时日志观测（验后已删）。
+- **验证方法教训（浏览器自动化）**：① 合成指针/键盘事件里触发**重同步工作**（重建/撤销）会顶穿 MCP
+  桥报 Internal error——事件其实已执行，读后续状态判断；② 多事件塞一个 evaluate 同理，逐个派发；
+  ③ Playwright click 的 actionability 在本页会挂，用 evaluate `el.click()`；④ Svelte dev 把
+  console.log 包成 log_if_contains_state，抓日志要直写全局数组；⑤ CUA 组合键偶发不送（同一热键
+  有时要发两次）；⑥ 模型看不了截图时用 PIL 做像素级对比验证（找海/陆落笔点、涂改前后 diff）。
+- **待办**（不变）：100k 网格视口裁剪；阴影恢复时走场图集路径（勿回包围盒）；生成小头
+  （撒点/级联/反序列化）。
+
 **本轮已处理（2026-09-28，第三十五次补充）— 死代码整包清理（删就真删，18 件）**
 
 - **删除（全仓零引用）**：shell 遗留 12 件（GenDock/HeightIntervalList/LayerStyleBar/LayersDrawer/

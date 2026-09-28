@@ -1109,6 +1109,12 @@ export class EditorStore {
   startDraw(regionId: string) {
     this.selectedRegionId = regionId;
     const region = this.world?.regions.find((r) => r.id === regionId);
+    // 区间型元素（kind=interval）的绘制语义 = 把区间值直刷到 cell（`__height__` 协议），
+    // 不是区域归属——归属由高度派生（数据驱动，未来区间型元素同一规则）
+    if (region?.attributes?.kind === 'interval') {
+      this.startHeightDraw(regionId);
+      return;
+    }
     const layer = this.world?.layers.find((l) => l.id === region?.layerId);
     let tool: DrawTool = 'brush';
     if (layer?.kind === 'road' || layer?.kind === 'route') tool = 'road';
