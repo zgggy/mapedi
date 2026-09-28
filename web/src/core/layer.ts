@@ -130,19 +130,13 @@ export function genConfigFromParams(
   if (typeof params.fromLayerId === 'string') cfg.fromLayerId = params.fromLayerId;
   if (typeof params.fromLayerCount === 'number') cfg.fromLayerCount = params.fromLayerCount;
   if (typeof params.allowOcean === 'boolean') cfg.allowOcean = params.allowOcean;
-  // height：世界形状（大陆占比/落差/平整率/大陆数/穿极/崎岖/海底起伏/侵蚀）
+  // height：世界形状（Perlin+HMF 高度图参数）
   const shape: WorldShape = { ...DEFAULT_WORLD_SHAPE };
   let hasShape = false;
-  if (typeof params.landRatio === 'number') { shape.landRatio = params.landRatio; hasShape = true; }
-  if (typeof params.relief === 'number') { shape.relief = params.relief; hasShape = true; }
-  if (typeof params.flatness === 'number') { shape.flatness = params.flatness; hasShape = true; }
-  if (typeof params.continentScale === 'number') { shape.continentScale = params.continentScale; hasShape = true; }
-  if (typeof params.coastBreak === 'number') { shape.coastBreak = params.coastBreak; hasShape = true; }
-  if (typeof params.mountain === 'number') { shape.mountain = params.mountain; hasShape = true; }
-  if (typeof params.detail === 'number') { shape.detail = params.detail; hasShape = true; }
-  if (typeof params.seaRugged === 'number') { shape.seaRugged = params.seaRugged; hasShape = true; }
-  if (typeof params.polar === 'boolean') { shape.polar = params.polar; hasShape = true; }
-  if (typeof params.erosion === 'number') { shape.erosion = params.erosion; hasShape = true; }
+  for (const k of ['seed', 'scale', 'octaves', 'lacunarity', 'persistence', 'hmfGain', 'hmfOffset', 'warpStrength', 'warpScale', 'seaLevel'] as const) {
+    const v = params[k];
+    if (typeof v === 'number') { (shape as unknown as Record<string, number>)[k] = v; hasShape = true; }
+  }
   if (hasShape) cfg.worldShape = shape;
   return cfg;
 }

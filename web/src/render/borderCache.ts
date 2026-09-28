@@ -202,13 +202,14 @@ function ringParity(rings: Ring[], x: number, y: number): boolean {
 }
 
 /**
- * 奇偶探针：**闭合后**的显示环 evenodd 填充应「盖住成员、排除非成员」。
- * 恰好「翻转奇偶（补框矩形外环）」才成立 → true：极区/贴框集合的外轮廓常缺失
- * （边界只含内环时 evenodd 填到补丁里，远海/深海因此对调），框外环一次翻转即正确。
- * 两种都不成立 → false（维持旧语义，不在未知拓扑上冒险）。
+ * 奇偶探针（**多数表决**）：在大量成员/非成员采样点上比较「plain / flip」两种解释的吻合率，
+ * 取高者（≥0.75 且领先 ≥0.1 才算确定）。
  *
- * 必须探**闭合环**（与绘制同一条 closeRingForCylindrical 补边），不能探裸环：
- * 裸环不含绕行环的补边奇偶，同侧/异侧补边会给出相反结论（「圈」/「带」两案）。
+ * 为什么不用单点探针：显示环过**边中点**（契约），比 cell 并集略内缩——边界 cell 的
+ * 中心会落在环外，单点探针一票否决两种解释（返回 false → 整件内外翻转）。
+ * 多数表决把边界噪声平均掉；对「整件翻转」这类结构性问题一锤定音。
+ *
+ * 环必须探**闭合后**的显示环（与绘制同一条补边）；不变量：成员 ≡ XOR(闭合环) ⊕ flip。
  */
 function computeFrameFlip(
   world: World,
@@ -228,32 +229,34 @@ function computeFrameFlip(
   for (const r of rings) {
     for (const d of prepareDisplayRings(r, frameY, poleSideForRing(r))) closed.push(d);
   }
-  let okPlain = true;
-  let okFlip = true;
-  const step = Math.max(1, (cellIds.length / 4) | 0);
-  for (let i = 0; i < cellIds.length && i < step * 4; i += step) {
+  let plain = 0;
+  let flip = 0;
+  const VOTES = 64;
+  const mStride = Math.max(1, Math.floor(cellIds.length / VOTES));
+  for (let i = 0, seen = 0; i < cellIds.length && seen < VOTES; i += mStride, seen++) {
     const c = world.cells[cellIds[i]];
     if (!c) continue;
     const p = project(c.center);
-    const par = ringParity(closed, p.x, p.y);
-    if (!par) okPlain = false;
-    else okFlip = false;
-    if (!okPlain && !okFlip) return false;
+    if (ringParity(closed, p.x, p.y)) plain++;
+    else flip++;
   }
-  // 非成员探针（集合非全图时）
   if (set.size < n) {
-    let seen = 0;
-    for (const c of world.cells) {
-      if (set.has(c.id)) continue;
+    // 非成员按全局步进采样（不要只取 id 序前几个——会偏向单一半球）
+    const stride = Math.max(1, Math.floor(n / (VOTES * 6)));
+    for (let i = 0, seen = 0; i < n && seen < VOTES; i += stride) {
+      if (set.has(i)) continue;
+      const c = world.cells[i];
+      if (!c) continue;
       const p = project(c.center);
-      const par = ringParity(closed, p.x, p.y);
-      if (par) okPlain = false;
-      else okFlip = false;
-      if (!okPlain && !okFlip) return false;
-      if (++seen >= 3) break;
+      if (ringParity(closed, p.x, p.y)) flip++;
+      else plain++;
+      seen++;
     }
   }
-  return !okPlain && okFlip;
+  const tot = plain + flip;
+  if (!tot) return false;
+  const rate = flip / tot;
+  return rate >= 0.75 && rate - plain / tot >= 0.1;
 }
 
 function ringBBox(rings: Ring[]) {

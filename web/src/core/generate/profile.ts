@@ -29,18 +29,7 @@ export function defaultProfiles(): GenerationProfile[] {
     {
       layerId: 'height',
       enabled: true,
-      params: {
-        landRatio: DEFAULT_WORLD_SHAPE.landRatio,
-        relief: DEFAULT_WORLD_SHAPE.relief,
-        flatness: DEFAULT_WORLD_SHAPE.flatness,
-        continentScale: DEFAULT_WORLD_SHAPE.continentScale,
-        coastBreak: DEFAULT_WORLD_SHAPE.coastBreak,
-        mountain: DEFAULT_WORLD_SHAPE.mountain,
-        detail: DEFAULT_WORLD_SHAPE.detail,
-        seaRugged: DEFAULT_WORLD_SHAPE.seaRugged,
-        polar: DEFAULT_WORLD_SHAPE.polar,
-        erosion: DEFAULT_WORLD_SHAPE.erosion,
-      },
+      params: { ...DEFAULT_WORLD_SHAPE },
       dependsOn: [],
     },
     {
