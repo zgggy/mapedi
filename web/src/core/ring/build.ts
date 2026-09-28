@@ -192,7 +192,7 @@ export function chainEdgesToMidpointRings(
   const usedE = new Array(edges.length).fill(false);
   const rings: MidRing[] = [];
 
-  const walkFrom = (startEdge: number): MidRing => {
+  const walkFrom = (startEdge: number): MidRing[] => {
     const e0 = edges[startEdge];
     usedE[startEdge] = true;
     const startK = e0.k0;
@@ -235,40 +235,65 @@ export function chainEdgesToMidpointRings(
       if (curK === startK) break;
     }
 
-    const closed = chainKeys[chainKeys.length - 1] === startK && chainEdges.length >= 3;
-    const keys = closed ? chainKeys.slice(0, -1) : chainKeys;
-    const pts: Pt[] = [];
-    let prevX: number | null = null;
-    for (let i = 0; i < chainEdges.length; i++) {
-      const e = edges[chainEdges[i]];
-      const m = e.midpoint ?? edgeMidpoint(e.p0, e.p1, period);
-      const mm: { x: number; y: number } = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, period), y: m.y };
-      pts.push(mm);
-      prevX = mm.x;
-    }
-    const nE = chainEdges.length;
-    const nV = closed ? nE : nE - 1;
-    const rawVerts: Pt[] = [];
-    for (let i = 0; i < nV; i++) {
-      const a = pts[i];
-      const b = pts[i + 1] ?? (closed
-        ? { x: unwrapXAgainst(a.x, pts[0].x, period), y: pts[0].y }
-        : pts[i]);
-      const vk = keys[(i + 1) % keys.length];
-      const v = vk ? rep.get(vk) : undefined;
-      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) {
-        rawVerts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-      } else {
-        rawVerts.push({ x: unwrapXAgainst(a.x, v.x, period), y: v.y });
+    // **在重复顶点处拆环**：8 字结/顶点接触会让链自交——自交环的三角化会吐出
+    // 「错乱三角形」（earcut 在自交环上给出环外三角）。拆成简单子环后一切路径
+    // （逐环三角组/整件剖分/扇形）都成立。
+    const rings: MidRing[] = [];
+    const buildRing = (from: number, to: number, keyFrom: number, keyTo: number, closed: boolean): MidRing | null => {
+      const nE = to - from;
+      if (nE < 2) return null;
+      const pts: Pt[] = [];
+      let prevX: number | null = null;
+      for (let i = from; i < to; i++) {
+        const e = edges[chainEdges[i]];
+        const m = e.midpoint ?? edgeMidpoint(e.p0, e.p1, period);
+        const mm = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, period), y: m.y };
+        pts.push(mm);
+        prevX = mm.x;
       }
+      const keys = chainKeys.slice(keyFrom, keyTo + 1);
+      const nV = closed ? nE : nE - 1;
+      const rawVerts: Pt[] = [];
+      for (let i = 0; i < nV; i++) {
+        const a = pts[i];
+        const b = pts[i + 1] ?? (closed ? { x: unwrapXAgainst(a.x, pts[0].x, period), y: pts[0].y } : pts[i]);
+        const vk = keys[(i + 1) % keys.length];
+        const v = vk ? rep.get(vk) : undefined;
+        if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+          rawVerts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+        } else {
+          rawVerts.push({ x: unwrapXAgainst(a.x, v.x, period), y: v.y });
+        }
+      }
+      return { pts, verts: alignVerts(pts, rawVerts), closed };
+    };
+    const posOf = new Map<string, number>();
+    let segStart = 0;
+    for (let i = 0; i < chainKeys.length; i++) {
+      const k = chainKeys[i];
+      if (posOf.has(k)) {
+        const seg = posOf.get(k)!;
+        if (seg >= segStart) {
+          const r = buildRing(seg, i, seg, i, true);
+          if (r) rings.push(r);
+          for (let j = seg; j <= i; j++) posOf.delete(chainKeys[j]);
+          segStart = i;
+        }
+      }
+      posOf.set(k, i);
     }
-    return { pts, verts: alignVerts(pts, rawVerts), closed };
+    // 尾段：闭合（回到 startK）或保持开链
+    const closedTail = chainKeys[chainKeys.length - 1] === startK && chainEdges.length - segStart >= 3;
+    const tail = buildRing(segStart, chainEdges.length, segStart, chainKeys.length - (closedTail ? 1 : 0), closedTail);
+    if (tail) rings.push(tail);
+    return rings;
   };
 
   for (let i = 0; i < edges.length; i++) {
     if (usedE[i]) continue;
-    const r = walkFrom(i);
-    if (r.pts.length >= 2) rings.push(r);
+    for (const r of walkFrom(i)) {
+      if (r.pts.length >= 2) rings.push(r);
+    }
   }
   return rings;
 }

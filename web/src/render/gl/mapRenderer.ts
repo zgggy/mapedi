@@ -27,7 +27,7 @@ import {
   type RenderEnv,
 } from '../layers';
 import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geometry';
-import { triangulateRings } from './triangulate';
+import { triangulateRings, trianglesMatchRings } from './triangulate';
 import { projectionWorldPeriod } from '../../core/project/projections';
 
 interface BBox {
@@ -473,7 +473,9 @@ export class MapGlRenderer {
     // 补丁只重做变动环；自检失败的环回退扇形）。
     let ptsTotal = 0;
     for (const fe of fillEntries) ptsTotal += fe.pts.length;
-    const tri = ptsTotal > 2000 ? null : triangulateRings(fillEntries);
+    let tri = ptsTotal > 2000 ? null : triangulateRings(fillEntries);
+    // 回验：三角形必须落在环集奇偶内（自交环 earcut 会出错乱三角形）
+    if (tri?.tris && !trianglesMatchRings(tri.tris, fillEntries.map((f) => f.pts))) tri = null;
     const geo: PieceGeo = {
       tri: tri?.tris ?? null,
       triOk: !!tri?.areaOk,

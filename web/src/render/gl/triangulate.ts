@@ -13,6 +13,33 @@
  * 不在此打补丁。
  */
 import type { DisplayRing, MidRing } from '../../core/ring/displayRing';
+
+/**
+ * 三角组回验：每个三角形质心必须落在环集奇偶内（= 填充区域）。
+ * 自交环上 earcut 会给出「环外三角」（错乱三角形），面积自检（2%）拦不住小自交环。
+ * 成本 O(tris·pts)；超过 8M 次测试直接判 false（回退扇形，奇偶精确）。
+ */
+export function trianglesMatchRings(tris: Float32Array, rings: Pt[][]): boolean {
+  let cost = 0;
+  for (const r of rings) cost += (tris.length / 6) * r.length;
+  if (cost > 8e6) return false;
+  for (let k = 0; k + 5 < tris.length; k += 6) {
+    const cx = (tris[k] + tris[k + 2] + tris[k + 4]) / 3;
+    const cy = (tris[k + 1] + tris[k + 3] + tris[k + 5]) / 3;
+    let cross = 0;
+    for (const pts of rings) {
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const a = pts[j], b = pts[i];
+        if ((a.y > cy) !== (b.y > cy)) {
+          const t = (cy - a.y) / (b.y - a.y);
+          if (cx < a.x + t * (b.x - a.x)) cross++;
+        }
+      }
+    }
+    if ((cross & 1) !== 1) return false;
+  }
+  return true;
+}
 import { splitOuterHoleRings, ringSignedArea, pointInRing } from '../../core/ring/displayRing';
 import { ShapeUtils, Vector2 } from 'three';
 import type { Pt } from './geometry';

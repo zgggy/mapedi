@@ -111,9 +111,26 @@ function heightField(cells: Cell[], seed: number, shape: WorldShape, rng: () => 
   const delta = 0.12 + 0.5 * Math.max(0, Math.min(1, shape.detail));            // 细节量
   const sigma = 0.25 + 1.0 * Math.max(0, Math.min(1, shape.seaRugged));         // 海底起伏
 
+  // 噪声域旋转（每种子随机正交阵）：打散 Perlin 网格的轴对齐对称感
+  const th = rng() * Math.PI * 2, ph = Math.acos(rng() * 2 - 1);
+  const R = (() => {
+    const c1 = Math.cos(th), s1 = Math.sin(th), c2 = Math.cos(ph), s2 = Math.sin(ph);
+    return [
+      c1, -s1, 0,
+      s1 * c2, c1 * c2, -s2,
+      s1 * s2, c1 * s2, c2,
+    ];
+  })();
+  const rot = (v: { x: number; y: number; z: number }): { x: number; y: number; z: number } => ({
+    x: R[0] * v.x + R[1] * v.y + R[2] * v.z,
+    y: R[3] * v.x + R[4] * v.y + R[5] * v.z,
+    z: R[6] * v.x + R[7] * v.y + R[8] * v.z,
+  });
+
   for (let i = 0; i < n; i++) {
     const c = cells[i];
-    const p = unitOf(c.center.lon, c.center.lat);
+    const p0 = unitOf(c.center.lon, c.center.lat); // 真实球向量（纬度用）
+    const p = rot(p0); // 噪声域（仅噪声采样）
     // 域扭曲 W(p)：向量 FBM（三通道各不同 → 方向对称撕海岸，无拉伸感）
     const wx = fbm(p.x * 1.6 + 3.1, p.y * 1.6 + 5.7, p.z * 1.6 + 1.3, seed + 11, 3);
     const wy = fbm(p.x * 1.6 + 8.2, p.y * 1.6 + 2.4, p.z * 1.6 + 6.9, seed + 23, 3);
@@ -127,7 +144,7 @@ function heightField(cells: Cell[], seed: number, shape: WorldShape, rng: () => 
 
     // 低纬大陆倾向（参数）：中低纬度整体抬升大陆度 → 大陆更常生于中低纬
     // （高纬大陆在墨卡托下拉伸难看；不再有穿极等特殊设定）
-    const w = smoothstep(0.92, 0.2, Math.abs(p.y));
+    const w = smoothstep(0.92, 0.2, Math.abs(p0.y)); // 真实纬度
     v += shape.latBias * 0.5 * w * (0.7 + 0.5 * fbm(qx * 2.2, qy * 2.2, qz * 2.2, seed + 201, 3));
 
     // 山系 M：ridged FBM × 内陆度

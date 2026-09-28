@@ -11,7 +11,7 @@
  */
 import type { DisplayRing } from '../../core/ring/displayRing';
 import { sampleMidRing } from '../../core/ring/hermite';
-import { triangulateRings } from './triangulate';
+import { triangulateRings, trianglesMatchRings } from './triangulate';
 
 export interface Pt {
   x: number;
@@ -129,7 +129,7 @@ export function ringGeo(
   let xorTris: Float32Array | null = null;
   if (mode === 'fill') {
     const tri = triangulateRings([{ ring, pts }]);
-    xorTris = tri?.areaOk ? tri.tris : buildFan(pts);
+    xorTris = tri?.areaOk && trianglesMatchRings(tri.tris, [pts]) ? tri.tris : buildFan(pts);
   }
   const geo: RingGeo = {
     fillPts: mode === 'fill' ? pts : null,
