@@ -1,5 +1,6 @@
 <script lang="ts">
   import CapsuleSlider from './CapsuleSlider.svelte';
+  import PanelShell from './PanelShell.svelte';
   import type { ViewMode } from './shell';
   import { HARD_MAX_DENSITY } from '../../core/world';
 
@@ -64,42 +65,11 @@
     onGlobeRotHours?: (v: number) => void;
   } = $props();
 
-  let hovered = $state(false);
-  let expanded = $state(false);
-
-  function onEnter() {
-    hovered = true;
-  }
-  function onLeave() {
-    hovered = false;
-    expanded = false;
-  }
-  function toggleExpand() {
-    expanded = !expanded;
-  }
-
-  const showBar = $derived(hovered || expanded);
 </script>
 
-<div class="top" onmouseenter={onEnter} onmouseleave={onLeave} role="presentation">
-  {#if !showBar}
-    <button
-      type="button"
-      class="pill-hit"
-      aria-label="展开项目栏"
-      title="展开项目栏"
-      onclick={() => { hovered = true; }}
-    >
-      <span class="pill" aria-hidden="true"></span>
-    </button>
-  {:else}
-    <div class="panel">
-      <button type="button" class="head" onclick={toggleExpand}>
-        <span class="name">{mapName}</span>
-        <span class="dim">自动保存 {autosaveAt || '…'}</span>
-      </button>
-      {#if expanded}
-        <div class="body">
+<PanelShell title="项目 · {mapName}" icon="🗃" {open} side="float" width={320} x={420} y={56} onCollapse={() => (open = false)}>
+  <div class="body">
+    <p class="dim" style="margin:0 0 6px">自动保存 {autosaveAt || '…'}</p>
           <section>
             <h3>生成</h3>
             <div class="row">
@@ -146,77 +116,17 @@
               <button type="button" onclick={onClearCache}>清自动存档</button>
             </div>
           </section>
-        </div>
-      {/if}
-    </div>
-  {/if}
-</div>
+  </div>
+</PanelShell>
 
 <style>
-  .top {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 60;
-    display: flex;
-    justify-content: center;
-    pointer-events: none;
-  }
   .top > * {
     pointer-events: auto;
   }
   /* 触发区比显示条更大 */
-  .pill-hit {
-    position: relative;
-    width: 56px;
-    height: 28px;
-    margin-top: 0;
-    padding: 0;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-  }
   /* 显示条：更窄；底色与 panel 相同；边框与其它 panel 一致 */
-  .pill {
-    display: block;
-    width: 28px;
-    height: 8px;
-    margin-top: 8px;
-    border-radius: 4px;
-    background: rgba(12, 14, 20, 0.94);
-    border: 1px solid var(--panel-border);
-    box-shadow: none;
-    pointer-events: none;
-  }
   .pill-hit:hover .pill {
     background: rgba(18, 20, 26, 0.98);
-  }
-  .panel {
-    width: min(460px, calc(100vw - 32px));
-    background: rgba(12, 14, 20, 0.94);
-    border: 1px solid var(--panel-border);
-    border-top: none;
-    border-radius: 0 0 12px 12px;
-    overflow: hidden;
-    font-size: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 12px;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 12px;
   }
   .head .name {
     font-weight: 600;

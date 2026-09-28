@@ -12,7 +12,6 @@
   import LayerInfoPanel from './ui/shell/LayerInfoPanel.svelte';
   import ElementInfoPanel from './ui/shell/ElementInfoPanel.svelte';
   import StatusBar from './ui/shell/StatusBar.svelte';
-  import BrushHud from './ui/shell/BrushHud.svelte';
   import DisplayStylePanel from './ui/shell/DisplayStylePanel.svelte';
   import PanelDock from './ui/shell/PanelDock.svelte';
   import ValidatorPanel from './ui/shell/ValidatorPanel.svelte';
@@ -43,6 +42,7 @@
   });
 
   const dockItems = $derived([
+    { id: 'project', icon: '🗃', title: '项目', open: shell.projectOpen },
     { id: 'layers', icon: '📚', title: '图层', open: panels.layers },
     { id: 'workspace', icon: '🗂', title: '工作区', open: panels.workspace },
     { id: 'layerInfo', icon: 'ℹ', title: '图层信息', open: panels.layerInfo },
@@ -51,6 +51,10 @@
   ]);
 
   function togglePanel(id: string) {
+    if (id === 'project') {
+      shell.projectOpen = !shell.projectOpen;
+      return;
+    }
     const key = id as keyof typeof panels;
     panels[key] = !panels[key];
     if (key === 'style' && panels.style && !styleLayerId) styleLayerId = focusLayer;
@@ -282,6 +286,8 @@
     }}
     onToggleVisible={(id) => editor.toggleLayerVisible(id)}
     onDrawLayer={(id) => {
+      // 行点击 = 持久切换显隐（与眼睛同一开关）+ 聚焦 + 开工作区
+      editor.toggleLayerVisible(id);
       editor.focusLayerForDraw(id);
       panels.workspace = true;
     }}
@@ -358,6 +364,8 @@
     onRadius={(v) => {
       editor.draw = { ...editor.draw, radiusDeg: v };
     }}
+    drawTool={draw.tool}
+    onTool={(t) => editor.setDrawTool(t)}
     onDrawMode={() => {
       if (editor.draw.active) editor.endDraw();
       else if (focusLayer === 'height') editor.startHeightDraw();
@@ -447,17 +455,6 @@
   />
 
   <StatusBar {hover} {status} {fps} zoom={zoomScale} />
-
-  <BrushHud
-    {draw}
-    label={editor.drawTargetLabel}
-    isHeight={focusLayer === 'height'}
-    onTool={(t) => editor.setDrawTool(t)}
-    onEnd={() => editor.endDraw()}
-    onRadius={(v) => {
-      editor.draw = { ...editor.draw, radiusDeg: v };
-    }}
-  />
 
   <DisplayStylePanel
     open={panels.style}

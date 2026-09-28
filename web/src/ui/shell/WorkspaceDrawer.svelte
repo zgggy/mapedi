@@ -37,6 +37,8 @@
     onDraw,
     onPaintValue,
     onRadius,
+    drawTool = 'brush',
+    onTool,
     onDrawMode,
     onCreate,
     onCreateChild,
@@ -62,6 +64,8 @@
     /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字 */
     onPaintValue?: (id: string, value: number) => void;
     onRadius?: (v: number) => void;
+    drawTool?: import('../../core/draw/brush').DrawTool;
+    onTool?: (t: import('../../core/draw/brush').DrawTool) => void;
     onDrawMode?: () => void;
     onCreate?: () => void;
     onCreateChild?: (parentId: string) => void;
@@ -433,21 +437,31 @@
             onCreate={() => onCreate?.()}
           />
         </div>
-      {:else}
+      {/if}
+      {#if drawActive || isHeight}
         <div class="tools">
-          <label class="field inline">
-            <span>笔刷</span>
-            <CapsuleSlider
-              min={0.3}
-              max={8}
-              step={0.1}
-              value={brushRadius}
-              label="笔刷宽度"
-              width={140}
-              onInput={(v) => onRadius?.(v)}
-            />
-            <span class="dim">{brushRadius.toFixed(1)}°</span>
-          </label>
+          <div class="tool-row">
+            <button type="button" class="tool" class:on={drawTool === 'brush'} onclick={() => onTool?.('brush')}>笔刷 B</button>
+            {#if !isHeight}
+              <button type="button" class="tool" class:on={drawTool === 'weight'} onclick={() => onTool?.('weight')}>权重 W</button>
+            {/if}
+            <label class="field inline">
+              <span>笔刷</span>
+              <CapsuleSlider
+                min={0.3}
+                max={8}
+                step={0.1}
+                value={brushRadius}
+                label="笔刷宽度"
+                width={140}
+                onInput={(v) => onRadius?.(v)}
+              />
+              <span class="dim">{brushRadius.toFixed(1)}°</span>
+            </label>
+          </div>
+          {#if isHeight}
+            <p class="dim hint">左键刷选定值 · 右键擦除 · 空白点击 / Esc 退出</p>
+          {/if}
         </div>
       {/if}
 
@@ -704,5 +718,28 @@
     width: 280px;
     pointer-events: none;
     transition: transform 0.08s linear;
+  }
+
+  .tool-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .tool {
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .tool.on {
+    background: rgba(240, 195, 106, 0.25);
+    border-color: rgba(240, 195, 106, 0.6);
+  }
+  .hint {
+    margin: 4px 0 0;
   }
 </style>

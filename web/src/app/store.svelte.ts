@@ -903,13 +903,9 @@ export class EditorStore {
     this.notify();
   }
 
-  /** 绘制按钮：聚焦该层并确保其显示（子随父） */
+  /** 聚焦该层（显隐由 toggleLayerVisible 独立控制，此处不再强制显示） */
   focusLayerForDraw(id: string) {
     this.selectLayerTop(id);
-    const layer = this.world?.layers.find((l) => l.id === id);
-    if (layer && !(layer.visible ?? defaultLayerVisible(layer))) {
-      this.toggleLayerVisible(id);
-    }
     this.notify();
   }
 

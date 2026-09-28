@@ -240,18 +240,19 @@ export function splitRegionForDisplay(
 }
 
 /**
- * 图层是否在地图上展示元素：**选中 ≡ 显示**（同一接口）。
- * visible 或当前选中 focusLayerId，任一成立即画填充+边界。
+ * 图层是否在地图上展示元素：**显隐唯一开关 = layer.visible**（眼睛 / 图层行点击均切换它）。
+ * 焦点/选中只决定工作区与叠放分组，**不改变显隐**（旧「选中 ≡ 显示」已废——它造成
+ * "点行只临时显示"：焦点强制显示 + 眼睛状态不变，切走即消失）。
  */
 export function isLayerShown(
   world: World,
   layerId: string,
   focusLayerId?: string | null,
 ): boolean {
+  void focusLayerId;
   const l = world.layers.find((x) => x.id === layerId);
   if (!l) return false;
   if (isFreeLayer(l) || l.baseMesh) return false;
-  if (focusLayerId && focusLayerId === layerId) return true;
   return isVisible(l, defaultLayerVisible(l));
 }
 
