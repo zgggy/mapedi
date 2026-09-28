@@ -40,7 +40,7 @@ import { computeClimate } from '../core/climate';
 import { generateBiomes } from '../core/biomes';
 import { absorbLandCell, releaseOceanCell, heightTopologyChanged } from '../core/heightRegions';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
-import { rebuildHeightIntervalElements, updateHeightIntervalElements } from '../core/layer/heightElements';
+import { rebuildHeightIntervalElements, updateHeightIntervalElements, normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
@@ -557,6 +557,8 @@ export class EditorStore {
     if (seq !== this.generationSeq) return true;
     if (!json) return false;
     const w = deserializeWorld(json);
+    // 旧档区间嵌套累积（h≥lo）→ 精确档归一（成员由高度重导，对象/命名保留）
+    normalizeHeightIntervalElements(w);
     ensureBuiltinLayers(w);
     if (!w.astro) w.astro = defaultStarSystem(w.meta.seed, w.climate);
     rebuildLandSeaRegions(w);

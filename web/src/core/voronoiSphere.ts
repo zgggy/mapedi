@@ -306,19 +306,36 @@ export function sphericalCircumcenter(a: Vec3, b: Vec3, c: Vec3): Vec3 | null {
   return dot(pole, cen) >= 0 ? pole : [-pole[0], -pole[1], -pole[2]];
 }
 
+export interface VertexSnap {
+  (v: Vec3): Vec3;
+  /** 收尾：代表坐标改为类内最小点（规范代表）——输出与调用遍历序无关 */
+  finalize(): void;
+}
+
 /**
  * 全局顶点表 snap：邻近球面点焊到同一代表。
  * 消除对偶近重合外心（短 Voronoi 边 / 近退化三角）在不同胞腔各留各的角。
+ *
+ * **规范代表**：类内取 (x,y,z) 字典序最小点做代表（finalize 统一落盘，代表对象引用不变）。
+ * 先到先得会让输出随三角遍历序漂移（snap 偶然差）；规范代表使输出与遍历序无关。
  */
-export function createVertexSnap(epsDot = 0.999999): (v: Vec3) => Vec3 {
+export function createVertexSnap(epsDot = 0.999999): VertexSnap {
   // 25k 时平均边长约 0.02rad；焊接阈须吸收浮点/对偶误差，又不能吞掉真角点
   const cell = Math.sqrt(2 * (1 - epsDot));
   const g = Math.max(cell, 1e-4);
   const grid = new Map<string, Vec3[]>();
   const key = (v: Vec3) =>
     `${Math.floor(v[0] / g)},${Math.floor(v[1] / g)},${Math.floor(v[2] / g)}`;
+  // 类内最小点（与到达序无关）
+  const classMin = new Map<Vec3, Vec3>();
+  const noteMin = (rep: Vec3, v: Vec3): void => {
+    const m = classMin.get(rep);
+    if (!m || v[0] < m[0] || (v[0] === m[0] && (v[1] < m[1] || (v[1] === m[1] && v[2] < m[2])))) {
+      classMin.set(rep, [v[0], v[1], v[2]]);
+    }
+  };
 
-  return (v: Vec3): Vec3 => {
+  const snap = ((v: Vec3): Vec3 => {
     const cx = Math.floor(v[0] / g);
     const cy = Math.floor(v[1] / g);
     const cz = Math.floor(v[2] / g);
@@ -329,10 +346,14 @@ export function createVertexSnap(epsDot = 0.999999): (v: Vec3) => Vec3 {
           if (!bucket) continue;
           for (const r of bucket) {
             const d = r[0] * v[0] + r[1] * v[1] + r[2] * v[2];
-            if (d >= epsDot) return r;
+            if (d >= epsDot) {
+              noteMin(r, v);
+              return r;
+            }
           }
         }
     const rep: Vec3 = [v[0], v[1], v[2]];
+    classMin.set(rep, [v[0], v[1], v[2]]);
     const k = key(rep);
     let a = grid.get(k);
     if (!a) {
@@ -341,7 +362,15 @@ export function createVertexSnap(epsDot = 0.999999): (v: Vec3) => Vec3 {
     }
     a.push(rep);
     return rep;
+  }) as VertexSnap;
+  snap.finalize = () => {
+    for (const [rep, m] of classMin) {
+      rep[0] = m[0];
+      rep[1] = m[1];
+      rep[2] = m[2];
+    }
   };
+  return snap;
 }
 
 /** 将邻近球面顶点焊到同一代表点，消除相邻胞腔缝；返回 snap 函数供外部复用 */
@@ -350,7 +379,9 @@ export function weldVertices(
   epsDot = 0.999999,
 ): { polys: Vec3[][]; snap: (v: Vec3) => Vec3 } {
   const snap = createVertexSnap(epsDot);
-  return { polys: polys.map((poly) => poly.map(snap)), snap };
+  const out = polys.map((poly) => poly.map(snap));
+  snap.finalize();
+  return { polys: out, snap };
 }
 
 function angleBetween(u: Vec3, v: Vec3): number {
@@ -724,18 +755,28 @@ export function sphericalVoronoi(
   const triangles: [number, number, number][] = hull;
   // 全局顶点表：所有外心先焊成代表，禁止 per-cell first-wins 分裂
   const snap = createVertexSnap();
-  const circum: Vec3[] = [];
+  // 有序焊接（(x,y,z) 字典序）：贪心聚类与到达序无关；配合 snap.finalize 的类内最小代表，
+  // 顶点表与三角遍历序完全无关（未来任何插入序/遍历序优化不再改输出）
+  const circumRaw: Vec3[] = [];
   for (let t = 0; t < triangles.length; t++) {
     const [a, b, c] = triangles[t];
-    const cc =
+    circumRaw.push(
       sphericalCircumcenter(sites[a], sites[b], sites[c]) ??
-      normalize([
-        sites[a][0] + sites[b][0] + sites[c][0],
-        sites[a][1] + sites[b][1] + sites[c][1],
-        sites[a][2] + sites[b][2] + sites[c][2],
-      ]);
-    circum.push(snap(cc));
+        normalize([
+          sites[a][0] + sites[b][0] + sites[c][0],
+          sites[a][1] + sites[b][1] + sites[c][1],
+          sites[a][2] + sites[b][2] + sites[c][2],
+        ]),
+    );
   }
+  const snapOrder = circumRaw.map((_, i) => i).sort((i, j) => {
+    const a = circumRaw[i];
+    const b = circumRaw[j];
+    return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  });
+  const circum: Vec3[] = new Array(triangles.length);
+  for (const i of snapOrder) circum[i] = snap(circumRaw[i]);
+  snap.finalize();
 
   // 2) 仅由 faces 建拓扑：邻接 = Delaunay 共边；sharedEdges = 该边两外心（与 poly 同一引用）
   const vertsBySite: Vec3[][] = Array.from({ length: n }, () => []);

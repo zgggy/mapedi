@@ -58,6 +58,40 @@ export function rebuildHeightIntervalElements(world: World): Region[] {
   return els;
 }
 
+/**
+ * 归一到**精确档**（lo ≤ h ≤ hi）：旧档嵌套累积（h≥lo）的遗留成员在此纠正。
+ * 区间本就是派生数据（cells = 高度档位），元素对象/命名/顺序保留，仅重导成员。
+ */
+export function normalizeHeightIntervalElements(world: World): void {
+  const els = heightIntervalRegions(world);
+  if (els.length !== 12) {
+    rebuildHeightIntervalElements(world);
+    return;
+  }
+  const byLo = new Map<number, Region>();
+  for (const r of els) {
+    const lo = r.attributes?.lo;
+    if (typeof lo === 'number') byLo.set(lo, r);
+  }
+  const next: CellId[][] = HEIGHT_INTERVALS.map(() => []);
+  for (const c of world.cells) {
+    const h = Math.round(c.height);
+    for (let i = 0; i < 12; i++) {
+      const iv = HEIGHT_INTERVALS[i];
+      if (h >= iv.lo && h <= iv.hi) {
+        next[i].push(c.id);
+        break;
+      }
+    }
+  }
+  HEIGHT_INTERVALS.forEach((iv, i) => {
+    const el = byLo.get(iv.lo);
+    if (!el) return;
+    el.cells = next[i];
+    el.overlaps = []; // 精确档互不相交
+  });
+}
+
 export function heightIntervalRegions(world: World): Region[] {
   return world.regions.filter((r) => r.layerId === 'height' && r.attributes?.kind === 'interval');
 }
