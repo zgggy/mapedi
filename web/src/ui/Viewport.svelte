@@ -825,8 +825,9 @@
   });
 
   $effect(() => {
-    void world.cells.length;
-    void world.regions.length;
+    // world 身份 = 任何数据触碰（笔刷提交/撤销/显隐/样式）→ 必须重绘；
+    // 否则数据已变、屏幕停在旧帧（"改了颜色不变，切一下图层才对"）
+    void world;
     void focusLayer;
     void highlightRegionId;
     void drawActive;

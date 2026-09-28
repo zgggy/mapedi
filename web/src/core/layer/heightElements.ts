@@ -18,12 +18,14 @@ export function cellInInterval(h: number, lo: number, _hi: number): boolean {
  * 不调用 computeRelationships（大重叠只记 count）。
  */
 export function rebuildHeightIntervalElements(world: World): Region[] {
+  // **精确档**（lo ≤ h ≤ hi，互不相交）：区间可见色 = 该档色，与行叠放顺序无关；
+  // 嵌套累积（h≥lo）会让可见色取决于叠放序且产生全图巨件，已废。
   const cellsPer: CellId[][] = HEIGHT_INTERVALS.map(() => []);
   for (const c of world.cells) {
     const h = Math.round(c.height);
     for (let i = 0; i < 12; i++) {
       const iv = HEIGHT_INTERVALS[i];
-      if (h >= iv.lo) cellsPer[i].push(c.id);
+      if (h >= iv.lo && h <= iv.hi) cellsPer[i].push(c.id);
     }
   }
 
@@ -40,29 +42,14 @@ export function rebuildHeightIntervalElements(world: World): Region[] {
         lo: iv.lo,
         hi: iv.hi,
         min: iv.min,
-        allowOverlap: true,
       },
       adjacentElementIds: new Set<string>(),
       overlaps: [],
     } satisfies Region;
   });
 
-  // 嵌套重叠：只记 sharedCount，不展开 sharedCells
+  // 精确档互不相交 → 无重叠；只记相邻档
   for (let i = 0; i < 12; i++) {
-    const setA = new Set(els[i].cells);
-    for (let j = 0; j < 12; j++) {
-      if (i === j) continue;
-      let shared = 0;
-      for (const c of els[j].cells) if (setA.has(c)) shared++;
-      if (shared <= 0) continue;
-      els[i].overlaps!.push({
-        elementId: els[j].id,
-        type: shared === els[i].cells.length && shared === els[j].cells.length ? 'complete' : 'partial',
-        sharedCells: [],
-        sharedCount: shared,
-      });
-    }
-    // 相邻档
     if (i > 0) els[i].adjacentElementIds!.add(els[i - 1].id);
     if (i < 11) els[i].adjacentElementIds!.add(els[i + 1].id);
   }
@@ -77,7 +64,7 @@ export function heightIntervalRegions(world: World): Region[] {
 
 /**
  * 增量更新高度区间：只动被改 cell 所属的区间，不全量重扫。
- * 每个区间是嵌套集（h ≥ lo），cell 在 old→new 间迁移时只影响中间几档。
+ * 每个区间是**精确档**（lo ≤ h ≤ hi）；cell 在 old→new 间迁移时离开旧档、进入新档。
  */
 export interface HeightIntervalDelta {
   layerId: string;
@@ -113,10 +100,10 @@ export function updateHeightIntervalElements(
     const h1 = Math.round(s.h1);
     if (h0 === h1) continue;
     for (let i = 0; i < 12; i++) {
-      const lo = HEIGHT_INTERVALS[i].lo;
-      const inOld = h0 >= lo;
-      const inNew = h1 >= lo;
-      const el = byLo.get(lo);
+      const iv = HEIGHT_INTERVALS[i];
+      const inOld = h0 >= iv.lo && h0 <= iv.hi;
+      const inNew = h1 >= iv.lo && h1 <= iv.hi;
+      const el = byLo.get(iv.lo);
       if (!el) continue;
       const o = outOf(el);
       if (inOld && !inNew) {

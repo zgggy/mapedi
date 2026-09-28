@@ -31,6 +31,8 @@ export type Entry = {
   rings: Ring[];
   poles: { north: boolean; south: boolean };
   fullWorld: boolean;
+  /** 奇偶填充需补「框矩形外环」才能覆盖成员（见 computeFrameFlip） */
+  frameFlip: boolean;
   bbox: { minX: number; maxX: number; minY: number; maxY: number };
   /** 增量维护载体（二期：笔刷实时生效）；补丁路径就地更新 set/edges/rings */
   book?: BoundaryBook;
@@ -108,6 +110,7 @@ export function patchPieceEntry(
   const owners = polarCellIds(world.cells);
   entry.poles = { north: b.set.has(owners.north), south: b.set.has(owners.south) };
   entry.fullWorld = world.cells.length > 0 && b.set.size === world.cells.length;
+  entry.frameFlip = computeFrameFlip(world, b.set, [...b.set], entry.rings, project);
   entry.bbox = ringBBox(entry.rings);
   return true;
 }
@@ -174,6 +177,7 @@ export function getCellSetRingsCached(
     rings,
     poles: { north: set.has(owners.north), south: set.has(owners.south) },
     fullWorld: world.cells.length > 0 && set.size === world.cells.length,
+    frameFlip: computeFrameFlip(world, set, cellIds, rings, project),
     bbox: ringBBox(rings),
     // 增量载体：边集/成员集在建缓存时零成本播种；补丁路径就地维护
     book: {
@@ -183,6 +187,66 @@ export function getCellSetRingsCached(
   };
   ringsCache.set(key, entry);
   return entry;
+}
+
+/** evenodd 奇偶：点被环集包住当且仅当穿越数为奇 */
+function ringParity(rings: Ring[], x: number, y: number): boolean {
+  let cross = 0;
+  for (const ring of rings) {
+    const pts = ring.pts;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[j];
+      const b = pts[i];
+      if ((a.y > y) !== (b.y > y)) {
+        const t = (y - a.y) / (b.y - a.y);
+        if (x < a.x + t * (b.x - a.x)) cross++;
+      }
+    }
+  }
+  return (cross & 1) === 1;
+}
+
+/**
+ * 奇偶探针：环集的 evenodd 填充应「盖住成员、排除非成员」。
+ * 恰好「翻转奇偶（补框矩形外环）」才成立 → true：极区/贴框集合的外轮廓常缺失
+ * （边界只含内环时 evenodd 填到补丁里，远海/深海因此对调），框外环一次翻转即正确。
+ * 两种都不成立 → false（维持旧语义，不在未知拓扑上冒险）。
+ */
+function computeFrameFlip(
+  world: World,
+  set: Set<CellId>,
+  cellIds: CellId[],
+  rings: Ring[],
+  project: (ll: { lon: number; lat: number }) => Pt,
+): boolean {
+  const n = world.cells.length;
+  if (!n) return false;
+  let okPlain = true;
+  let okFlip = true;
+  const step = Math.max(1, (cellIds.length / 4) | 0);
+  for (let i = 0; i < cellIds.length && i < step * 4; i += step) {
+    const c = world.cells[cellIds[i]];
+    if (!c) continue;
+    const p = project(c.center);
+    const par = ringParity(rings, p.x, p.y);
+    if (!par) okPlain = false;
+    else okFlip = false;
+    if (!okPlain && !okFlip) return false;
+  }
+  // 非成员探针（集合非全图时）
+  if (set.size < n) {
+    let seen = 0;
+    for (const c of world.cells) {
+      if (set.has(c.id)) continue;
+      const p = project(c.center);
+      const par = ringParity(rings, p.x, p.y);
+      if (par) okPlain = false;
+      else okFlip = false;
+      if (!okPlain && !okFlip) return false;
+      if (++seen >= 3) break;
+    }
+  }
+  return !okPlain && okFlip;
 }
 
 function ringBBox(rings: Ring[]) {

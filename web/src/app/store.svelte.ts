@@ -881,7 +881,7 @@ export class EditorStore {
       }
       this.status = `隐藏「${layer.name || id}」`;
     }
-    this.touchRegions();
+    this.touchLayerView();
   }
 
   setLayerOpacity(id: string, opacity: number) {
@@ -889,7 +889,18 @@ export class EditorStore {
     const layer = this.world.layers.find((l) => l.id === id);
     if (!layer) return;
     layer.opacity = Math.max(0, Math.min(1, opacity));
-    this.touchRegions();
+    this.touchLayerView();
+  }
+
+  /**
+   * 图层显隐/不透明度：**视图态**轻失效——只换 world 身份触发重绘 + dataRev 变
+   * 使合成缓存失效；件环/几何缓存不受影响（显隐不改变任何 cell 集），隐藏层再显示
+   * 应毫秒级命中缓存，禁止走 touchRegions 的全量失效。
+   */
+  private touchLayerView() {
+    bumpRegionsRev();
+    this.world = this.world ? { ...this.world } : this.world;
+    this.notify();
   }
 
   /** 绘制按钮：聚焦该层并确保其显示（子随父） */
@@ -1102,7 +1113,8 @@ export class EditorStore {
 
   /** 高度绘制会话：整数场 + 12 工作区间 */
   startHeightDraw(intervalId?: string) {
-    this.selectedRegionId = null;
+    // 笔刷目标元素 = 选中态（工作区黄框，与图层面板选中语义一致）
+    this.selectedRegionId = intervalId ?? this.heightIntervalId ?? null;
     this.heightIntervalId = intervalId ?? this.heightIntervalId ?? 'h6';
     this.draw = {
       ...emptyDrawSession(),

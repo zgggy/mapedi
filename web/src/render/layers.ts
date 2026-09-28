@@ -345,7 +345,7 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       continue;
     }
     if (!rings.length) continue;
-    const prepared = preparePieces(rings, fr, entry.poles);
+    const prepared = preparePieces(rings, fr, entry.poles, entry.frameFlip);
     if (!prepared.length) continue;
 
     const needFill = fillOn && !seenFill.has(dp.key);
@@ -384,8 +384,9 @@ function preparePieces(
   rings: MidRing[],
   frameY: ReturnType<typeof frameYOf>,
   poles: { north: boolean; south: boolean },
+  frameFlip = false,
 ): DisplayRing[] {
-  const fk = `${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical},${poles.north},${poles.south}`;
+  const fk = `${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical},${poles.north},${poles.south}|${frameFlip ? 1 : 0}`;
   let byF = prepCache.get(rings as unknown as object);
   if (!byF) {
     byF = new Map();
@@ -398,6 +399,33 @@ function preparePieces(
     for (const piece of prepareDisplayRings(r, frameY, poleSideForRing(r, poles))) {
       if (piece.pts.length >= 2) out.push(piece);
     }
+  }
+  // 框矩形外环：evenodd 翻转（奇偶探针判定，见 computeFrameFlip）——
+  // 集合贴框/含极时外轮廓常缺失，补框环一次翻转即「盖成员、排非成员」。
+  // 矩形外扩余量：圆角/描边发生在可见框外，显示被 clip 裁掉。
+  if (frameFlip) {
+    const m = 0.08;
+    const x0 = frameY.minX - m;
+    const x1 = (frameY.maxX ?? Math.PI) + m;
+    const y0 = frameY.minY - m;
+    const y1 = frameY.maxY + m;
+    const xm = (x0 + x1) / 2;
+    const ym = (y0 + y1) / 2;
+    out.push({
+      pts: [
+        { x: x0, y: ym },
+        { x: xm, y: y0 },
+        { x: x1, y: ym },
+        { x: xm, y: y1 },
+      ],
+      verts: [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ],
+      closed: true,
+    });
   }
   byF.set(fk, out);
   return out;
