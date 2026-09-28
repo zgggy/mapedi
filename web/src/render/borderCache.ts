@@ -157,10 +157,10 @@ export function getCellSetRingsCached(
   const hit = ringsCache.get(key);
   if (hit) return hit;
   // 有界增长：按插入序淘汰最旧（变化元素每修订只新增少量条目）
-  if (ringsCache.size > 256) {
+  if (ringsCache.size > 2048) {
     for (const k of ringsCache.keys()) {
       ringsCache.delete(k);
-      if (ringsCache.size <= 128) break;
+      if (ringsCache.size <= 1024) break;
     }
   }
   if (!pairEdgeCache) {

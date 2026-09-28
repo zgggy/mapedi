@@ -3,7 +3,7 @@ import { defaultLayerRenderConfig } from '../core/types';
 import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
 import { invalidateProjCache } from '../render/projCache';
-import { invalidateBorderCache, invalidatePieceEntries } from '../render/borderCache';
+import { invalidateBorderCache } from '../render/borderCache';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
 import { invalidateCellIndex } from '../core/index/cellIndex';
@@ -96,8 +96,9 @@ import {
 const NAME_POOL = ['北境', '南洋', '东海', '西陆', '中央', '苍岭', '赤原', '银湾', '铁丘', '雾林'];
 
 /** 模块级响应式状态：App 通过 getter 读取即可追踪 */
+let worldRaw: World | null = $state.raw(null);
+
 const ui = $state({
-  world: null as World | null,
   status: '正在生成世界…',
   generating: false,
   genProgress: 0,
@@ -127,8 +128,10 @@ const ui = $state({
 export class EditorStore {
   get rev() { return ui.rev; }
   get projectEpoch() { return ui.projectEpoch; }
-  get world() { return ui.world; }
-  set world(v: World | null) { ui.world = v; }
+  // world 用 $state.raw：热路径（生成/重建/绘制）在裸对象上跑——深代理曾让
+  // 松手重建放大 50-70×（2.2s/次）；响应性 = 身份变更 + notify（本设计的驱动方式）
+  get world() { return worldRaw; }
+  set world(v: World | null) { worldRaw = v; }
   get status() { return ui.status; }
   set status(v: string) { ui.status = v; }
   get generating() { return ui.generating; }
@@ -319,8 +322,9 @@ export class EditorStore {
   touchHeight(full = false) {
     invalidateRegionIndex();
     invalidateCellGrid();
-    if (full) invalidatePieceEntries('piece:height:');
-    invalidatePieceEntries('piece:landsea:');
+    // 件环**不删缓存**（删 = 内容消失 + 重暖风暴）：区间/landsea 的成员增减都以
+    // Δ 补丁落盘（pendingHeightDeltas / pendingPiecePatches），见 flushHeightRegions。
+    void full;
     bumpHeightRev();
     bumpRegionsRev();
     this.heightGeomDirty = true;
@@ -357,7 +361,29 @@ export class EditorStore {
     }
     const dirty = this.heightDirtyIds;
     const dirtyList = dirty && dirty.size ? [...dirty] : sampleIds;
+    // rebuild 前后 diff landsea 成员 → 件环增量补丁（与高度 Δ 同型）
+    const prevCells = new Map<string, Set<number>>();
+    for (const r of this.world.regions) {
+      if (r.layerId !== 'landsea') continue;
+      prevCells.set(r.id, new Set(r.cells));
+    }
     rebuildLandSeaRegions(this.world, dirtyList ?? null);
+    for (const r of this.world.regions) {
+      if (r.layerId !== 'landsea') continue;
+      const prev = prevCells.get(r.id);
+      const now = new Set(r.cells);
+      const added: number[] = [];
+      const removed: number[] = [];
+      if (prev) {
+        for (const id of now) if (!prev.has(id)) added.push(id);
+        for (const id of prev) if (!now.has(id)) removed.push(id);
+      } else {
+        for (const id of now) added.push(id);
+      }
+      if (added.length || removed.length) {
+        this.pendingPiecePatches.push({ setKey: `piece:landsea:${r.id}:0`, added, removed });
+      }
+    }
     this.heightGeomDirty = false;
     this.heightDirtyIds = null;
     bumpHeightRev();
@@ -366,6 +392,8 @@ export class EditorStore {
 
   /** 二期：笔刷 tick 的区间增减队列（渲染侧消费后打件环补丁） */
   private pendingHeightDeltas: import('../core/layer/heightElements').HeightIntervalDelta[] = [];
+  /** landsea 件环补丁队列：rebuild 前后 diff 出增减格（提交/撤销走补丁，不删缓存） */
+  private pendingPiecePatches: { setKey: string; added: number[]; removed: number[] }[] = [];
   consumePieceInvalidations(): string[] | null {
     if (!this.pendingPieceInvalidations.length) return null;
     const out = this.pendingPieceInvalidations;
@@ -377,6 +405,13 @@ export class EditorStore {
     if (!this.pendingHeightDeltas.length) return null;
     const out = this.pendingHeightDeltas;
     this.pendingHeightDeltas = [];
+    return out;
+  }
+
+  consumePiecePatches(): { setKey: string; added: number[]; removed: number[] }[] | null {
+    if (!this.pendingPiecePatches.length) return null;
+    const out = this.pendingPiecePatches;
+    this.pendingPiecePatches = [];
     return out;
   }
 

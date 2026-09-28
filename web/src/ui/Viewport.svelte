@@ -725,6 +725,13 @@
     if (invs?.length) {
       for (const prefix of invs) invalidatePieceEntries(prefix);
     }
+    // landsea 件环增量补丁（与高度 Δ 同型；不删缓存 → 内容不消失）
+    const patches = editor.consumePiecePatches();
+    if (patches?.length) {
+      for (const pt of patches) {
+        patchPieceEntry(world, pt.setKey, projection, (ll) => project(ll, projection, projParams ?? defaultProjParams()), pt.added, pt.removed);
+      }
+    }
     // 松手重算已落地 → 清色块高亮（元素由真实件接替出现）
     if (paintPreviewCommitted) {
       paintPreviewCommitted = false;

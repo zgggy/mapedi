@@ -467,7 +467,12 @@ export class MapGlRenderer {
       if (fill?.fan) fans.push(fill.fan);
       if (outline?.strip) strips.push(outline.strip);
     }
-    const tri = triangulateRings(fillEntries);
+    // 大件（总采样点 > 2000，如大洋=框减百洞）不做整块 earcut：单洞变化会触发
+    // 整块重三角化（实测帧尖峰 0.3-1.4s）。tri=null → drawPiece 走 stencil 兜底
+    // （逐环扇形按环对象缓存，补丁只重做变动环）。
+    let ptsTotal = 0;
+    for (const fe of fillEntries) ptsTotal += fe.pts.length;
+    const tri = ptsTotal > 2000 ? null : triangulateRings(fillEntries);
     const geo: PieceGeo = {
       tri: tri?.tris ?? null,
       triOk: !!tri?.areaOk,

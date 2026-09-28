@@ -281,12 +281,13 @@ export function drawWorld(
         : (fn) => setTimeout(fn, 0);
     let i = 0;
     const warmStep = (): void => {
-      if (i >= cold.length) {
-        opts?.onGeometryReady?.();
-        return;
+      // 时间预算批量：每回调 ≤6ms 的件（原 1 件/回调，百件级风暴拖数秒 → 主线程长冻结）
+      const t0 = performance.now();
+      while (i < cold.length && performance.now() - t0 < 6) {
+        buildPieceParams({ ...env, displayPieces: [cold[i++]], warmQueue: undefined });
       }
-      buildPieceParams({ ...env, displayPieces: [cold[i++]], warmQueue: undefined });
       opts?.onGeometryReady?.();
+      if (i >= cold.length) return;
       idle(warmStep);
     };
     idle(warmStep);
