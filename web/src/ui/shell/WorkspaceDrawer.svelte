@@ -131,10 +131,12 @@
         depth,
         parentId,
         expandable,
-        kids: expandable ? kidsOf(r).map((c) => build(c, depth + 1, r.id)) : [],
+        kids: expandable ? kidsOf(r).reverse().map((c) => build(c, depth + 1, r.id)) : [],
       };
     };
-    return tops.map((r) => build(r, 0, null));
+    // 列表 = 叠放的**反序**（顶部 = 后画/最高）：绘制序 = 数组序（低者先画），
+    // 工作区顶部 = 数组末 = 绘制最上层（与图层面板同一约定：上 = 高）
+    return tops.reverse().map((r) => build(r, 0, null));
   });
 
   /** 展开路径上的可见行（单列网格渲染源） */
@@ -288,12 +290,13 @@
     const derived = !!reg && !!intervalAttrs(reg);
     const items: MenuItem[] = [
       { id: 'vis', label: '显示 / 隐藏', action: () => onToggleHidden?.(id) },
-      { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveItem?.(id, -1) },
+      // 列表为叠放反序（上 = 高）：列表上移 = 数组后移（dir=+1）
+      { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveItem?.(id, 1) },
       {
         id: 'down',
         label: '下移一层',
         disabled: si < 0 || si >= seq.length - 1,
-        action: () => onMoveItem?.(id, 1),
+        action: () => onMoveItem?.(id, -1),
       },
       {
         id: 'copy',
@@ -391,7 +394,11 @@
     const rows = slotsForDrag();
     if (dragId && dragReady && onRegionDrag && !isFreeLayer) {
       const k = insertIndex(rectCache, dragIndex, windowStart(), e.clientY);
-      onRegionDrag(dragId, insertPlan(flatRowList, rowPosOf(dragIndex), rowPosOf(k)));
+      // 列表 = 叠放反序：显示坐标映射回数组坐标（reverse）再规划插入位置
+      const arr = [...flatRowList].reverse();
+      const dArr = arr.length - 1 - rowPosOf(dragIndex);
+      const kArr = arr.length - rowPosOf(k);
+      onRegionDrag(dragId, insertPlan(arr, dArr, kArr));
     }
     dragId = null;
     dragIndex = -1;

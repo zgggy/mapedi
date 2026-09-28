@@ -1,4 +1,4 @@
-import { deserializeWorld } from '../world';
+import { deserializeWorld, rebuildSharedEdgesFromCells } from '../world';
 import type { World } from '../types';
 import type { ProjCache } from '../../render/projCache';
 
@@ -33,7 +33,12 @@ function runWorker(
       }
       if (d.type === 'done') {
         worker.terminate();
-        resolve({ world: d.world, projCache: d.projCache });
+        // Worker 侧剥离 sharedEdges（省克隆体积）：主线程按固定顺序重建（同 deserializeWorld）
+        const world = d.world;
+        if (!world.sharedEdges?.size && world.cells?.length) {
+          world.sharedEdges = rebuildSharedEdgesFromCells(world);
+        }
+        resolve({ world, projCache: d.projCache });
         return;
       }
       worker.terminate();
