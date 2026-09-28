@@ -80,7 +80,7 @@
                 <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={90} onInput={(v) => onShape('flatness', v)} /></label>
               </div>
               <div class="row">
-                <label class="sm"><input type="checkbox" checked={shape.polar} onchange={(e) => onShape('polar', e.currentTarget.checked)} /> 穿极大陆</label>
+                <label class="sm">低纬倾向 <CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬大陆倾向" width={90} onInput={(v) => onShape('latBias', v)} /></label>
                 <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
               </div>
             {/if}

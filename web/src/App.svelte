@@ -22,6 +22,7 @@
   let hover = $state<HoverInfo | null>(null);
   let styleId = $state('dark');
   let reliefSmooth = $state(0.35);
+  let projection = $state<import('./core/project/projections').ProjectionId>('mercator');
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
   let globeSpin = $state(true);
@@ -180,7 +181,7 @@
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}
           roadSegments={editor.roadSegments()}
-          projection={'mercator'}
+          projection={projection}
           {projParams}
           {reliefSmooth}
           {styleId}
@@ -255,6 +256,8 @@
     globeShowAxis={globeAxis}
     globeShowEcliptic={globeEcliptic}
     globeSpin={globeSpin}
+    {projection}
+    onProjection={(p) => (projection = p as import('./core/project/projections').ProjectionId)}
     globeTilt={editor.climateDraft.axialTiltDeg}
     globeRotHours={editor.climateDraft.rotationHours}
     onSwitchView={switchView}

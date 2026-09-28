@@ -141,7 +141,7 @@ export function genConfigFromParams(
   if (typeof params.mountain === 'number') { shape.mountain = params.mountain; hasShape = true; }
   if (typeof params.detail === 'number') { shape.detail = params.detail; hasShape = true; }
   if (typeof params.seaRugged === 'number') { shape.seaRugged = params.seaRugged; hasShape = true; }
-  if (typeof params.polar === 'boolean') { shape.polar = params.polar; hasShape = true; }
+  if (typeof params.latBias === 'number') { shape.latBias = params.latBias; hasShape = true; }
   if (typeof params.erosion === 'number') { shape.erosion = params.erosion; hasShape = true; }
   if (hasShape) cfg.worldShape = shape;
   return cfg;

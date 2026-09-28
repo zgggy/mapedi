@@ -111,11 +111,6 @@ function heightField(cells: Cell[], seed: number, shape: WorldShape, rng: () => 
   const delta = 0.12 + 0.5 * Math.max(0, Math.min(1, shape.detail));            // 细节量
   const sigma = 0.25 + 1.0 * Math.max(0, Math.min(1, shape.seaRugged));         // 海底起伏
 
-  // 穿极大陆：沿随机大圆的宽帽（穿两极 + 日界线，噪声撕边）
-  const lon0 = rng() * 360 - 180;
-  const spineN = unitOf(lon0 + 90, 0);
-  const spineW = 0.5 + rng() * 0.22;
-
   for (let i = 0; i < n; i++) {
     const c = cells[i];
     const p = unitOf(c.center.lon, c.center.lat);
@@ -130,17 +125,10 @@ function heightField(cells: Cell[], seed: number, shape: WorldShape, rng: () => 
     // 大陆度 C
     let v = fbm(qx * fC, qy * fC, qz * fC, seed + 101, 6);
 
-    if (shape.polar) {
-      const d = Math.abs(p.x * spineN.x + p.y * spineN.y + p.z * spineN.z);
-      const ang = Math.asin(Math.max(0, Math.min(1, d)));
-      const t = ang / spineW;
-      if (t < 2.2) {
-        const warp = 1 + fbm(qx * 2.4, qy * 2.4, qz * 2.4, seed + 201, 3) * 0.4;
-        v += Math.exp(-t * t * warp) * 0.62 * (0.7 + 0.5 * fbm(qx * 3.0, qy * 3.0, qz * 3.0, seed + 211, 3));
-      }
-      const pole = Math.max(0, Math.abs(p.y) - 0.93) / 0.07;
-      if (pole > 0) v += pole * pole * 0.3; // 贴极保障
-    }
+    // 低纬大陆倾向（参数）：中低纬度整体抬升大陆度 → 大陆更常生于中低纬
+    // （高纬大陆在墨卡托下拉伸难看；不再有穿极等特殊设定）
+    const w = smoothstep(0.92, 0.2, Math.abs(p.y));
+    v += shape.latBias * 0.5 * w * (0.7 + 0.5 * fbm(qx * 2.2, qy * 2.2, qz * 2.2, seed + 201, 3));
 
     // 山系 M：ridged FBM × 内陆度
     const inland = smoothstep(0.02, 0.5, v);
@@ -177,6 +165,7 @@ export function buildTerrain(
   const n = cells.length;
   if (!n) return;
   const rng = createRng(hashSeed(seed, 17));
+  void rng;
 
   onProgress?.('Perlin-FBM 地形', 0.15);
   const f = heightField(cells, seed, shape, rng);

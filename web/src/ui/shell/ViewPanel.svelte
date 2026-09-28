@@ -17,6 +17,8 @@
     globeSpin = true,
     globeTilt = 23.4,
     globeRotHours = 24,
+    projection = 'mercator',
+    onProjection,
     onSwitchView,
     onStyle,
     onRelief,
@@ -35,6 +37,8 @@
     globeSpin?: boolean;
     globeTilt?: number;
     globeRotHours?: number;
+    projection?: string;
+    onProjection?: (p: string) => void;
     onSwitchView: (m: ViewMode) => void;
     onStyle: (s: string) => void;
     onRelief: (v: number) => void;
@@ -57,6 +61,10 @@
           <option value="dark">暗色</option>
           <option value="parchment">羊皮纸</option>
           <option value="neon">科幻</option>
+        </select>
+        <select value={projection} onchange={(e) => onProjection?.(e.currentTarget.value)}>
+          <option value="mercator">墨卡托</option>
+          <option value="robinson">罗宾森（两极内收）</option>
         </select>
       </div>
       <div class="row">

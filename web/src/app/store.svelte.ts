@@ -557,7 +557,7 @@ export class EditorStore {
       mountain: num('mountain', DEFAULT_WORLD_SHAPE.mountain),
       detail: num('detail', DEFAULT_WORLD_SHAPE.detail),
       seaRugged: num('seaRugged', DEFAULT_WORLD_SHAPE.seaRugged),
-      polar: bool('polar', DEFAULT_WORLD_SHAPE.polar),
+      latBias: num('latBias', DEFAULT_WORLD_SHAPE.latBias),
       erosion: num('erosion', DEFAULT_WORLD_SHAPE.erosion),
     };
   }
@@ -574,7 +574,7 @@ export class EditorStore {
     };
     switch (name) {
       case '群岛':
-        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentScale: 0.25, coastBreak: 0.85, mountain: 0.6, detail: 0.7 });
+        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentScale: 0.25, coastBreak: 0.85, mountain: 0.6, detail: 0.7, latBias: 0.7 });
         set('country', { count: 12, fromLayerCount: 2, allowOcean: true });
         set('province', { count: 24 });
         break;
@@ -583,12 +583,12 @@ export class EditorStore {
         set('culture', { allowOcean: true });
         break;
       case '高原世界':
-        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentScale: 0.75, coastBreak: 0.35, mountain: 0.55, detail: 0.35 });
+        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentScale: 0.75, coastBreak: 0.35, mountain: 0.55, detail: 0.35, latBias: 0.35 });
         set('culture', { coreSelector: 'highElevation' });
         break;
       case '默认大陆':
       default:
-        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentScale: 0.5, coastBreak: 0.55, mountain: 0.7, detail: 0.5, polar: true });
+        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentScale: 0.5, coastBreak: 0.55, mountain: 0.7, detail: 0.5, latBias: 0.55 });
         set('country', { count: 8, fromLayerCount: 3, allowOcean: false });
         set('province', { count: 15 });
         set('culture', { allowOcean: false });

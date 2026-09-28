@@ -56,14 +56,19 @@ export function appendMidRing(
     const l0 = Math.hypot(t0x, t0y);
     const l3 = Math.hypot(t3x, t3y);
     if (!(l0 > 1e-6) || !(l3 > 1e-6) || l0 > 0.45 || l3 > 0.45) {
+      // 远角/退化兜底：控制点伸出量以**段长**为限——角点被拉远时（坏角/跨副本角）
+      // 贝塞尔不得甩尾（旧 0.3·|V−p| 会把整条边拽出长刺）
+      const segLen = Math.hypot(p3.x - p0.x, p3.y - p0.y);
+      const w0 = Math.min(0.3, (0.6 * segLen) / Math.max(l0, 1e-6));
+      const w3 = Math.min(0.3, (0.6 * segLen) / Math.max(l3, 1e-6));
       const steps = Math.max(2, Math.ceil(Math.max(l0, l3) / 0.15));
       for (let s = 1; s <= steps; s++) {
         const t = s / steps;
         const u = 1 - t;
-        const c1x = p0.x + (V.x - p0.x) * 0.3;
-        const c1y = p0.y + (V.y - p0.y) * 0.3;
-        const c2x = p3.x + (V.x - p3.x) * 0.3;
-        const c2y = p3.y + (V.y - p3.y) * 0.3;
+        const c1x = p0.x + (V.x - p0.x) * w0;
+        const c1y = p0.y + (V.y - p0.y) * w0;
+        const c2x = p3.x + (V.x - p3.x) * w3;
+        const c2y = p3.y + (V.y - p3.y) * w3;
         const x =
           u * u * u * p0.x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * p3.x;
         const y =

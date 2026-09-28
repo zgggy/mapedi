@@ -405,7 +405,9 @@ function preparePieces(
   // 不适用元素边界的「过边中点 Hermite」（Hermite 会把矩形啃成内接圆角，四角缺色）；
   // virtualFrom 同时把它排除出描边（框边只用于填充）。
   if (frameFlip) {
-    const m = 0.08;
+    // 余量必须为 0：框环随副本实例化，外扩会让相邻副本的框环重叠——
+    // evenodd 下重叠带被抵消 → 换日线处出现竖条（「175～-175 之间竖线」）。
+    const m = 0;
     const x0 = frameY.minX - m;
     const x1 = (frameY.maxX ?? Math.PI) + m;
     const y0 = frameY.minY - m;

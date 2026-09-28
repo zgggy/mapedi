@@ -38,7 +38,7 @@ export function defaultProfiles(): GenerationProfile[] {
         mountain: DEFAULT_WORLD_SHAPE.mountain,
         detail: DEFAULT_WORLD_SHAPE.detail,
         seaRugged: DEFAULT_WORLD_SHAPE.seaRugged,
-        polar: DEFAULT_WORLD_SHAPE.polar,
+        latBias: DEFAULT_WORLD_SHAPE.latBias,
         erosion: DEFAULT_WORLD_SHAPE.erosion,
       },
       dependsOn: [],

@@ -3,6 +3,7 @@ import { PROJ_LAT_MAX } from './mercator';
 
 export type ProjectionId =
   | 'mercator'
+  | 'robinson'
   | 'behrmann'
   | 'aeqd'
   | 'gk'
@@ -27,6 +28,7 @@ export const PROJ_META: Record<
   { name: string; emoji: string }
 > = {
   mercator: { name: '墨卡托', emoji: '🗺️' },
+  robinson: { name: '罗宾森（两极内收）', emoji: '🧭' },
   behrmann: { name: '贝尔曼', emoji: '📐' },
   aeqd: { name: '等距方位', emoji: '🎯' },
   gk: { name: '高斯-克吕格', emoji: '📏' },
@@ -39,6 +41,10 @@ export function projectionWorldPeriod(id: ProjectionId): number | null {
   if (id === 'behrmann') return Math.PI * 2 * Math.sin(30 * Math.PI / 180);
   return null;
 }
+
+// 罗宾森 PLEN（平行线长度）/ PDFE（距赤道距离），0°..90° 每 5°
+const ROB_PLEN = [1.0, 0.9986, 0.9954, 0.99, 0.9822, 0.973, 0.96, 0.9427, 0.9216, 0.8962, 0.8679, 0.835, 0.7986, 0.7597, 0.7186, 0.6732, 0.6213, 0.5722, 0.5322];
+const ROB_PDFE = [0.0, 0.062, 0.124, 0.186, 0.248, 0.31, 0.372, 0.434, 0.4958, 0.5571, 0.6176, 0.6769, 0.7346, 0.7903, 0.8435, 0.8936, 0.9394, 0.9761, 1.0];
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
@@ -64,6 +70,18 @@ export function project(
         x: p.lon * D2R * phi,
         y: Math.sin(p.lat * D2R) / phi,
       };
+    }
+    case 'robinson': {
+      // 罗宾森：伪圆柱——两极「往内收」（极点是半宽线），高纬不再拉伸；
+      // 经典 PLEN/PDFE 5° 表 + 线性插值；x = 0.8487·λ·PLEN(φ), y = 1.3523·PDFE(φ)
+      const lam = p.lon * D2R;
+      const phi = Math.max(-90, Math.min(90, p.lat));
+      const a = Math.abs(phi);
+      const i = Math.min(17, Math.floor(a / 5));
+      const t = (a - i * 5) / 5;
+      const plen = ROB_PLEN[i] + (ROB_PLEN[i + 1] - ROB_PLEN[i]) * t;
+      const pdfe = ROB_PDFE[i] + (ROB_PDFE[i + 1] - ROB_PDFE[i]) * t;
+      return { x: 0.8487 * lam * plen, y: Math.sign(phi) * 1.3523 * pdfe };
     }
     case 'aeqd': {
       const c = params.aeqdCenter;
@@ -119,6 +137,17 @@ export function unproject(
       const lon = (x / phi) * R2D;
       const lat = Math.asin(Math.max(-1, Math.min(1, y * phi))) * R2D;
       return { lon, lat };
+    }
+    case 'robinson': {
+      const a = Math.abs(y) / 1.3523;
+      let i = 0;
+      while (i < 17 && ROB_PDFE[i + 1] < a) i++;
+      const span = ROB_PDFE[i + 1] - ROB_PDFE[i] || 1;
+      const t = Math.max(0, Math.min(1, (a - ROB_PDFE[i]) / span));
+      const phi = (i + t) * 5 * Math.sign(y || 1);
+      const plen = ROB_PLEN[i] + (ROB_PLEN[i + 1] - ROB_PLEN[i]) * t;
+      const lam = plen > 1e-9 ? x / (0.8487 * plen) : 0;
+      return { lon: lam * R2D, lat: phi };
     }
     case 'aeqd': {
       const c = params.aeqdCenter;

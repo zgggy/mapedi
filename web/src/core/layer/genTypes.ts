@@ -37,8 +37,8 @@ export interface WorldShape {
   detail: number;
   /** 海底起伏 0–1（海床/海沟噪声） */
   seaRugged: number;
-  /** 穿极大陆（产品默认开：默认大陆穿极且至少一端贴极） */
-  polar: boolean;
+  /** 中低纬大陆倾向 0–1（越大越偏中低纬；高纬大陆墨卡托下拉伸难看） */
+  latBias: number;
   /** 热侵蚀迭代 0–6 */
   erosion: number;
 }
@@ -52,7 +52,7 @@ export const DEFAULT_WORLD_SHAPE: WorldShape = {
   mountain: 0.7,
   detail: 0.5,
   seaRugged: 0.8,
-  polar: true,
+  latBias: 0.55,
   erosion: 2,
 };
 
