@@ -226,7 +226,6 @@
     autosaveAt={editor.autosaveAt}
     shape={editor.worldShape}
     onShape={(k, v) => editor.setProfileParam('height', k, v)}
-    onPreset={(name) => editor.applyGenPreset(name)}
     onGenerate={(s, n) => {
       bootError = '';
       return editor.generate(s, n);

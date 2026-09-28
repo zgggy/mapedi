@@ -93,7 +93,6 @@ import {
   type GenerationProfile,
 } from '../core/generate/profile';
 import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
-import { HMF2D_PRESETS } from '../core/heightmap2d';
 
 const NAME_POOL = ['北境', '南洋', '东海', '西陆', '中央', '苍岭', '赤原', '银湾', '铁丘', '雾林'];
 
@@ -544,21 +543,22 @@ export class EditorStore {
     );
   }
 
-  /** height profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_HMF2D） */
+  /** height profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_WORLD_SHAPE） */
   get worldShape(): WorldShape {
     const p = this.profiles.find((x) => x.layerId === 'height')?.params ?? {};
     const num = (k: keyof WorldShape, d: number) => (typeof p[k] === 'number' ? (p[k] as number) : d);
+    const bool = (k: keyof WorldShape, d: boolean) => (typeof p[k] === 'boolean' ? (p[k] as boolean) : d);
     return {
-      seed: num('seed', DEFAULT_WORLD_SHAPE.seed),
-      scale: num('scale', DEFAULT_WORLD_SHAPE.scale),
-      octaves: num('octaves', DEFAULT_WORLD_SHAPE.octaves),
-      lacunarity: num('lacunarity', DEFAULT_WORLD_SHAPE.lacunarity),
-      persistence: num('persistence', DEFAULT_WORLD_SHAPE.persistence),
-      hmfGain: num('hmfGain', DEFAULT_WORLD_SHAPE.hmfGain),
-      hmfOffset: num('hmfOffset', DEFAULT_WORLD_SHAPE.hmfOffset),
-      warpStrength: num('warpStrength', DEFAULT_WORLD_SHAPE.warpStrength),
-      warpScale: num('warpScale', DEFAULT_WORLD_SHAPE.warpScale),
-      seaLevel: num('seaLevel', DEFAULT_WORLD_SHAPE.seaLevel),
+      landRatio: num('landRatio', DEFAULT_WORLD_SHAPE.landRatio),
+      relief: num('relief', DEFAULT_WORLD_SHAPE.relief),
+      flatness: num('flatness', DEFAULT_WORLD_SHAPE.flatness),
+      continentScale: num('continentScale', DEFAULT_WORLD_SHAPE.continentScale),
+      coastBreak: num('coastBreak', DEFAULT_WORLD_SHAPE.coastBreak),
+      mountain: num('mountain', DEFAULT_WORLD_SHAPE.mountain),
+      detail: num('detail', DEFAULT_WORLD_SHAPE.detail),
+      seaRugged: num('seaRugged', DEFAULT_WORLD_SHAPE.seaRugged),
+      polar: bool('polar', DEFAULT_WORLD_SHAPE.polar),
+      erosion: num('erosion', DEFAULT_WORLD_SHAPE.erosion),
     };
   }
 
@@ -574,7 +574,7 @@ export class EditorStore {
     };
     switch (name) {
       case '群岛':
-        set('height', { ...HMF2D_PRESETS['群岛'] });
+        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentScale: 0.25, coastBreak: 0.85, mountain: 0.6, detail: 0.7 });
         set('country', { count: 12, fromLayerCount: 2, allowOcean: true });
         set('province', { count: 24 });
         break;
@@ -583,12 +583,12 @@ export class EditorStore {
         set('culture', { allowOcean: true });
         break;
       case '高原世界':
-        set('height', { ...HMF2D_PRESETS['巨型山脉大陆'] });
+        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentScale: 0.75, coastBreak: 0.35, mountain: 0.55, detail: 0.35 });
         set('culture', { coreSelector: 'highElevation' });
         break;
       case '默认大陆':
       default:
-        set('height', { ...DEFAULT_WORLD_SHAPE });
+        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentScale: 0.5, coastBreak: 0.55, mountain: 0.7, detail: 0.5, polar: true });
         set('country', { count: 8, fromLayerCount: 3, allowOcean: false });
         set('province', { count: 15 });
         set('culture', { allowOcean: false });
