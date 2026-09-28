@@ -10,6 +10,24 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-28，第三十五次补充）— 死代码整包清理（删就真删，18 件）**
+
+- **删除（全仓零引用）**：shell 遗留 12 件（GenDock/HeightIntervalList/LayerStyleBar/LayersDrawer/
+  ProjectPanel/Rail/Rails/SideDrawer/SliderField/ViewDock/Sheets/panelTokens）+ workbench 5 件
+  （ElementList/GenerationProfiles/InfoPanel/ToolsPanel/WorkbenchHost）+ render/globeTexture。
+  ElementList 的滑块是 CapsuleSlider 的双份旧实现，一并消失。world.ts 注释去掉已删的 GenDock 提法。
+- **保留（勿删）**：core/political、core/nature、core/relief、core/ring/trace——src 内已零调用
+  （unifiedGenerate 链之外的旧生成器），但 **tests/ 大量覆盖**（generatePolitical/childrenOf/
+  generateFauna/generateVegetation/cellReliefHeights/traceMidRing…）。测试是业务规则显式载体
+  （AGENTS.md §6「测试纪律」），删它们=删规则+改测试，属产品决策，不属清理包。
+  如确认旧生成器彻底退场，需连同 tests/ 对应用例**一次性整包**处理并明确业务结论。
+- **核实方法**：import 图可达性（含 import()/new URL 动态引用）+ tests/ 真实 import 逐个核对；
+  删后 grep 全仓零残留；`npm run check` 0 错误；浏览器冒烟（15 层行 / 12 区间行 / 胶囊滑块 / 错误 0）。
+- **注意**：core/generate/worker.ts 曾被误判死代码——它经 new URL 动态引用可达，**不可删**；
+  命令行 grep 宽泛词（Rail/InfoPanel 等）会误命中子串（Rails/LayerInfoPanel），必须核对 import 语句。
+- **剩余待办**：拓扑翻转增量连通分量、撤销/重做一致性复验、生成小头（撒点/级联/反序列化）、
+  100k 网格视口裁剪、阴影恢复时走场图集路径（勿回包围盒）。
+
 **本轮已处理（2026-09-28，第三十五次）— 面板/按钮契约二轮：胶囊滑块 + 右键菜单 + 抬起式拖动 + 长名称不省略**
 
 - **用户契约（8 条）**：① 面板可拖动、高度随内容增至 ≤0.8 屏高、内滚不显条；② 图层操作说明删除；
