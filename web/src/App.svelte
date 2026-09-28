@@ -24,6 +24,7 @@
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
   let globeSpin = $state(true);
+  let globeFov = $state(45);
   let projParams = $state(defaultProjParams());
   let fps = $state(0);
   let zoomScale = $state(1);
@@ -207,6 +208,7 @@
             showAxis={globeAxis}
             showEcliptic={globeEcliptic}
             spinPreview={globeSpin}
+            fov={globeFov}
             onPatchAstro={(patch) => editor.patchAstro(patch)}
             onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
             onpick={(lon, lat) => {
@@ -233,9 +235,12 @@
     seedInput={editor.seedInput}
     densityInput={editor.densityInput}
     autosaveAt={editor.autosaveAt}
+    shape={editor.worldShape}
+    onShape={(k, v) => editor.setProfileParam('height', k, v)}
     globeShowAxis={globeAxis}
     globeShowEcliptic={globeEcliptic}
     globeSpin={globeSpin}
+    globeFov={globeFov}
     globeTilt={editor.climateDraft.axialTiltDeg}
     globeRotHours={editor.climateDraft.rotationHours}
     onGenerate={(s, n) => {
@@ -254,6 +259,7 @@
     onGlobeRotHours={(v) => {
       editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
     }}
+    onGlobeFov={(v) => (globeFov = v)}
     onExport={(k) => {
       if (k === 'json') editor.exportProject?.();
       else if (k === 'png') {

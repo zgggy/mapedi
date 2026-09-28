@@ -1,4 +1,5 @@
 import type { LayerId, World } from '../types';
+import { DEFAULT_WORLD_SHAPE } from '../layer/genTypes';
 
 export interface GenerationProfile {
   layerId: LayerId;
@@ -28,7 +29,16 @@ export function defaultProfiles(): GenerationProfile[] {
     {
       layerId: 'height',
       enabled: true,
-      params: { stamps: 6, falloff: 2.2 },
+      params: {
+        landRatio: DEFAULT_WORLD_SHAPE.landRatio,
+        relief: DEFAULT_WORLD_SHAPE.relief,
+        flatness: DEFAULT_WORLD_SHAPE.flatness,
+        continentCount: DEFAULT_WORLD_SHAPE.continentCount,
+        polar: DEFAULT_WORLD_SHAPE.polar,
+        roughness: DEFAULT_WORLD_SHAPE.roughness,
+        seaRugged: DEFAULT_WORLD_SHAPE.seaRugged,
+        erosion: DEFAULT_WORLD_SHAPE.erosion,
+      },
       dependsOn: [],
     },
     {

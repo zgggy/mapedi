@@ -11,6 +11,7 @@
  */
 import type { DisplayRing } from '../../core/ring/displayRing';
 import { sampleMidRing } from '../../core/ring/hermite';
+import { triangulateRings } from './triangulate';
 
 export interface Pt {
   x: number;
@@ -20,8 +21,9 @@ export interface Pt {
 export interface RingGeo {
   /** fill 模式采样点（三角化与 fan 的同一几何来源） */
   fillPts: Pt[] | null;
-  /** fill：外部参考点三角扇 (ref, p_i, p_j)×n，stride 6（stencil 兜底路径用） */
-  fan: Float32Array | null;
+  /** fill 奇偶三角组 [x,y]×3×n（stencil INVERT 用）：环自身 earcut（精确面积光栅）；
+   *  面积自检失败回退外部参考点扇形（奇偶等价，光栅面积大） */
+  xorTris: Float32Array | null;
   /** 描边条带 [baseX, baseY, dirX, dirY]×6/段；顶点 = base + dir·uHalfW */
   strip: Float32Array | null;
   /** 环包围盒（scissor 用） */
@@ -122,9 +124,16 @@ export function ringGeo(
     if (p.y < minY) minY = p.y;
     if (p.y > maxY) maxY = p.y;
   }
+  // 逐环三角组（按环对象缓存 → 补丁只重建受牵连环）：earcut 精确面积光栅；
+  // 面积自检失败回退外部参考点扇形（奇偶等价，包围盒级光栅）
+  let xorTris: Float32Array | null = null;
+  if (mode === 'fill') {
+    const tri = triangulateRings([{ ring, pts }]);
+    xorTris = tri?.areaOk ? tri.tris : buildFan(pts);
+  }
   const geo: RingGeo = {
     fillPts: mode === 'fill' ? pts : null,
-    fan: mode === 'fill' ? buildFan(pts) : null,
+    xorTris,
     strip: mode === 'outline' ? buildStripLayout(pts, willClose && pts.length >= 3) : null,
     bbox: { minX, maxX, minY, maxY },
   };

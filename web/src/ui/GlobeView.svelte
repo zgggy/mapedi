@@ -10,7 +10,7 @@
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import type { ClimateParams, World } from '../core/types';
   import { lonLatToVec3 } from '../core/sphere';
-  import { buildFillsForFocus, cellDisplayColor } from '../render/cellColor';
+  import { composeShownPieces, isLayerShown } from '../core/displayCompose';
   import { catmullRomPolyline } from '../core/paths';
   import { syncHomeFromClimate, type StarSystem } from '../core/astro';
 
@@ -27,10 +27,12 @@
     showAxis = true,
     showEcliptic = true,
     spinPreview = true,
+    fov = 45,
     onPatchAstro,
     onpaint,
     onpick,
     onstrokeend,
+    onFov,
   }: {
     world: World;
     focusLayer?: string;
@@ -44,10 +46,13 @@
     showAxis?: boolean;
     showEcliptic?: boolean;
     spinPreview?: boolean;
+    /** 相机视野（度）；Shift+滚轮 调整后经 onFov 回写（单源=父状态） */
+    fov?: number;
     onPatchAstro?: (patch: Partial<StarSystem>) => void;
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean) => void;
     onpick?: (lon: number, lat: number) => void;
     onstrokeend?: () => void;
+    onFov?: (v: number) => void;
   } = $props();
 
   let container: HTMLDivElement;
@@ -64,6 +69,8 @@
   let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   let painting = false;
   let spinT = 0;
+  /** onMount 内挂接的 FOV 应用器（外部 prop → 镜头） */
+  let applyFov: ((v: number) => void) | null = null;
 
   const home = $derived.by(() => {
     const base = astro ?? world?.astro ?? null;
@@ -89,18 +96,34 @@
     }
   }
 
-  /** 球面原生：cell 多边形三角扇 + 路径折线 */
+  /** 球面原生：cell 多边形三角扇（显示碎片着色）+ 元素边界线 + 路径折线 */
   function rebuildSphereContent() {
     if (!scene || !contentGroup) return;
     clearGroup(contentGroup);
 
-    const fills = buildFillsForFocus(world, focusLayer);
+    // 显示碎片 = 平面同一套（显隐唯一开关 layer.visible；叠放 = composeShownPieces 序）
+    const pieces = composeShownPieces(world, focusLayer, highlightRegionId);
+    const fillOf = new Map<number, string>();
+    const pieceOf = new Map<number, number>();
+    for (const [pi, p] of pieces.entries()) {
+      // 不透明度预乘进颜色（球面三角扇为不透明材质；与平面「透明叠色」观感等价合成）
+      const base = new THREE.Color(p.color);
+      const op = p.opacity ?? 0.88;
+      const mix = base.clone().lerp(new THREE.Color('#1a3348'), 1 - op);
+      const hex = `#${mix.getHexString()}`;
+      for (const id of p.cellIds) {
+        fillOf.set(id, hex);
+        pieceOf.set(id, pi);
+      }
+    }
+
     const positions: number[] = [];
     const colors: number[] = [];
     const R = 1.001;
     for (const cell of world.cells) {
       if (cell.polygon.length < 3) continue;
-      const col = new THREE.Color(cellDisplayColor(world, cell.id, focusLayer, fills));
+      const hit = fillOf.get(cell.id);
+      const col = new THREE.Color(hit ?? (cell.isOcean ? '#1a3348' : '#c4a882'));
       if (highlightRegionId) {
         const reg = world.regions.find((r) => r.id === highlightRegionId);
         if (reg?.cells.includes(cell.id)) col.lerp(new THREE.Color('#ffe68c'), 0.45);
@@ -110,7 +133,7 @@
       for (let i = 0; i < verts.length; i++) {
         const a = verts[i];
         const b = verts[(i + 1) % verts.length];
-        positions.push(cx * R, cy * R, cz * R, a[0] * R, a[1] * R, a[2] * R, b[0] * R, b[1] * R, b[2] * R);
+        positions.push(cx * R, cy * R, cz * R, a[0] * R, a[1] * R, b[0] * R, b[1] * R, b[2] * R);
         for (let k = 0; k < 3; k++) colors.push(col.r, col.g, col.b);
       }
     }
@@ -131,11 +154,50 @@
     );
     contentGroup.add(sea);
 
+    // 元素边界：成员/非成员共享边（同一 cellSet 真相），过边中点的折线段（球面侧的「过边中点」）
+    if (world.sharedEdges?.size && pieceOf.size) {
+      const bp: number[] = [];
+      const bc: number[] = [];
+      for (const [ek, [pa, pb]] of world.sharedEdges) {
+        const dash = ek.indexOf('-');
+        if (dash < 0) continue;
+        const i = +ek.slice(0, dash);
+        const j = +ek.slice(dash + 1);
+        const oi = pieceOf.get(i);
+        const oj = pieceOf.get(j);
+        if (oi === oj) continue;
+        const top = (oi ?? -1) > (oj ?? -1) ? oi : oj;
+        if (top === undefined || top < 0) continue;
+        const c = new THREE.Color(pieces[top].color).multiplyScalar(0.7);
+        const m = lonLatToVec3({
+          lon: (pa.lon + pb.lon) / 2,
+          lat: (pa.lat + pb.lat) / 2,
+        });
+        const a = lonLatToVec3(pa);
+        const b = lonLatToVec3(pb);
+        for (const [u, v] of [
+          [a, m],
+          [m, b],
+        ] as const) {
+          bp.push(u[0] * 1.003, u[1] * 1.003, u[2] * 1.003, v[0] * 1.003, v[1] * 1.003, v[2] * 1.003);
+          bc.push(c.r, c.g, c.b, c.r, c.g, c.b);
+        }
+      }
+      if (bp.length) {
+        const bg = new THREE.BufferGeometry();
+        bg.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3));
+        bg.setAttribute('color', new THREE.Float32BufferAttribute(bc, 3));
+        contentGroup.add(
+          new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ vertexColors: true })),
+        );
+      }
+    }
+
     // 路径：过点 Catmull-Rom 采样后上球（略抬高避免 z-fight）
     if (world.paths?.length) {
       for (const path of world.paths) {
         if (!path.points || path.points.length < 2) continue;
-        if (focusLayer !== path.layerId && focusLayer !== 'height') continue;
+        if (path.hidden || !isLayerShown(world, path.layerId, focusLayer)) continue;
         const lonlat = path.points;
         const flat: { x: number; y: number; z: number }[] = [];
         for (const ll of lonlat) {
@@ -259,6 +321,11 @@
     if (scene) rebuildOverlays();
   });
 
+  // 外部 FOV（顶栏滑块）→ 镜头；Shift+滚轮 经 onFov 回写父状态（单源）
+  $effect(() => {
+    if (fov >= 18) applyFov?.(fov);
+  });
+
   onMount(() => {
     const w = container.clientWidth || 480;
     const h = container.clientHeight || 360;
@@ -289,12 +356,13 @@
     meshHolder.add(contentGroup);
 
     /**
-     * 镜头（Shift+滚轮）：**只改 FOV + 沿视线压扁**，绝不改相机距离。
+     * 镜头（Shift+滚轮 / 顶栏「视野」滑块）：**只改 FOV + 沿视线压扁**，绝不改相机距离。
      * 压扁 ellipsoid 才能在球外「看到超过半球」的地面（近 2/3）；
      * 单靠 FOV 几何上仍只见 ≤50% 球面。
      * 向上滚：FOV 变大、压扁加强 → 更多地面、内容向盘面中间收拢。
+     * FOV 单源 = 父状态（fov prop / onFov 回写）。
      */
-    let lensFov = 45;
+    let lensFov = Math.max(18, Math.min(150, fov));
     let lensFlatten = 1;
     const applyLens = () => {
       camera.fov = lensFov;
@@ -304,6 +372,10 @@
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
       planetRoot.quaternion.copy(q);
       planetRoot.scale.set(1, 1, lensFlatten);
+    };
+    applyFov = (v: number) => {
+      lensFov = Math.max(18, Math.min(150, v));
+      applyLens();
     };
     renderer.domElement.addEventListener(
       'wheel',
@@ -315,6 +387,7 @@
         lensFov = Math.max(18, Math.min(150, lensFov + (up ? 6 : -6)));
         lensFlatten = Math.max(0.5, Math.min(1, lensFlatten + (up ? -0.05 : 0.05)));
         applyLens();
+        onFov?.(lensFov);
       },
       { passive: false, capture: true },
     );
@@ -388,6 +461,7 @@
       ro.disconnect();
       controls.dispose();
       renderer.dispose();
+      applyFov = null;
     };
   });
 </script>

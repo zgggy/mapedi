@@ -6,7 +6,7 @@
 import type { LayerId, World } from './types';
 
 export type { ElementOverlap } from './types';
-import type { GenConfig, GenMethod, GenScope, GenPattern, CoreSelector } from './layer/genTypes';
+import { DEFAULT_WORLD_SHAPE, type GenConfig, type GenMethod, type GenScope, type GenPattern, type CoreSelector, type WorldShape } from './layer/genTypes';
 export type {
   LayerConfig,
   PlacementRule,
@@ -130,6 +130,18 @@ export function genConfigFromParams(
   if (typeof params.fromLayerId === 'string') cfg.fromLayerId = params.fromLayerId;
   if (typeof params.fromLayerCount === 'number') cfg.fromLayerCount = params.fromLayerCount;
   if (typeof params.allowOcean === 'boolean') cfg.allowOcean = params.allowOcean;
+  // height：世界形状（大陆占比/落差/平整率/大陆数/穿极/崎岖/海底起伏/侵蚀）
+  const shape: WorldShape = { ...DEFAULT_WORLD_SHAPE };
+  let hasShape = false;
+  if (typeof params.landRatio === 'number') { shape.landRatio = params.landRatio; hasShape = true; }
+  if (typeof params.relief === 'number') { shape.relief = params.relief; hasShape = true; }
+  if (typeof params.flatness === 'number') { shape.flatness = params.flatness; hasShape = true; }
+  if (typeof params.continentCount === 'number') { shape.continentCount = params.continentCount; hasShape = true; }
+  if (typeof params.polar === 'boolean') { shape.polar = params.polar; hasShape = true; }
+  if (typeof params.roughness === 'number') { shape.roughness = params.roughness; hasShape = true; }
+  if (typeof params.seaRugged === 'number') { shape.seaRugged = params.seaRugged; hasShape = true; }
+  if (typeof params.erosion === 'number') { shape.erosion = params.erosion; hasShape = true; }
+  if (hasShape) cfg.worldShape = shape;
   return cfg;
 }
 

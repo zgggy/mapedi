@@ -418,7 +418,7 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
 
   // height：连续场 + 海陆派生 + 12 嵌套区间元素（等高线）
   if (layerId === 'height') {
-    generateDemoContinents(world, config.seed);
+    generateDemoContinents(world, config.seed, undefined, config.worldShape);
     rebuildLandSeaRegions(world);
     const els = rebuildHeightIntervalElements(world);
     // 海陆关系单独算；区间关系已在 rebuild 内用 count 记录

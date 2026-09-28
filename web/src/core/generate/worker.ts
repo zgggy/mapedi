@@ -6,10 +6,12 @@ import { defaultClimate } from '../types';
 export interface GenRequest {
   seed: number;
   count: number;
+  /** profile 面板参数（layerId → params）；缺省用生成器默认 */
+  profileParams?: Record<string, Record<string, number | string | boolean>>;
 }
 
 self.onmessage = (ev: MessageEvent<GenRequest>) => {
-  const { seed, count } = ev.data;
+  const { seed, count, profileParams } = ev.data;
   const post = (label: string, progress: number) => {
     self.postMessage({ type: 'progress', label, progress });
   };
@@ -25,7 +27,7 @@ self.onmessage = (ev: MessageEvent<GenRequest>) => {
     runCascade(world, seed, undefined, (id, i, n) => {
       const p = 45 + Math.round((i / n) * 53);
       post(CASCADE_LABELS[id] ?? id, p);
-    });
+    }, profileParams);
 
     post('完成', 100);
     // 不传 sharedEdges：主线程按固定顺序重建，JSON 体积小一个数量级

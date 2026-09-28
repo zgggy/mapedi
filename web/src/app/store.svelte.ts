@@ -92,6 +92,7 @@ import {
   defaultProfiles,
   type GenerationProfile,
 } from '../core/generate/profile';
+import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
 
 const NAME_POOL = ['北境', '南洋', '东海', '西陆', '中央', '苍岭', '赤原', '银湾', '铁丘', '雾林'];
 
@@ -458,12 +459,15 @@ export class EditorStore {
   private async generateViaWorker(seed: number, count: number, seq: number) {
     this.status = `生成中（Worker）… ${count} 地块`;
     this.notify();
+    // profile 面板参数随 Worker 下发（否则面板旋钮只在主线程回退路径生效）
+    const params: Record<string, Record<string, number | string | boolean>> = {};
+    for (const p of this.profiles) params[p.layerId] = p.params;
     const world = await generateWorldAsync(seed, count, (p) => {
       if (seq !== this.generationSeq) return;
       this.genProgress = p.progress;
       this.status = `${p.label}… ${p.progress}%`;
       this.notify();
-    });
+    }, params);
     if (seq !== this.generationSeq) return;
     for (const r of world.regions) {
       if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
@@ -525,6 +529,23 @@ export class EditorStore {
     );
   }
 
+  /** height profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_WORLD_SHAPE） */
+  get worldShape(): WorldShape {
+    const p = this.profiles.find((x) => x.layerId === 'height')?.params ?? {};
+    const num = (k: keyof WorldShape, d: number) => (typeof p[k] === 'number' ? (p[k] as number) : d);
+    const bool = (k: keyof WorldShape, d: boolean) => (typeof p[k] === 'boolean' ? (p[k] as boolean) : d);
+    return {
+      landRatio: num('landRatio', DEFAULT_WORLD_SHAPE.landRatio),
+      relief: num('relief', DEFAULT_WORLD_SHAPE.relief),
+      flatness: num('flatness', DEFAULT_WORLD_SHAPE.flatness),
+      continentCount: num('continentCount', DEFAULT_WORLD_SHAPE.continentCount),
+      polar: bool('polar', DEFAULT_WORLD_SHAPE.polar),
+      roughness: num('roughness', DEFAULT_WORLD_SHAPE.roughness),
+      seaRugged: num('seaRugged', DEFAULT_WORLD_SHAPE.seaRugged),
+      erosion: num('erosion', DEFAULT_WORLD_SHAPE.erosion),
+    };
+  }
+
   /** 生成预设 */
   applyGenPreset(name: string) {
     const next = this.profiles.map((p) => ({ ...p, params: { ...p.params } }));
@@ -537,7 +558,7 @@ export class EditorStore {
     };
     switch (name) {
       case '群岛':
-        set('height', { stamps: 10, falloff: 2.8 });
+        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentCount: 10, roughness: 0.9 });
         set('country', { count: 12, fromLayerCount: 2, allowOcean: true });
         set('province', { count: 24 });
         break;
@@ -546,12 +567,12 @@ export class EditorStore {
         set('culture', { allowOcean: true });
         break;
       case '高原世界':
-        set('height', { stamps: 5, falloff: 1.4 });
+        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentCount: 4, roughness: 0.6 });
         set('culture', { coreSelector: 'highElevation' });
         break;
       case '默认大陆':
       default:
-        set('height', { stamps: 6, falloff: 2.2 });
+        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentCount: 5, polar: true });
         set('country', { count: 8, fromLayerCount: 3, allowOcean: false });
         set('province', { count: 15 });
         set('culture', { allowOcean: false });

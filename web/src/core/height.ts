@@ -3,6 +3,7 @@ import { isOcean } from './types';
 import { createRng, hashSeed } from './rng';
 import { projectMercator } from './project/mercator';
 import { landContinentsCSR } from './index/cellGraph';
+import { DEFAULT_WORLD_SHAPE, type WorldShape } from './layer/genTypes';
 
 /** 值噪声 + 域扭曲，用于撕破圆形大陆轮廓 */
 function hash2(ix: number, iy: number, seed: number): number {
@@ -95,14 +96,15 @@ export function stampContinent(
   }
 }
 
-/** 海底高度场：整数 -63..-1，有海沟/大陆架起伏 */
-export function setAllOcean(cells: Cell[]): void {
+/** 海底高度场：整数 -63..-1，有海沟/大陆架起伏（seaRugged 0–1 控制起伏幅度） */
+export function setAllOcean(cells: Cell[], seaRugged = 1): void {
+  const rugged = 0.25 + 0.75 * Math.max(0, Math.min(1, seaRugged));
   for (const c of cells) {
     const p = projectMercator(c.center);
     const n = fbm(p.x * 1.8, p.y * 1.8, 7777, 5);
     const trench = ridged(p.x * 3.5, p.y * 3.5, 8888);
-    const base = -20 - n * 30;
-    const depth = base - trench * 13;
+    const base = -20 - n * 30 * rugged;
+    const depth = base - trench * 13 * rugged;
     c.height = Math.max(-63, Math.min(-1, Math.round(depth)));
     c.isOcean = true;
     c.continentId = undefined;
@@ -140,35 +142,39 @@ export function assignContinents(world: World): void {
   // 生成期种子（供笔刷多数票）；landSea rebuild 后以大陆 Region 顺序为准
 }
 
-/** 大陆生成：海底 + 几块大陆（中心山脉向外扩散，参数随机） */
+/** 大陆生成：海底 + 几块大陆（中心山脉向外扩散）+ 形状整形（占比/落差/平整率） */
 export function generateDemoContinents(
   world: World,
   seed: number,
   onProgress?: (label: string, frac: number) => void,
+  shape: WorldShape = DEFAULT_WORLD_SHAPE,
 ): void {
   onProgress?.('海底地形', 0.1);
-  setAllOcean(world.cells);
+  setAllOcean(world.cells, shape.seaRugged);
   const rng = createRng(hashSeed(seed, 17));
+  const rough = 0.5 + 0.5 * Math.max(0, Math.min(1, shape.roughness));
 
-  // 1) 穿极大陆
-  onProgress?.('穿极大陆', 0.2);
-  const polarLon = rng() * 320 - 160;
-  for (let lat = -35; lat <= 89; lat += 10) {
-    stampContinent(
-      world.cells,
-      { lon: polarLon + rng() * 16 - 8, lat },
-      {
-        height: 0.55 + rng() * 0.4,
-        falloff: 1.5 + rng() * 1.2,
-        radius: 0.4 + rng() * 0.35,
-        roughness: 0.65 + rng() * 0.3,
-        seed: hashSeed(seed, 400 + Math.round(lat)),
-      },
-    );
-    onProgress?.('穿极大陆', 0.2 + 0.3 * ((lat + 35) / 124));
+  // 1) 穿极大陆（产品默认开：默认大陆穿极）
+  if (shape.polar) {
+    onProgress?.('穿极大陆', 0.2);
+    const polarLon = rng() * 320 - 160;
+    for (let lat = -35; lat <= 89; lat += 10) {
+      stampContinent(
+        world.cells,
+        { lon: polarLon + rng() * 16 - 8, lat },
+        {
+          height: 0.55 + rng() * 0.4,
+          falloff: 1.5 + rng() * 1.2,
+          radius: 0.4 + rng() * 0.35,
+          roughness: (0.65 + rng() * 0.3) * rough,
+          seed: hashSeed(seed, 400 + Math.round(lat)),
+        },
+      );
+      onProgress?.('穿极大陆', 0.2 + 0.3 * ((lat + 35) / 124));
+    }
   }
 
-  // 2) 确保极点大陆
+  // 2) 确保极点大陆（产品默认：至少一端贴极）
   onProgress?.('极点大陆', 0.5);
   for (const c of world.cells) {
     if (Math.abs(c.center.lat) < 88.5) continue;
@@ -186,7 +192,7 @@ export function generateDemoContinents(
 
   // 3) 其它大陆
   onProgress?.('大陆生成', 0.6);
-  const stamps = 4 + Math.floor(rng() * 3);
+  const stamps = Math.max(0, Math.round(shape.continentCount));
   for (let i = 0; i < stamps; i++) {
     const lon = rng() * 320 - 160;
     const lat = (rng() * 100 - 50) * (rng() > 0.5 ? 1 : 0.85);
@@ -194,14 +200,85 @@ export function generateDemoContinents(
       height: 0.55 + rng() * 0.45,
       falloff: 2.5 + rng() * 1.5,
       radius: 0.6 + rng() * 0.6,
-      roughness: 0.65 + rng() * 0.3,
+      roughness: (0.65 + rng() * 0.3) * rough,
       seed: hashSeed(seed, 100 + i),
     });
-    onProgress?.('大陆生成', 0.6 + 0.25 * (i / stamps));
+    onProgress?.('大陆生成', 0.6 + 0.2 * (i / Math.max(1, stamps)));
   }
-  onProgress?.('热侵蚀', 0.85);
-  thermalErode(world.cells, 2, 0.12);
+  const iters = Math.max(0, Math.min(4, Math.round(shape.erosion)));
+  if (iters > 0) {
+    onProgress?.('热侵蚀', 0.85);
+    thermalErode(world.cells, iters, 0.12);
+  }
+  onProgress?.('形状整形', 0.9);
+  shapeHeightField(world.cells, shape);
   onProgress?.('大陆归属', 0.95);
   assignContinents(world);
   onProgress?.('完成', 1);
+}
+
+/** 正态分位（Acklam 有理近似，|err| < 1.2e-9）；p∈(0,1) */
+function probit(p: number): number {
+  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1, 2.506628277459239];
+  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
+  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+  const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
+  const pl = 0.02425;
+  if (p < pl) {
+    const q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+  if (p > 1 - pl) {
+    const q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+  const q = p - 0.5;
+  const r = q * q;
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+    (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+
+/**
+ * 高度分布整形（单调保序 → 空间结构不变，只改值分布）：
+ * 1) 按 raw 高度排名切陆/海两群（陆 = 前 landRatio → 占比精确）
+ * 2) 各群内部按分位映射到**半正态**（整体 = 以海平面为界的钟形；用户要的正态观感）
+ * 3) 平整率：|z|^γ 收拢向 0（γ=1+3·flatness，越大越多 cell 贴海平面）
+ * 4) 落差：陆地峰值 + 海底最深 = relief（各半，与现行默认观感一致）
+ */
+export function shapeHeightField(
+  cells: Cell[],
+  shape: Pick<WorldShape, 'landRatio' | 'relief' | 'flatness'>,
+): void {
+  const n = cells.length;
+  if (!n) return;
+  const order = cells.map((_, i) => i);
+  order.sort((a, b) => cells[a].height - cells[b].height || cells[a].id - cells[b].id);
+  const p = Math.max(0.01, Math.min(0.95, shape.landRatio));
+  const landCount = Math.max(1, Math.min(n - 1, Math.round(p * n)));
+  const seaCount = n - landCount;
+  const gamma = 1 + 3 * Math.max(0, Math.min(1, shape.flatness));
+  const relief = Math.max(20, Math.min(127, shape.relief));
+  const H = relief / 2;
+
+  // 半正态分位（u∈(0,1) → probit(0.5+0.5u) ∈ (0,∞)），γ 收拢
+  const zLand = new Float64Array(landCount);
+  for (let r = 0; r < landCount; r++) {
+    zLand[r] = Math.pow(probit(0.5 + 0.5 * ((r + 0.5) / landCount)), gamma);
+  }
+  const zSea = new Float64Array(seaCount);
+  for (let r = 0; r < seaCount; r++) {
+    zSea[r] = Math.pow(probit(0.5 + 0.5 * ((r + 0.5) / seaCount)), gamma);
+  }
+  const zlMax = zLand[landCount - 1] || 1;
+  const zsMax = zSea[seaCount - 1] || 1;
+
+  for (let i = 0; i < n; i++) {
+    const c = cells[order[i]];
+    if (i >= seaCount) {
+      c.height = Math.max(1, Math.min(64, Math.round((zLand[i - seaCount] / zlMax) * H)));
+    } else {
+      c.height = Math.max(-63, Math.min(-1, Math.round((zSea[i] / zsMax) * -H)));
+    }
+    c.isOcean = isOcean(c);
+  }
 }

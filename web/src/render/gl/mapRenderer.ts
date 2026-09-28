@@ -39,12 +39,12 @@ interface BBox {
 
 /** 一片元素的合并几何（所有环 × 同一 smooth；副本由实例属性施加） */
 interface PieceGeo {
-  /** 填充三角形 [x,y]×3×n（直绘主路径；与 fan 同源采样） */
+  /** 填充三角形 [x,y]×3×n（直绘主路径；与 xorTris 同源采样） */
   tri: Float32Array | null;
   /** 剖分面积自检通过；false → stencil 兜底 */
   triOk: boolean;
-  /** stencil 兜底路径用（外部参考点扇形） */
-  fan: Float32Array | null;
+  /** stencil 路径用：逐环奇偶三角组（earcut 精确面积，逐环缓存；含扇形回退） */
+  xorTris: Float32Array | null;
   strip: Float32Array | null;
   bbox: BBox | null;
 }
@@ -452,7 +452,7 @@ export class MapGlRenderer {
     }
     const hit = byKey.get(key);
     if (hit) return hit;
-    const fans: Float32Array[] = [];
+    const xors: Float32Array[] = [];
     const strips: Float32Array[] = [];
     const fillEntries: { ring: DisplayRing; pts: Pt[] }[] = [];
     let bbox: BBox | null = null;
@@ -464,19 +464,20 @@ export class MapGlRenderer {
       const g = fill ?? outline;
       if (g) bbox = unionBox(bbox, g.bbox.minX, g.bbox.maxX, g.bbox.minY, g.bbox.maxY);
       if (fill?.fillPts && fill.fillPts.length >= 3) fillEntries.push({ ring, pts: fill.fillPts });
-      if (fill?.fan) fans.push(fill.fan);
+      if (fill?.xorTris) xors.push(fill.xorTris);
       if (outline?.strip) strips.push(outline.strip);
     }
     // 大件（总采样点 > 2000，如大洋=框减百洞）不做整块 earcut：单洞变化会触发
-    // 整块重三角化（实测帧尖峰 0.3-1.4s）。tri=null → drawPiece 走 stencil 兜底
-    // （逐环扇形按环对象缓存，补丁只重做变动环）。
+    // 整块重三角化（实测帧尖峰 0.3-1.4s）。tri=null → drawPiece 走 stencil 路径，
+    // stencil 用**逐环三角组**（xorTris：earcut 精确面积光栅，按环对象缓存，
+    // 补丁只重做变动环；自检失败的环回退扇形）。
     let ptsTotal = 0;
     for (const fe of fillEntries) ptsTotal += fe.pts.length;
     const tri = ptsTotal > 2000 ? null : triangulateRings(fillEntries);
     const geo: PieceGeo = {
       tri: tri?.tris ?? null,
       triOk: !!tri?.areaOk,
-      fan: mergeF(fans),
+      xorTris: mergeF(xors),
       strip: mergeF(strips),
       bbox,
     };
@@ -594,7 +595,7 @@ export class MapGlRenderer {
     gl.scissor(frame.x, frame.y, frame.w, frame.h);
   }
 
-  /** 三角化自检失败时的语义兜底：stencil INVERT 扇形 + 覆盖面 + 渐隐场合成（罕见件） */
+  /** 大件语义路径：stencil INVERT 逐环三角组 + 覆盖面（奇偶与 Canvas evenodd 同语义） */
   private drawPieceStencil(
     env: RenderEnv,
     piece: PieceParams,
@@ -633,8 +634,8 @@ export class MapGlRenderer {
     gl.stencilFunc(gl.ALWAYS, 0, 0xff);
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
     this.setDxs(copies);
-    if (geo.fan) {
-      const buf = this.bufFor(geo.fan, 'fan');
+    if (geo.xorTris) {
+      const buf = this.bufFor(geo.xorTris, 'fan');
       gl.useProgram(this.progFan.prog);
       gl.bindVertexArray(buf.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, buf.count, copies.length);

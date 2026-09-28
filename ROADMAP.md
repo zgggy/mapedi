@@ -71,7 +71,7 @@
 | 项 | 现状 | 目标 |
 |---|---|---|
 | **拖动 / 绘制卡顿** | 包 1-4 ✅ 全部落地（失效域拆分 / 增量烘焙 / 实时层缓存 / hover 覆盖层） | 剩余卡点 = 缩放动画（依赖 GPU）；红线：不抽稀、不关阴影、不降 smooth、**零瞬态折扣** |
-| **100k 级 cell 目标** | CPU 侧交互已按 100k 优化；GL 唯一后端；生成链全通：createWorld 4.8-6.9s（第四十三次方向桶播种，原 8-22s）/撒点 1.7s/级联 0.65s/反序列化 0.83s | 可选：per-cell 颜色图集；顶点 snap 规范代表化 |
+| **100k 级 cell 目标** | CPU 侧交互已按 100k 优化；GL 唯一后端；生成链全通：createWorld 4.8-6.9s（第四十三次方向桶播种，原 8-22s）/撒点 1.7s/级联 0.65s/反序列化 0.83s；大件填充=逐环三角组（第四十七次） | 可选：per-cell 颜色图集（三选一待拍板）；getProjCache 首建 Worker 化 |
 | **笔刷区间重建** | ✅ 拓扑翻转已增量（第三十六次）：触及实体局部拆分/并查集成组 + 未触及保留 + 关系划分快路径；100k warm 松手 ≈ 23-32ms（原 255ms，且不再超线性）；非拓扑走 `updateHeightIntervalElements` 增量 ✓ | 余量 = 大洋件 cells 物化 O(n)（模型固有），如需再快走件环补丁 |
 | **getProjCache 首次重建** | 已改 key 失效 ✓；端点拖动反复触发已消除（包 1）✓；首次 O(N) 30000 cell ≈ 591ms（100k ~2s，一次性） | 可 Worker 化 |
 | **GPU 后端** | ✅ **GL 唯一后端**（第三十八次）：Canvas2D 后端与阴影功能整体归档（docs/_archive/canvas2d-shadow/），后端切换删除；填充 stencil 奇偶 + 描边条带 + cellsMesh 桶行视口裁剪 | 余量：辅助层（框/路径/地名/选中）仍 2D 绘制，全 GL 化需文字/曲线渲染 |
@@ -79,6 +79,8 @@
 ### P1 — 架构一致性
 
 **已全部清完（2026-09-26）**：`world.continents` 第二真相已删（真相 = landsea continent Region.cells）；`layer.ts` 的 GenConfig 移入 `layer/genTypes.ts`、别名已删；heightRegions 三表并入 heightIntervals 单源；TS 存量错误清零（svelte-check / tsc 均 0 errors）。细节见 HANDOFF 第十一次。
+
+**球面视图显示契约对齐（第四十七次余量）**：功能对齐已完成（图层显隐/元素边界/选中/视野）；但球面元素填充是 cell 贴角三角扇，非「Hermite 边界内 evenodd」——球面中点 Hermite 填充、球面标签/悬停为独立后续包。
 
 ---
 

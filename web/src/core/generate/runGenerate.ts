@@ -11,6 +11,7 @@ export function generateWorldAsync(
   seed: number,
   count: number,
   onProgress?: (p: GenProgress) => void,
+  profileParams?: Record<string, Record<string, number | string | boolean>>,
 ): Promise<World> {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') {
@@ -50,6 +51,6 @@ export function generateWorldAsync(
       worker.terminate();
       reject(e.error ?? new Error(e.message));
     };
-    worker.postMessage({ seed, count });
+    worker.postMessage({ seed, count, profileParams });
   });
 }
