@@ -68,33 +68,63 @@ export function blueNoiseSphere(
     const cell = Math.max(minD, 0.015);
     // 数字格键（|floor(p/cell)| ≤ 67 → 偏移 256、步长 512 无碰撞）——
     // 旧字符串键每尝试 27 次模板拼接 + Map 查询，是撒点 5s 的主因
-    const grid = new Map<number, number[]>();
+    // 桶 = 开放寻址 Int32 槽表（键=gk+1，0=空）+ next 链；判定与随机序逐位不变
+    const cap = 1 << (32 - Math.clz32(target * 4 - 1));
+    const slotKey = new Int32Array(cap);
+    const slotHead = new Int32Array(cap).fill(-1);
+    const next = new Int32Array(target + 8).fill(-1);
+    const mask = cap - 1;
     const gk = (x: number, y: number, z: number) =>
       (Math.floor(x / cell) + 256) * 262144 + (Math.floor(y / cell) + 256) * 512 + (Math.floor(z / cell) + 256);
+    // 查找槽位：命中返回槽；键不存在返回 -1
+    const findSlot = (k: number): number => {
+      let h = Math.imul(k, 2654435761) >>> 8 & mask;
+      for (;;) {
+        const sk = slotKey[h];
+        if (sk === 0) return -1;
+        if (sk === k + 1) return h;
+        h = (h + 1) & mask;
+      }
+    };
+    // 插入槽位：命中返回槽；空位则占坑
+    const claimSlot = (k: number): number => {
+      let h = Math.imul(k, 2654435761) >>> 8 & mask;
+      for (;;) {
+        const sk = slotKey[h];
+        if (sk === 0) {
+          slotKey[h] = k + 1;
+          return h;
+        }
+        if (sk === k + 1) return h;
+        h = (h + 1) & mask;
+      }
+    };
 
     const tryPush = (p: Vec3): boolean => {
-      const cx = Math.floor(p[0] / cell);
-      const cy = Math.floor(p[1] / cell);
-      const cz = Math.floor(p[2] / cell);
+      const px = p[0];
+      const py = p[1];
+      const pz = p[2];
+      const cx = Math.floor(px / cell);
+      const cy = Math.floor(py / cell);
+      const cz = Math.floor(pz / cell);
       for (let dx = -1; dx <= 1; dx++)
         for (let dy = -1; dy <= 1; dy++)
           for (let dz = -1; dz <= 1; dz++) {
-            const a = grid.get((cx + dx + 256) * 262144 + (cy + dy + 256) * 512 + (cz + dz + 256));
-            if (!a) continue;
-            for (const j of a) {
+            const s = findSlot((cx + dx + 256) * 262144 + (cy + dy + 256) * 512 + (cz + dz + 256));
+            if (s < 0) continue;
+            for (let j = slotHead[s]; j !== -1; j = next[j]) {
               const q = pts[j];
-              const d2 = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
-              if (d2 < minD2) return false;
+              const ax = px - q[0];
+              const ay = py - q[1];
+              const az = pz - q[2];
+              if (ax * ax + ay * ay + az * az < minD2) return false;
             }
           }
+      const idx = pts.length;
       pts.push(p);
-      const k = gk(p[0], p[1], p[2]);
-      let arr = grid.get(k);
-      if (!arr) {
-        arr = [];
-        grid.set(k, arr);
-      }
-      arr.push(pts.length - 1);
+      const s = claimSlot(gk(px, py, pz));
+      next[idx] = slotHead[s];
+      slotHead[s] = idx;
       return true;
     };
 

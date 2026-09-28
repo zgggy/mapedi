@@ -248,16 +248,16 @@ export function ensureBuiltinLayers(world: World): World {
   return world;
 }
 
-import { lonlatKey } from './ring/build';
+import { lonlatKey, lonlatNumKey } from './ring/build';
 
 /**
  * 全局顶点归一：同一 0.001° 格只保留一个 LonLat，**改写 cell.polygon**。
  * 相邻 cell 共享角点必须是同一坐标，否则 sharedEdges/链化接错。
  */
 export function canonicalizeCellPolygons(world: World): void {
-  const rep = new Map<string, LonLat>();
+  const rep = new Map<number, LonLat>();
   const snap = (ll: LonLat): LonLat => {
-    const k = lonlatKey(ll);
+    const k = lonlatNumKey(ll);
     const hit = rep.get(k);
     if (hit) return hit;
     const copy = { lon: ll.lon, lat: ll.lat };
@@ -337,32 +337,39 @@ export function rebuildSharedEdgesFromCells(world: World): Map<string, [LonLat, 
   // 幂等归一；与 rebuildNeighbors 同一套 lonlatKey
   canonicalizeCellPolygons(world);
   const out = new Map<string, [LonLat, LonLat]>();
-  const qkey = lonlatKey;
   for (const c of world.cells) {
     if (!c?.polygon?.length) continue;
-    const ptByKey = new Map<string, LonLat>();
+    const ptByKey = new Map<number, LonLat>();
     for (const p of c.polygon) {
-      const k = qkey(p);
+      const k = lonlatNumKey(p);
       if (!ptByKey.has(k)) ptByKey.set(k, p);
     }
     for (const n of c.neighbors) {
       if (n <= c.id) continue;
       const nc = world.cells[n];
       if (!nc?.polygon?.length) continue;
-      const shared: LonLat[] = [];
-      const seen = new Set<string>();
+      // 共享边两端 = 邻格多边形中落在本格的前两个**相异**角点（命中 2 个即早停）；
+      // 塌成一点或对不上 → 无边（禁止 0.05° 糊焊）
+      let p0: LonLat | null = null;
+      let p1: LonLat | null = null;
+      let k0 = NaN;
+      let k1 = NaN;
       for (const p of nc.polygon) {
-        const k = qkey(p);
-        if (seen.has(k)) continue;
+        const k = lonlatNumKey(p);
+        if (k === k0 || k === k1) continue;
         const hit = ptByKey.get(k);
         if (!hit) continue;
-        seen.add(k);
-        shared.push(hit);
+        if (!p0) {
+          p0 = hit;
+          k0 = k;
+        } else {
+          p1 = hit;
+          k1 = k;
+          break;
+        }
       }
-      // 共享边两端；塌成一点或对不上 → 无边（禁止 0.05° 糊焊）
-      if (shared.length < 2) continue;
-      const ek = c.id < n ? `${c.id}-${n}` : `${n}-${c.id}`;
-      out.set(ek, [shared[0], shared[1]]);
+      if (!p0 || !p1) continue;
+      out.set(edgeKey(c.id, n), [p0, p1]);
     }
   }
   return out;

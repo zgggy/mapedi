@@ -32,6 +32,15 @@ export function lonlatKey(ll: LonLat): string {
   return `${Math.round(lon * 1000)},${Math.round(ll.lat * 1000)}`;
 }
 
+/** lonlatKey 的数值版（**同分桶**：同一 0.001° 网格 + ±180 缝归一）——热路径用，免字符串 */
+export function lonlatNumKey(ll: LonLat): number {
+  let lon = ll.lon;
+  while (lon > 180) lon -= 360;
+  while (lon < -180) lon += 360;
+  if (Math.abs(lon) >= 180 - 1e-3) lon = 180;
+  return (Math.round(lon * 1000) + 180000) * 360001 + (Math.round(ll.lat * 1000) + 90000);
+}
+
 export function edgeMidpoint(p0: Pt, p1: Pt, period = Math.PI * 2): Pt {
   const b = { x: unwrapXAgainst(p0.x, p1.x, period), y: p1.y };
   return { x: (p0.x + b.x) / 2, y: (p0.y + b.y) / 2 };
