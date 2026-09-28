@@ -4,7 +4,6 @@ import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ens
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
 import { invalidateProjCache } from '../render/projCache';
 import { invalidateBorderCache, invalidatePieceEntries } from '../render/borderCache';
-import { invalidateStaticLayer, markDirtyCells } from '../render/staticLayerCache';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
 import { invalidateCellIndex } from '../core/index/cellIndex';
@@ -119,12 +118,6 @@ const ui = $state({
   searchQ: '',
   searchHits: [] as { id: string; name: string; layerId: string; cells: number }[],
   measuring: false,
-  /** 渲染后端：canvas（默认）/ gpu（RegionMesh，显示面板可切换） */
-  renderBackend: (
-    typeof localStorage !== 'undefined' && localStorage.getItem('mapedi-render-backend') === 'gpu'
-      ? 'gpu'
-      : 'canvas'
-  ) as 'canvas' | 'gpu',
   measureA: null as LonLat | null,
   measureB: null as LonLat | null,
   projectEpoch: 0,
@@ -257,7 +250,6 @@ export class EditorStore {
     invalidateCellGrid();
     invalidateProjCache();
     invalidateBorderCache();
-    invalidateStaticLayer();
     bumpAllRev();
     this.world = this.world ? { ...this.world } : this.world;
     this.notify();
@@ -292,7 +284,6 @@ export class EditorStore {
     invalidateRegionIndex();
     invalidateCellIndex();
     invalidateBorderCache();
-    invalidateStaticLayer();
     bumpRegionsRev();
     materializeParentCells(this.world!);
     this.world = this.world ? { ...this.world } : this.world;
@@ -304,21 +295,6 @@ export class EditorStore {
     this.notify();
   }
 
-  get renderBackend(): 'canvas' | 'gpu' {
-    return ui.renderBackend;
-  }
-
-  /** 切换渲染后端（显示面板）；贴图内容随绘制方式变化，需重烘焙 */
-  setRenderBackend(b: 'canvas' | 'gpu') {
-    ui.renderBackend = b;
-    try {
-      localStorage.setItem('mapedi-render-backend', b);
-    } catch {
-      /* 忽略持久化失败 */
-    }
-    invalidateStaticLayer();
-    this.notify();
-  }
 
   /** 归属提交（增量）：bump data rev + 调用方标脏；不动静态贴图/边界缓存（rev 键自愈） */
   private touchRegionsIncremental() {
@@ -345,7 +321,6 @@ export class EditorStore {
     invalidateCellGrid();
     if (full) invalidatePieceEntries('piece:height:');
     invalidatePieceEntries('piece:landsea:');
-    invalidateStaticLayer();
     bumpHeightRev();
     bumpRegionsRev();
     this.heightGeomDirty = true;
@@ -1289,8 +1264,6 @@ export class EditorStore {
       this.strokeRegionLayer = null;
       this.paintDirty = false;
       this.markHeightDirty(dirtyIds);
-      // 拓扑翻转会重塑远处边界 → 全量；纯高度微调只重烘 stroke 波及 cell
-      markDirtyCells(topoChanged ? 'all' : dirtyIds);
       this.flushHeightRegions(samples);
       if (this.world) this.world = { ...this.world };
       this.notify();
@@ -1313,7 +1286,6 @@ export class EditorStore {
     this.paintDirty = false;
     // 归属提交：定向失效本区域件（指纹已废，「全清/补丁」二选一的不变量必须在这里兑现）
     if (strokeDirty.length) {
-      markDirtyCells(strokeDirty);
       this.touchRegionsIncremental();
       if (committedLayer && committedRegion) {
         this.pendingPieceInvalidations.push(`piece:${committedLayer}:${committedRegion}:`);

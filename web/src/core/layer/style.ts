@@ -1,6 +1,7 @@
 /**
- * 元素样式：仅三通道（边界 / 内阴影 / 填充），全是参数。
- * 地块层默认关 shadow/fill——是配置，不是硬编码分支。
+ * 元素样式：两通道（边界 / 填充），全是参数。
+ * （阴影通道已按产品决定整体归档：docs/_archive/canvas2d-shadow/，勿恢复。）
+ * 地块层默认关 fill——是配置，不是硬编码分支。
  */
 export interface BorderStyle {
   enabled: boolean;
@@ -8,13 +9,6 @@ export interface BorderStyle {
   color: string;
   /** 边界平滑（高度层 = 高度区域边界平滑） */
   smooth: number;
-}
-
-export interface ShadowStyle {
-  enabled: boolean;
-  width: number;
-  alpha: number;
-  color: string;
 }
 
 export interface FillStyle {
@@ -25,22 +19,16 @@ export interface FillStyle {
 
 export interface ElementStyle {
   border: BorderStyle;
-  shadow: ShadowStyle;
   fill: FillStyle;
 }
 
 export type ElementStylePatch = {
   border?: Partial<BorderStyle>;
-  shadow?: Partial<ShadowStyle>;
   fill?: Partial<FillStyle>;
 };
 
 export function defaultBorderStyle(): BorderStyle {
   return { enabled: true, width: 1.6, color: '#ffffff', smooth: 1 };
-}
-
-export function defaultShadowStyle(): ShadowStyle {
-  return { enabled: true, width: 18.5, alpha: 0.45, color: '#ffffff' };
 }
 
 export function defaultFillStyle(): FillStyle {
@@ -50,7 +38,6 @@ export function defaultFillStyle(): FillStyle {
 export function defaultElementStyle(): ElementStyle {
   return {
     border: defaultBorderStyle(),
-    shadow: defaultShadowStyle(),
     fill: defaultFillStyle(),
   };
 }
@@ -58,7 +45,6 @@ export function defaultElementStyle(): ElementStyle {
 export function cloneElementStyle(s: ElementStyle): ElementStyle {
   return {
     border: { ...s.border },
-    shadow: { ...s.shadow },
     fill: { ...s.fill },
   };
 }
@@ -66,7 +52,6 @@ export function cloneElementStyle(s: ElementStyle): ElementStyle {
 export function patchElementStyle(base: ElementStyle, patch: ElementStylePatch): ElementStyle {
   return {
     border: { ...base.border, ...(patch.border ?? {}) },
-    shadow: { ...base.shadow, ...(patch.shadow ?? {}) },
     fill: { ...base.fill, ...(patch.fill ?? {}) },
   };
 }
@@ -79,11 +64,6 @@ export function clampElementStyle(s: ElementStyle): ElementStyle {
       ...s.border,
       width: n(s.border.width, 0, 12),
       smooth: n(s.border.smooth, 0, 1),
-    },
-    shadow: {
-      ...s.shadow,
-      width: n(s.shadow.width, 0, 48),
-      alpha: n(s.shadow.alpha, 0, 1),
     },
     fill: {
       ...s.fill,
@@ -103,14 +83,11 @@ export function migrateFlatStyle(raw: Record<string, unknown>): ElementStyle {
   const str = (v: unknown, d: string) => (typeof v === 'string' ? v : d);
 
   if ('elementBorder' in raw || 'borderWidth' in raw || 'innerShadowWidth' in raw || 'fillEnabled' in raw) {
+    // 旧档 innerShadow* 字段随阴影通道归档，静默丢弃
     s.border.enabled = bool(raw.elementBorder, s.border.enabled);
     s.border.width = num(raw.elementBorderWidth ?? raw.borderWidth, s.border.width);
     s.border.color = str(raw.elementBorderColor, s.border.color);
     s.border.smooth = num(raw.elementSmooth ?? raw.borderSmooth, s.border.smooth);
-    s.shadow.width = num(raw.innerShadowWidth, s.shadow.width);
-    s.shadow.alpha = num(raw.innerShadowAlpha, s.shadow.alpha);
-    s.shadow.color = str(raw.innerShadowColor, s.shadow.color);
-    s.shadow.enabled = s.shadow.width > 0 && s.shadow.alpha > 0;
     s.fill.enabled = bool(raw.fillEnabled, s.fill.enabled);
     s.fill.alpha = num(raw.fillAlpha, s.fill.alpha);
     s.fill.color = str(raw.fillColor, s.fill.color);
@@ -125,7 +102,7 @@ export function migrateFlatStyle(raw: Record<string, unknown>): ElementStyle {
 export function isElementStyle(v: unknown): v is ElementStyle {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
-  return !!(o.border && o.shadow && o.fill && typeof o.border === 'object');
+  return !!(o.border && o.fill && typeof o.border === 'object');
 }
 
 export function normalizeStyle(raw: unknown): ElementStyle {

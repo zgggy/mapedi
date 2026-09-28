@@ -58,7 +58,6 @@ function style(
   const s = defaultElementStyle();
   return {
     border: { ...s.border, ...(patch.border ?? {}) },
-    shadow: { ...s.shadow, ...(patch.shadow ?? {}) },
     fill: { ...s.fill, ...(patch.fill ?? {}) },
   };
 }
@@ -87,7 +86,6 @@ export function defaultLayerConfigs(): LayerConfig[] {
       gen: { ...genBase(0), method: 'randomConnected' },
       style: style({
         border: { enabled: true, width: 0.8, color: '#ffffff', smooth: 0 },
-        shadow: { enabled: false, width: 0, alpha: 0, color: '#fff' },
         fill: { enabled: false, alpha: 0, color: '#C4A882' },
       }),
       workspace: { listElements: false },
@@ -108,7 +106,6 @@ export function defaultLayerConfigs(): LayerConfig[] {
       },
       style: style({
         border: { enabled: true, width: 1.0, color: '#ffffff', smooth: 1 },
-        shadow: { enabled: false, width: 0, alpha: 0, color: '#fff' },
         fill: { enabled: true, alpha: 0.9, color: '#888888' },
       }),
       workspace: { listElements: true },
@@ -124,7 +121,6 @@ export function defaultLayerConfigs(): LayerConfig[] {
       gen: { ...genBase(0), method: 'diffusion' },
       style: style({
         border: { enabled: true, width: 1.5, color: '#ffffff', smooth: 1 },
-        shadow: { enabled: true, width: 12, alpha: 0.35, color: '#fff' },
         fill: { enabled: true, alpha: 0.85, color: '#2A6A9B' },
       }),
       workspace: { listElements: true },

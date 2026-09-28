@@ -10,7 +10,7 @@
 3. **`elementsLayer`**：唯一绘制入口  
    - 海岸线（陆–海）**默认一直画**（显式常显，不进第二套 pipeline）  
    - 每个 **DisplayPiece**：边界环跟 **`piece.cellIds`**（与填色同一集合身份）  
-   - **`prepareDisplayRings` 一次** → 所有可见世界副本合成单个 evenodd 填充遮罩和真实边界路径；填充 / 内阴影 / 描边共用  
+   - **`prepareDisplayRings` 一次** → 所有可见世界副本合成单个 evenodd 填充遮罩和真实边界路径；填充 / 描边共用  
    - **z 序（后画=高，无图层名特例）**：  
      1. 焦点图层 > 列表上层第一层级 > 列表下层第一层级  
      2. 同树内：子 > 父 > 父父…  
@@ -21,34 +21,23 @@
    若共享边不完整，保留开链以暴露拓扑问题；不得以弦或投影框立柱把它伪装成封闭大陆。
 6. **区域边界 ≠ cell polygon**：边界过**边中点** Hermite；cell 贴角多边形只用于网格/几何，两者不可混用
 
-## 渲染后端（同一契约，两个光栅化器）
+## 渲染（GL 唯一后端）
 
-**显示契约与后端无关**：`buildPieceParams` 是样式链唯一解析（宽度/颜色/选中放大/阴影），`core/ring/hermite` 是曲线唯一采样（闭合条件 `closed && (mode==='fill' || virtualFrom===undefined)`）。两个后端只差光栅化，禁止各推一套参数或环。
-
-### GL 直绘（`renderBackend='gpu'`，`render/gl/mapRenderer.ts`）
+**显示契约与后端无关**：`buildPieceParams` 是样式链唯一解析（宽度/颜色/选中放大），`core/ring/hermite` 是曲线唯一采样（闭合条件 `closed && (mode==='fill' || virtualFrom===undefined)`）。渲染只走 GL；**阴影功能与 Canvas2D 渲染后端已整体归档**（`docs/_archive/canvas2d-shadow/`，用户决定：阴影永不做、不再使用 Canvas2D），禁止恢复或再引第二条渲染管线。
 
 三画布叠放（z 序即 DOM 序）：
 
 | 画布 | 内容 |
 |------|------|
-| `canvas.gl`（底） | bg 清海色 + cellsMesh + elements（填充/内阴影/描边）逐帧直绘 |
-| `canvas`（中） | paths / decorations / frame（透明底）+ 全部输入 |
+| `canvas.gl`（底） | bg 清海色 + cellsMesh + elements（填充/描边）逐帧直绘 |
+| `canvas`（中） | paths / decorations / frame + 选中 cell 描边（透明底）+ 全部输入 |
 | `canvas.ovl`（顶） | 笔刷光标、路径控制点 |
 
 - **相机即 uniform**：几何按环对象缓存（WeakMap → VBO），缩放/平移只改 uniform；零重烘、零 drawImage、零读回。世界副本 = 顶点着色器 `aDx` 实例属性。
-- **evenodd = stencil 奇偶**（外部参考点三角扇 + INVERT）：含世界副本重叠不叠色，与 Canvas 单遮罩同语义；每片 scissor 局部清 stencil（不做全幅清屏）。
-- **内阴影 = Φ 剖面渐隐条带 + 并集缓冲**：α(u) = Φ(2−2|u|) − Φ(−2−2|u|)（u = 距边界 / 阴影半宽 w），即半宽 w、σ=w/2 矩形描边的高斯剖面——与 Canvas「clip(fill) + blur(2w 描边)」沿直线段**数学等价**。多环/副本的条带**不得叠加求和**（Canvas 是「描边并集再模糊」）：先以 GL_MAX 把各条带场值归并进渐隐缓冲（≈ 遮罩并集），再一次 over 合成到填充上；外侧由填充 stencil 裁掉，因此不需要外/洞方向判定。
+- **evenodd = stencil 奇偶**（外部参考点三角扇 + INVERT）：含世界副本重叠不叠色；每片 scissor 局部清 stencil（不做全幅清屏）。
 - **地图外框 = gl.scissor**（与 `clipToMapFrame` 同矩形）；框外遮罩仍在 frame 层。
-- **失败回退**：shader/上下文/非纯色样式（CanvasGradient）任一失败 → 整帧回退 Canvas2D（显示不降级）。
-
-### Canvas2D 回退与静态层烘焙
-
-静态层（海色底、网格、元素填充/边界/内阴影）按 1:1 分辨率烘焙到离屏贴图，显示时不拉伸。两种模式：
-
-- **period 模式**（缩小视图）：贴图覆盖一整个投影周期带接缝余量。烘焙时相邻周期的几何仍参与同一元素的 evenodd 遮罩；目标画布按设备像素给每个周期分配互不重叠的区间，余量仅供接缝采样，绝不重复合成半透明像素。相机水平位置和内容偏移只决定平铺位置，不参与失效。
-- **viewport 模式**（放大视图，period 贴图超预算时自动切换）：贴图只覆盖视口 + 30% 余量。相机位置按余量分桶，余量内平移不失效；出界或缩放/DPR/投影/样式/数据变化时重烘焙。
-
-两种模式都遵守：**不得拉伸低分辨率贴图代替清晰绘制**。缩放改变时重烘焙（1:1）。路径、符号、标签、外框及拾取按实时投影坐标处理。非周期投影和路径编辑走矢量直绘。SVG 导出继续使用矢量路径。GL 直绘模式不走烘焙（bg/cellsMesh/elements 由 GL 画布逐帧直绘）。
+- **GL 不可用** = 清屏 + 视口内提示横幅，**不回退 2D 代画**（Canvas2D 已归档）。
+- 非纯色样式（CanvasGradient）不支持即拒（GL 只吃纯色）。
 
 ## 模块边界（`core/ring/*`）
 
@@ -58,7 +47,7 @@
 | `build.ts` | **`cellIds` → 边界环**（无 owner）；保留所有有效共享边，边中点在球面求值 |
 | `normalize.ts` | unwrap + 周期真实终点 + 仅供填充的对应极侧框边 → DisplayRing[]；开链不补假边 |
 | `hermite.ts` | **中点 Hermite 唯一实现**（ctx / Path2D / SVG 共用）；fill 走闭环，outline 只走真实段 |
-| `trace.ts` | 其他调用点的路径/阴影辅助；`elementsLayer` 的内阴影使用合成后的同一 evenodd 遮罩 |
+| `trace.ts` | 其他调用点的路径辅助 |
 | `path2d.ts` | Path2D 缓存壳（WeakMap 按 ring+smooth+mode）；曲线求值只在 `hermite.appendMidRing` |
 
 `ownerPolygon.ts` 兼容门面已删；`defaultExclusiveColor` 在 `core/layer/style.ts`。

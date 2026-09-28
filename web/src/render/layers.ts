@@ -179,21 +179,9 @@ export const frameLayer: RenderLayer = {
   },
 };
 
-export const bgLayer: RenderLayer = {
-  name: 'bg',
-  repeat: false,
-  draw(env) {
-    const { ctx, style, dpr, w, h } = env;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = style.ocean;
-    ctx.fillRect(0, 0, w, h);
-  },
-};
-
 /**
  * 地形底：**不做 cell 填充**。
- * 海 = bgLayer；陆地轮廓色由 displayStack 边界内填充（高度层=大陆色，否则黄陆）。
+ * 陆地轮廓色由 displayStack 边界内填充（高度层=大陆色，否则黄陆）。
  * 此层只画选中高亮的 cell 描边。
  */
 export const cellsLayer: RenderLayer = {
@@ -214,70 +202,13 @@ export const cellsLayer: RenderLayer = {
   },
 };
 
-/**
- * 地块网格层：每个 cell 只描边，不填色、不平滑（直线段）。
- * P0/P3：视口索引 + 合并 Path2D 一次 stroke。
- */
-export const cellsMeshLayer: RenderLayer = {
-  name: 'cellsMesh',
-  repeat: true,
-  draw(env) {
-    const { ctx, world, cam, style, pcache, w, h, showCellMesh } = env;
-    if (!showCellMesh) return;
-    const pad = 2 / cam.scale;
-    const drawDx = env.drawDx ?? env.contentOffsetX ?? 0;
-    const viewL = cam.x - drawDx - w / 2 / cam.scale - pad;
-    const viewR = cam.x - drawDx + w / 2 / cam.scale + pad;
-    const viewT = cam.y + h / 2 / cam.scale + pad;
-    const viewB = cam.y - h / 2 / cam.scale - pad;
-    const ids = pcache.view.cellsInView({
-      minX: viewL,
-      maxX: viewR,
-      minY: viewB,
-      maxY: viewT,
-    });
-    if (!ids.length) return;
-    beginWorld(ctx, env);
-    clipToMapFrame(ctx, env);
-    const stroke = style.cellStroke;
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = Math.max(stroke.width, 0.35) / cam.scale;
-    ctx.lineJoin = 'miter';
-    ctx.lineCap = 'butt';
-    if (stroke.dash?.length) ctx.setLineDash(stroke.dash.map((d) => d / cam.scale));
-    // 合并一次 stroke（P3 批处理）
-    const batch = new Path2D();
-    const period = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
-    for (const id of ids) {
-      const polarOutline = pcache.polarOutlines.get(id);
-      const poly = polarOutline ?? pcache.polys[id];
-      if (!poly || poly.length < 6) continue;
-      const p = cellPolyPath2D(pcache, id, poly, !!polarOutline, period);
-      if (p) batch.addPath(p);
-      else {
-        batch.moveTo(poly[0], poly[1]);
-        for (let i = 2; i < poly.length; i += 2) batch.lineTo(poly[i], poly[i + 1]);
-        if (polarOutline) {
-          batch.lineTo(unwrapXAgainst(poly[poly.length - 2], poly[0], period), poly[1]);
-        } else {
-          batch.closePath();
-        }
-      }
-    }
-    ctx.stroke(batch);
-    ctx.setLineDash([]);
-    ctx.restore();
-    endWorld(ctx);
-  },
-};
-
-/** 外框 y（±85° 投影）—— fill/stroke/shadow 共用 */
+/** 外框 y（±85° 投影）—— fill/stroke 共用 */
 function frameYOf(env: RenderEnv) {
   const fr = getFrameRect(env);
   return { ...fr, cylindrical: env.proj === 'mercator' || env.proj === 'behrmann' || env.proj === 'globe' };
 }
 
-/** CSS 颜色 → [r,g,b,a]（0..1）。解析不了返回 null（CanvasGradient 等走 Canvas2D 回退）。 */
+/** CSS 颜色 → [r,g,b,a]（0..1）。解析不了返回 null（非纯色解析失败即拒）。 */
 export function cssToRgba(c: string): [number, number, number, number] | null {
   const hex = /^#?([0-9a-f]{6})$/i.exec(c || '');
   if (hex) {
@@ -295,28 +226,24 @@ export function cssToRgba(c: string): [number, number, number, number] | null {
   return null;
 }
 
-/** 元素显示参数（样式链唯一解析结果）：Canvas2D 回退与 GL 直绘共用同一份。 */
+/** 元素显示参数（样式链唯一解析结果）：GL 直绘唯一消费。（Canvas2D 管线已归档） */
 export interface PieceParams {
   key: string;
-  /** 唯一环语义源：fill / outline / 阴影都由它派生（禁止第二套环） */
+  /** 唯一环语义源：fill / outline 都由它派生（禁止第二套环） */
   rings: DisplayRing[];
-  /** 无环整框片（h0 全海底等）：矩形填充，无描边/阴影 */
+  /** 无环整框片（h0 全海底等）：矩形填充，无描边 */
   fullFrame: { color: string; alpha: number; minX: number; maxX: number; minY: number; maxY: number } | null;
-  /** 是否画填充（阴影裁剪仍用同一环的填充形状） */
+  /** 是否画填充 */
   fillOn: boolean;
   fillColor: string | CanvasGradient;
   fillAlpha: number;
   stroke: string;
   /** 描边全宽（用户单位，已含选中放大 1.6）；0 = 不描 */
   strokeW: number;
-  shadowColor: string;
-  /** 阴影半宽 w（用户单位，已含选中放大 1.15；σ = w/2 的高斯剖面）；0 = 无阴影 */
-  shadowW: number;
-  shadowAlpha: number;
   smooth: number;
   selected: boolean;
   copies: number[];
-  /** px→用户单位换算 + Canvas blur 口径用的相机比例 */
+  /** px→用户单位换算 */
   camScale: number;
 }
 
@@ -333,7 +260,6 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
     ((_id: string) =>
       env.fillStyle ?? {
         border: { enabled: true, width: style.border.width, color: style.border.color, smooth: 1 },
-        shadow: { enabled: false, width: 0, alpha: 0, color: '#fff' },
         fill: { enabled: true, alpha: 0.85, color: '#888' },
       });
   const project = (ll: { lon: number; lat: number }) => projectPt(env, ll);
@@ -359,9 +285,6 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
     const elOn = es.border.enabled !== false;
     const bw = Math.max(0, es.border.width);
     const elColor = es.border.color;
-    const shadowOn = es.shadow.enabled !== false && es.shadow.width > 0;
-    const shadowW = shadowOn ? es.shadow.width : 0;
-    const shadowA = shadowOn ? es.shadow.alpha : 0;
     const sm = es.border.smooth;
 
     const rid = dp.regionId;
@@ -414,9 +337,6 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
         fillAlpha: alpha,
         stroke: 'transparent',
         strokeW: 0,
-        shadowColor: '#000',
-        shadowW: 0,
-        shadowAlpha: 0,
         smooth: sm,
         selected: sel,
         copies,
@@ -449,12 +369,6 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       fillAlpha: fillA * (dp.opacity ?? 1),
       stroke: sel ? defaultExclusiveColor(region?.color ?? '#f0c36a') : (elOn ? strokeCol : 'transparent'),
       strokeW,
-      shadowColor: excl,
-      // 【阴影暂时停用】（用户决定：架构稳定前显示不渲染阴影）。
-      // 恢复条件：二期架构落地后按同一 Φ 剖面恢复——去掉下面的归零即可
-      // （Canvas 的 clip+blur 与 GL 的场图集实现都还在，只是不被触发）。
-      shadowW: 0,
-      shadowAlpha: 0,
       smooth: sm,
       selected: sel,
       copies,
@@ -462,78 +376,6 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
     });
   }
   return out;
-}
-
-/**
- * Canvas2D 元素画法（GL 不可用时的回退路径）。
- * 唯一样条路径：**同一 PieceParams.rings** 上做 fill / shadow / stroke。
- * 禁止 fill 用一套环、描边 unwrapChainX 另一套、阴影再 raw 环。
- * 内阴影 = clip(fill) + blur(2w 描边)——GL 的 Φ 剖面条带与其沿直线段数学等价。
- */
-export function paintPieceParams(
-  ctx: CanvasRenderingContext2D,
-  piece: PieceParams,
-): void {
-  const sm = piece.smooth;
-  const sc = piece.camScale;
-  if (piece.fullFrame) {
-    const f = piece.fullFrame;
-    ctx.save();
-    ctx.globalAlpha = f.alpha;
-    ctx.fillStyle = f.color;
-    ctx.fillRect(f.minX, f.minY, f.maxX - f.minX, f.maxY - f.minY);
-    ctx.restore();
-    return;
-  }
-  const live = piece.rings.filter((p) => p.pts.length >= 2);
-  if (!live.length) return;
-  const fill = new Path2D();
-  const outline = new Path2D();
-  for (const dx of piece.copies) {
-    const transform = new DOMMatrix().translate(dx, 0);
-    for (const ring of live) {
-      if (ring.closed) {
-        const p = ringPath2D(ring, sm, 'fill');
-        if (p) fill.addPath(p, transform);
-      }
-      const p = ringPath2D(ring, sm, 'outline');
-      if (p) outline.addPath(p, transform);
-    }
-  }
-
-  // 所有周期副本共用一个 evenodd 遮罩，避免半透明重复着色。
-  if (piece.fillOn) {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, piece.fillAlpha));
-    ctx.fillStyle = piece.fillColor;
-    ctx.fill(fill, 'evenodd');
-    ctx.restore();
-  }
-  // 内阴影：clip 到填充 + 单遍 blur 描边
-  if (piece.shadowW > 0 && piece.shadowAlpha > 0) {
-    ctx.save();
-    ctx.clip(fill, 'evenodd');
-    const blurPx = (piece.shadowW * sc) / 2;
-    ctx.filter = blurPx > 0.5 ? `blur(${blurPx.toFixed(1)}px)` : 'none';
-    ctx.strokeStyle = piece.shadowColor;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.globalAlpha = piece.shadowAlpha;
-    ctx.lineWidth = piece.shadowW * 2;
-    ctx.stroke(outline);
-    ctx.filter = 'none';
-    ctx.restore();
-  }
-  if (piece.strokeW > 0 && piece.stroke !== 'transparent') {
-    ctx.strokeStyle = piece.stroke;
-    ctx.lineWidth = piece.strokeW;
-    if (piece.selected) {
-      ctx.shadowColor = piece.shadowColor;
-      ctx.shadowBlur = 6 / sc;
-    }
-    ctx.stroke(outline);
-    ctx.shadowBlur = 0;
-  }
 }
 
 /** raw MidRing[] → display pieces。键含 frameY，换投影不得复用旧 unwrap/闭合 */
@@ -592,29 +434,6 @@ function elementCopies(env: RenderEnv): number[] {
   }
   return [...indices].sort((a, b) => a - b).map((k) => origin + k * period);
 }
-
-/**
- * 元素层：**唯一展示接口**（选中 ≡ 显示）。
- * 对所有 shown 层的每个元素：边界内填充 + 元素边界（含内缘带）。
- * 海岸线（陆海界）**默认一直画**。选中元素最后画 → 最顶。
- *
- * fill / shadow / stroke 共用 `buildPieceParams` 的同一套环（禁止分叉预处理）；
- * GL 直绘消费同一份参数（见 render/gl/mapRenderer），两后端只差光栅化。
- */
-export const elementsLayer: RenderLayer = {
-  name: 'elements',
-  repeat: false,
-  draw(env) {
-    const { ctx } = env;
-    beginWorld(ctx, env, 0, true);
-    clipToMapFrame(ctx, env, 0);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    for (const piece of buildPieceParams(env)) paintPieceParams(ctx, piece);
-    ctx.restore();
-    endWorld(ctx);
-  },
-};
 
 function darkenHex(hex: string, f = 0.6): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex);
@@ -966,12 +785,12 @@ export const decorationsLayer: RenderLayer = {
 };
 
 
-/** 默认管线：bg → 高亮 → 网格 → **元素层（填充+边界）** → 路径 → 装饰（名称/标记） → 框 */
+/**
+ * 2D 辅助管线（GL 唯一后端下的余下层）：选中描边 → 路径 → 装饰（名称/标记） → 框。
+ * bg / cellsMesh / elements 三通道由 GL 直绘（见 render/gl/mapRenderer），不再进 2D 管线。
+ */
 export const defaultPipeline: RenderLayer[] = [
-  bgLayer,
   cellsLayer,
-  cellsMeshLayer,
-  elementsLayer,
   pathsLayer,
   decorationsLayer,
   frameLayer,

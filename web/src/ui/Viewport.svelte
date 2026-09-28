@@ -3,7 +3,6 @@
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
-  import { markDirtyCells } from '../render/staticLayerCache';
   import { patchPieceEntry, invalidatePieceEntries } from '../render/borderCache';
   import {
     unproject,
@@ -22,7 +21,6 @@
   } from '../render/map2d';
   import { getProjCache } from '../render/projCache';
   import {
-    bgLayer,
     cellsLayer,
     frameLayer,
     pathsLayer,
@@ -65,7 +63,6 @@
     reliefSmooth = 0.35,
     styleId = 'dark',
     workspaceOpen = false,
-    renderBackend = 'canvas' as 'canvas' | 'gpu',
     onhover,
     onzoom,
     onpaint,
@@ -93,7 +90,6 @@
     /** 缩放级别（cam.scale / 默认 180）→ 状态栏显示 */
     onzoom?: (zoom: number) => void;
     /** 渲染后端：gpu = GL 直绘（bg/cellsMesh/元素三通道，相机 uniform 逐帧直绘） */
-    renderBackend?: 'canvas' | 'gpu';
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => number[] | null;
     onradius?: (v: number) => void;
     onstrokeend?: () => void;
@@ -136,7 +132,7 @@
    * Esc / 退出绘制后控件消失，不能再画。
    */
   const pathEdit = $derived(isFreeLayer && drawActive);
-  const pathPipeline = [bgLayer, cellsLayer, pathsLayer, frameLayer];
+  const pathPipeline = [cellsLayer, pathsLayer, frameLayer];
   /** 拖点时的原曲线（虚线幽灵） */
   let dragGhostPts = $state<LonLat[] | null>(null);
 
@@ -682,9 +678,8 @@
 
   // GL 直绘场景：惰性创建（显示面板切到 GPU 才建）；失败/异常整帧回退 Canvas2D（显示不降级）
   let mapGl: MapGlRenderer | null = null;
-  let mapGlFailed = false;
+  let mapGlFailed = $state(false);
   function ensureMapGl(): MapGlRenderer | null {
-    if (renderBackend !== 'gpu') return null;
     if (mapGl) return mapGl.ok ? mapGl : null;
     if (mapGlFailed || !glCanvas) return null;
     mapGl = MapGlRenderer.create(glCanvas);
@@ -844,7 +839,6 @@
     void projParams;
     void styleId;
     void cam.scale;
-    void renderBackend; // 切换渲染后端必须整帧重绘（GL 直绘 ↔ Canvas 回退）
     onzoom?.(cam.scale / 180);
     requestRender();
     requestOverlay();
@@ -865,25 +859,14 @@
     requestOverlay();
   });
 
-  // 选中变化只标脏新旧选中元素的 cell（增量重烘）；找不到对应区域（如刚删除）→ 全量
-  let lastHighlightForDirty: string | null = null;
-  $effect(() => {
-    const hid = highlightRegionId ?? null;
-    if (hid === lastHighlightForDirty) return;
-    const prev = lastHighlightForDirty;
-    lastHighlightForDirty = hid;
-    const dirtyIds: number[] = [];
-    for (const r of world.regions) {
-      if (r.id === prev || r.id === hid) dirtyIds.push(...r.cells);
-    }
-    if (dirtyIds.length) markDirtyCells(dirtyIds);
-    else if (prev !== null || hid !== null) markDirtyCells('all');
-  });
 </script>
 
 <div class="viewport-root" class:draw={drawActive && !pathEdit} class:path-edit={pathEdit}>
-  <!-- GL 直绘层（渲染后端 = GPU 时用）：bg/cellsMesh/元素三通道，最底 -->
+  <!-- GL 直绘层：bg/cellsMesh/元素三通道，最底（GL 唯一后端） -->
   <canvas class="gl" bind:this={glCanvas}></canvas>
+  {#if mapGlFailed}
+    <div class="gl-fail">GPU 渲染不可用（WebGL2 初始化失败）。Canvas2D 后端已归档，地图无法显示。</div>
+  {/if}
   <canvas
     bind:this={canvas}
     oncontextmenu={(e) => e.preventDefault()}
@@ -1246,5 +1229,19 @@
     height: 100%;
     pointer-events: none;
     z-index: 2;
+  }
+
+  .gl-fail {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #f0c36a;
+    font-size: 14px;
+    z-index: 3;
+    pointer-events: none;
+    text-align: center;
+    padding: 0 24px;
   }
 </style>

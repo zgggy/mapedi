@@ -12,21 +12,8 @@ import { buildPieceParams, defaultPipeline, type RenderEnv, type RenderLayer } f
 import { worldCopyDxs } from './space';
 import { composeShownPieces } from '../core/displayCompose';
 import { ringPath2D } from '../core/ring/path2d';
-import { drawPeriodicStatic } from './staticLayerCache';
 
 /** cellId → 国家色（RegionIndex 缓存） */
-export function buildCountryFill(world: World): Map<number, string> {
-  return getRegionIndex(world).fillMap(world, 'country');
-}
-
-/** cellId → 重叠成员列表 */
-export function buildOverlapMembers(
-  world: World,
-  layerId: string,
-): Map<number, { id: string; color: string; weight: number }[]> {
-  return getRegionIndex(world).overlapMap(world, layerId);
-}
-
 export interface Camera {
   x: number;
   y: number;
@@ -204,8 +191,6 @@ export function drawWorld(
     fillStyle?: import('../core/layer/style').ElementStyle;
     styleOf?: (layerId: string) => import('../core/layer/style').ElementStyle;
     borderStyle?: import('../core/types').LayerRenderConfig;
-    /** P1 静态层合成缓存（默认开；路径编辑关；GL 直绘时不走烘焙） */
-    staticCache?: boolean;
     /** 平移/缩放中：跳过脏区域重烘焙（贴图 1:1 显示，不拉伸） */
     isDragging?: boolean;
     /** 冷件补热就绪回调（渐现：触发重绘让元素出现） */
@@ -213,6 +198,7 @@ export function drawWorld(
     /** 首启渐现：冷件跳过入队（仅世界载入/生成期为 true；之后同步重建） */
     progressiveBoot?: boolean;
     /** GL 直绘场景（bg/cellsMesh/elements 三通道）；返回 true = 已绘，2D 只画余下层（透明底） */
+    /** GL 直绘场景（bg/cellsMesh/elements 三通道）；GL 唯一后端——缺席/失败即清屏返回 */
     glScene?: {
       render(env: RenderEnv, channels: { cellsMesh: boolean; elements: boolean }): boolean;
     };
@@ -254,53 +240,17 @@ export function drawWorld(
   const env = buildRenderEnv(ctx, world, cam, hoverId, dpr, opts);
 
   const pipeline = opts?.pipeline ?? defaultPipeline;
-  const staticNames = new Set(['bg', 'cellsMesh', 'elements']);
-  // GL 直绘：bg/cellsMesh/elements 由 GL 画布逐帧直绘（相机 uniform，无烘焙/无 drawImage）；
-  // 返回 true 时 2D 画布只画余下层（透明底），底色在 GL 画布上
-  const glReady = opts?.glScene
-    ? opts.glScene.render(env, {
-        cellsMesh: pipeline.some((l) => l.name === 'cellsMesh'),
-        elements: pipeline.some((l) => l.name === 'elements'),
-      })
-    : false;
-  // 每帧先清屏：贴图/图层未覆盖处不得留上一帧残影
+  // GL 唯一后端：bg/cellsMesh/elements 由 GL 画布逐帧直绘（相机 uniform，无烘焙/无 drawImage）；
+  // 2D 画布只画余下层（透明底），底色在 GL 画布上。（Canvas2D 后端已归档，无回退）
+  const glReady = opts?.glScene ? opts.glScene.render(env, { cellsMesh: true, elements: true }) : false;
+  // 每帧先清屏：图层未覆盖处不得留上一帧残影
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.restore();
-  if (!glReady) {
-    ctx.fillStyle = style.ocean;
-    ctx.fillRect(0, 0, w, h);
-  }
+  if (!glReady) return; // GL 不可用：清屏后由调用方提示，2D 不再代画
 
-  // A cylindrical map bakes one complete period; non-periodic/oversized views draw directly.
-  // 周期贴图：bg + cellsMesh + elements → drawImage 显示（缩放/拖动/平移用；GL 直绘不烘焙）
-  // 局部重绘：样式/动作用，只更新贴图脏区域（不破坏周期贴图）
-  const useStatic = !glReady && opts?.staticCache !== false && !opts?.singleWorldCopy;
-  const staticLayers = useStatic
-    ? pipeline.filter((l) => staticNames.has(l.name))
-    : [];
-  const rest = useStatic || glReady
-    ? pipeline.filter((l) => !staticNames.has(l.name))
-    : pipeline;
-
-  if (staticLayers.length) {
-    const tiled = period !== null &&
-      drawPeriodicStatic(env, staticLayers, w, h, period);
-    if (!tiled) {
-      for (const layer of staticLayers) {
-        if (!layer.repeat) {
-          env.drawDx = contentOffsetX;
-          layer.draw(env);
-        } else {
-          for (const dx of dxs) {
-            env.drawDx = dx;
-            layer.draw(env);
-          }
-        }
-      }
-    }
-  }
+  const rest = pipeline;
   const restT0 = performance.now();
   for (const layer of rest) {
     if (!layer.repeat) {

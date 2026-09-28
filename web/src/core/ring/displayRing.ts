@@ -6,7 +6,7 @@
  * - verts.length === pts.length
  * - verts[i] 对应 pts[i] → pts[i+1]（闭环含 last→first）
  *
- * fill / stroke / shadow **只**吃 DisplayRing，禁止分叉预处理。
+ * fill / stroke **只**吃 DisplayRing，禁止分叉预处理。（阴影已归档）
  */
 import type { Pt } from '../../render/space';
 

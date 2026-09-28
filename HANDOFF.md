@@ -10,6 +10,30 @@
 
 ## 当前状态（截至交接）
 
+**本轮已处理（2026-09-28，第三十八次）— 归档阴影全部功能 + 归档 Canvas2D 渲染后端（GL 唯一）**
+
+- **用户决定（原话要点）**："不要阴影，所有阴影相关功能全部归档，现在全部 canvas2d 也是，归档，不要用了"。
+  两条都是**产品层面的否决**——不是待办。todo/注释里凡写"阴影恢复时…"都只是归档约束，不是要做的事。
+- **阴影归档**（`docs/_archive/canvas2d-shadow/`）：
+  - 样式通道 `ShadowStyle`（ElementStyle 现两通道：边界/填充）、DisplayStylePanel「内阴影」组、
+    旧档 `innerShadow*` 迁移字段（静默丢弃）。
+  - Canvas clip+blur 内阴影块（paintPieceParams 整体归档）、GL Φ 剖面渐隐条带（buildFadeRibbon）、
+    GL 场图集（VERT_FADE/FRAG_FADE/FRAG_FILL_FIELD/FRAG_FADE_COMPOSITE/VERT_SCREEN + fieldPass
+    相位 A + ensureFadeRT + fill+shadow 一次合成）。fill→stroke 为唯一顺序。
+  - 选中 glow（ctx.shadowBlur）随 Canvas 管线一并归档；选中语义不变（1.6× 描边 + 专属色）。
+- **Canvas2D 渲染后端归档**：bgLayer / cellsMeshLayer / elementsLayer / paintPieceParams /
+  staticLayerCache（周期贴图烘焙 + markDirtyCells 增量重烘）整批退场；`renderBackend` 切换
+  （store/面板/StatusBar）删除，StatusBar 后端位固定 GPU。**GL 不可用 = 清屏 + 视口横幅提示，
+  不再回退 2D 代画**。2D 画布仅剩辅助层：选中 cell 描边、路径曲线、装饰名称/标记、地图框。
+  （范围说明：辅助层暂留 2D 绘制——砍掉=地名/路径直接消失；如需全清请明示，那是 GL 文字/曲线渲染包。）
+- **RENDER_LOGIC.md** 同步为「GL 唯一后端」契约；归档目录 README 写明禁止当依据。
+- **验证**：`npm run check` 0 errors；测试无引用被删符号（不动 tests）。浏览器实测 GL 唯一渲染
+  正常（gpuRan>0、海陆像素齐、无阴影 UI、无后端切换、StatusBar=GPU）。
+  **教训**：批量切除后 `ensureMapGl` 里残留 `if (renderBackend !== 'gpu') return null;` ——后端开关
+  删除后 GL 永不启用、整图黑屏且零报错（drawWorld 早退）。**删开关要连同全部门槛分支一起清**，
+  验证必须看"真的画了"（gpuRan/drawCount 计数或像素），不能只看无报错。
+- **待办**：生成小头（撒点/级联/反序列化）。100k 视口裁剪已完（342fbcc，GPU cellsMesh 桶行裁剪）。
+
 **本轮已处理（2026-09-28，第三十七次）— GPU cellsMesh 视口裁剪（100k 网格）**
 
 - **问题**：GL 后端的 cell 网格每帧把全表边条带 instanced 直绘（100k cell ≈ 数十万顶点），无视口

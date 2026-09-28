@@ -5,9 +5,7 @@
  * 几何按**环对象**缓存（WeakMap），相机变化零重算，缩放只改 uniform：
  * - fan：外部参考点三角扇（stencil 奇偶 = evenodd，含世界副本重叠不叠色）
  * - strip：描边条带 [base, dir]，宽度走 uHalfW uniform（用户单位）
- * - fade：内阴影渐隐条带（解析剖面 = Canvas 的 clip(fill)+blur(2w 描边) 的直线段等价，
- *   两侧对称伸展、由填充 stencil 裁掉外侧 → 不需要外/洞方向判定）
- *
+
  * 闭合语义只来自 hermite（willClose），不在此另立规则：
  * outline 模式遇 virtualFrom 跨界尾巴是**开环**，强制闭合 = 横跨地图的直线（「横线」bug）。
  */
@@ -26,8 +24,6 @@ export interface RingGeo {
   fan: Float32Array | null;
   /** 描边条带 [baseX, baseY, dirX, dirY]×6/段；顶点 = base + dir·uHalfW */
   strip: Float32Array | null;
-  /** 内阴影渐隐条带 [x, y, nx, ny, u]×2/点 + 三角索引；顶点 = p + n·u·uHalfW，u∈±2.5 */
-  fade: { verts: Float32Array; idx: Uint32Array } | null;
   /** 环包围盒（scissor 用） */
   bbox: { minX: number; maxX: number; minY: number; maxY: number };
 }
@@ -66,39 +62,6 @@ function buildStripLayout(pts: Pt[], closed: boolean): Float32Array {
   return out;
 }
 
-/**
- * 折线 → 内阴影渐隐条带（连续 ribbon，无重叠关节）。
- * 每点 2 顶点：u=-2.5 / +2.5（单位 = uHalfW = 阴影半宽 w）；
- * 片元 α = Φ(2−2|u|) − Φ(−2−2|u|) —— 半宽 w、σ=w/2 矩形描边的高斯剖面，
- * 与 Canvas「clip(fill) + blur(2w 描边)」沿直线段数学等价；外侧半条由填充 stencil 裁掉。
- */
-function buildFadeRibbon(pts: Pt[]): { verts: Float32Array; idx: Uint32Array } | null {
-  const n = pts.length;
-  if (n < 2) return null;
-  const verts = new Float32Array(n * 2 * 5);
-  const idx = new Uint32Array((n - 1) * 6);
-  for (let i = 0; i < n; i++) {
-    const p = pts[i];
-    const a = pts[i > 0 ? i - 1 : 0];
-    const b = pts[i < n - 1 ? i + 1 : n - 1];
-    let nx = b.y - a.y;
-    let ny = -(b.x - a.x);
-    const l = Math.hypot(nx, ny) || 1;
-    nx /= l;
-    ny /= l;
-    const o = i * 10;
-    verts[o] = p.x; verts[o + 1] = p.y; verts[o + 2] = nx; verts[o + 3] = ny; verts[o + 4] = -2.5;
-    verts[o + 5] = p.x; verts[o + 6] = p.y; verts[o + 7] = nx; verts[o + 8] = ny; verts[o + 9] = 2.5;
-    if (i < n - 1) {
-      const k = i * 6;
-      const v0 = i * 2;
-      idx[k] = v0; idx[k + 1] = v0 + 1; idx[k + 2] = v0 + 2;
-      idx[k + 3] = v0 + 1; idx[k + 4] = v0 + 3; idx[k + 5] = v0 + 2;
-    }
-  }
-  return { verts, idx };
-}
-
 /** 环 → 外部参考点三角扇（stencil INVERT 用；扇形奇偶 = evenodd = Canvas fill 隐式闭合） */
 function buildFan(pts: Pt[]): Float32Array {
   const n = pts.length;
@@ -129,7 +92,7 @@ function buildFan(pts: Pt[]): Float32Array {
 
 const geoCache = new WeakMap<object, Map<string, RingGeo>>();
 
-/** 环几何（缓存）。mode='fill' → fan；'outline' → strip + fade。 */
+/** 环几何（缓存）。mode='fill' → fan；'outline' → strip。 */
 export function ringGeo(
   ring: DisplayRing,
   smooth: number,
@@ -163,7 +126,6 @@ export function ringGeo(
     fillPts: mode === 'fill' ? pts : null,
     fan: mode === 'fill' ? buildFan(pts) : null,
     strip: mode === 'outline' ? buildStripLayout(pts, willClose && pts.length >= 3) : null,
-    fade: mode === 'outline' ? buildFadeRibbon(pts) : null,
     bbox: { minX, maxX, minY, maxY },
   };
   byKey.set(key, geo);

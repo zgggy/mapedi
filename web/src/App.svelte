@@ -165,7 +165,6 @@
         <Viewport
           {world}
           {focusLayer}
-          renderBackend={editor.renderBackend}
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
@@ -447,7 +446,7 @@
     }}
   />
 
-  <StatusBar {hover} {status} {fps} zoom={zoomScale} backend={editor.renderBackend} />
+  <StatusBar {hover} {status} {fps} zoom={zoomScale} />
 
   <BrushHud
     {draw}
@@ -469,8 +468,6 @@
       editor.setLayerStyle(styleLayer, patch);
     }}
     onCollapse={() => (panels.style = false)}
-    renderBackend={editor.renderBackend}
-    onRenderBackend={(b) => editor.setRenderBackend(b)}
   />
 
   <ValidatorPanel

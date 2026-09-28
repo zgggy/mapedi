@@ -1,7 +1,7 @@
 /**
  * 边界环正规化（投影空间）：unwrap → 周期真实终点 → 填充用框边。
  *
- * fill / stroke / shadow 共用本模块输出，禁止在绘制侧再拆。
+ * fill / stroke 共用本模块输出，禁止在绘制侧再拆。（阴影已归档）
  */
 import { unwrapXAgainst, type Pt } from '../../render/space';
 import {
