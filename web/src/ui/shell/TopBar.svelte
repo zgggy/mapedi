@@ -70,14 +70,18 @@
                 <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
               </div>
               <div class="row">
-                <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={110} onInput={(v) => onShape('flatness', v)} /></label>
-                <label class="sm">大陆数 <input type="number" min="0" max="12" value={shape.continentCount} onchange={(e) => onShape('continentCount', Math.max(0, Math.min(12, Number(e.currentTarget.value) || 0)))} /></label>
-                <label class="sm"><input type="checkbox" checked={shape.polar} onchange={(e) => onShape('polar', e.currentTarget.checked)} /> 穿极大陆</label>
+                <label class="sm">大陆尺度 <CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度（越大大陆越少越大）" width={90} onInput={(v) => onShape('continentScale', v)} /></label>
+                <label class="sm">海岸破碎 <CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎度（域扭曲）" width={90} onInput={(v) => onShape('coastBreak', v)} /></label>
+                <label class="sm">山脉 <CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={90} onInput={(v) => onShape('mountain', v)} /></label>
               </div>
               <div class="row">
-                <label class="sm">崎岖 <CapsuleSlider min={0} max={1} step={0.05} value={shape.roughness} label="山脉崎岖度" width={90} onInput={(v) => onShape('roughness', v)} /></label>
+                <label class="sm">细节 <CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={90} onInput={(v) => onShape('detail', v)} /></label>
                 <label class="sm">海床 <CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={90} onInput={(v) => onShape('seaRugged', v)} /></label>
-                <label class="sm">侵蚀 <input type="number" min="0" max="4" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(4, Number(e.currentTarget.value) || 0)))} /></label>
+                <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={90} onInput={(v) => onShape('flatness', v)} /></label>
+              </div>
+              <div class="row">
+                <label class="sm"><input type="checkbox" checked={shape.polar} onchange={(e) => onShape('polar', e.currentTarget.checked)} /> 穿极大陆</label>
+                <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
               </div>
             {/if}
             {#if generating}

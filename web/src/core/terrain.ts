@@ -1,23 +1,30 @@
 /**
- * 统一地形模型 v3：**-63 底球 + 随机撒点 + 扩散**（用户定语义）。
+ * 统一地形模型 v5：**Perlin 梯度噪声 + FBM**（先定算法，参数由算法导出）。
  *
- * 模型（一句话）：底球高度 -63；球面随机撒点，每点自带**起始高度（峰高）/ 扩散半径 /
- * 扩散浓度**；高度从峰顶沿**大圆角距**向外衰减——浓度越高下降越慢、越低下降越快；
- * 半径越大铺得越远。多点扩散自然叠加（叠加处 = 高地/大陆合并）。
+ * 算法（数据流）：
+ *   p        = 球面单位向量（无缝：噪声直接吃 xyz，不走经纬度）
+ *   q        = normalize(p + κ·W(p))            W = 向量 FBM（域扭曲，撕海岸）
+ *   C        = FBM(q·f_c, oct=6)                大陆度（低频大形 + 高频细节）
+ *          + 穿极宽帽（可关）                    保证「穿极 + 贴极」产品默认
+ *   M        = ridged-FBM(q·f_m, oct=5)·内陆度·μ  山系（山脊分形 → 连绵山脉）
+ *   D        = FBM(p·f_d, oct=4)·δ              表面细节
+ *   S        = FBM(p·f_s, oct=4)·σ + 海沟噪声   海底起伏（防整片同高）
+ *   h_raw    = C + M + D + (海侧)·S
+ *   → 热侵蚀 → 去尖刺 → 海平面 = 分位(landRatio) → 线性刻度(relief/flatness) → 整数
  *
- * 关键性质：
- * - 距离全是**大圆角距**：扩散穿过日界线/极点是正常衰减，不会「到线就停」；
- * - 域扭曲只扰动**角距**（方向对称）→ 无「绕着什么转 / 拉伸」的弧线感；
- * - 海底起伏用小噪声（避免整片同高）；无山脊弧带噪声。
- * 后处理：热侵蚀 + 去尖刺；海平面 = 场的 landRatio 分位（占比精确）；落差精确；
- * 平整率 = 向海平面幂弯。
+ * 为什么 Perlin+FBM（vs 旧值噪声）：梯度噪声无「网格状/拉伸」伪影；FBM 的
+ * lacunarity/gain 控制细节能量谱；ridged 变体出山脊而非鼓包；域扭曲让海岸有机。
+ *
+ * 参数（面板）与算法一一对应：
+ *   大陆尺度 → f_c（频率）；海岸破碎度 → κ；山脉强度 → μ；细节量 → δ；
+ *   海底起伏 → σ；穿极大陆 → 帽开关；大陆占比/落差/平整率/侵蚀 → 后处理。
  */
 import type { Cell, World } from './types';
 import { isOcean } from './types';
 import { createRng, hashSeed } from './rng';
 import type { WorldShape } from './layer/genTypes';
 
-// ── 球面 3D 值噪声（确定性、无缝；只用于细节/海底/撕边） ──
+// ── Perlin 梯度噪声（3D，种子化，[-1,1]） ──
 
 function hash3(ix: number, iy: number, iz: number, seed: number): number {
   let h = (ix * 374761393 + iy * 668265263 + iz * 2147483647 + seed * 1274126177) | 0;
@@ -26,31 +33,61 @@ function hash3(ix: number, iy: number, iz: number, seed: number): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-const fade = (t: number) => t * t * (3 - 2 * t);
-
-function noise3(x: number, y: number, z: number, seed: number): number {
-  const x0 = Math.floor(x), y0 = Math.floor(y), z0 = Math.floor(z);
-  const fx = fade(x - x0), fy = fade(y - y0), fz = fade(z - z0);
-  const c000 = hash3(x0, y0, z0, seed), c100 = hash3(x0 + 1, y0, z0, seed);
-  const c010 = hash3(x0, y0 + 1, z0, seed), c110 = hash3(x0 + 1, y0 + 1, z0, seed);
-  const c001 = hash3(x0, y0, z0 + 1, seed), c101 = hash3(x0 + 1, y0, z0 + 1, seed);
-  const c011 = hash3(x0, y0 + 1, z0 + 1, seed), c111 = hash3(x0 + 1, y0 + 1, z0 + 1, seed);
-  const x00 = c000 + (c100 - c000) * fx, x10 = c010 + (c110 - c010) * fx;
-  const x01 = c001 + (c101 - c001) * fx, x11 = c011 + (c111 - c011) * fx;
-  const y0v = x00 + (x10 - x00) * fy, y1v = x01 + (x11 - x01) * fy;
-  return y0v + (y1v - y0v) * fz;
+/** 立方体棱方向梯度（Perlin 经典 12 梯度） */
+function gradDot(h: number, x: number, y: number, z: number): number {
+  const g = h & 15;
+  const u = g < 8 ? x : y;
+  const v = g < 4 ? y : (g === 12 || g === 14 ? x : z);
+  return ((g & 1) === 0 ? u : -u) + ((g & 2) === 0 ? v : -v);
 }
 
-function fbm3(x: number, y: number, z: number, seed: number, octaves = 3): number {
+const quintic = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** Perlin 3D 梯度噪声，输出 ≈ [-1,1] */
+function perlin3(x: number, y: number, z: number, seed: number): number {
+  const x0 = Math.floor(x), y0 = Math.floor(y), z0 = Math.floor(z);
+  const xf = x - x0, yf = y - y0, zf = z - z0;
+  const u = quintic(xf), v = quintic(yf), w = quintic(zf);
+  const g = (dx: number, dy: number, dz: number) =>
+    gradDot(Math.floor(hash3(x0 + dx, y0 + dy, z0 + dz, seed) * 16), xf - dx, yf - dy, zf - dz);
+  const x00 = lerp(g(0, 0, 0), g(1, 0, 0), u);
+  const x10 = lerp(g(0, 1, 0), g(1, 1, 0), u);
+  const x01 = lerp(g(0, 0, 1), g(1, 0, 1), u);
+  const x11 = lerp(g(0, 1, 1), g(1, 1, 1), u);
+  return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
+}
+
+/** 分形布朗运动：多倍频叠加（lacunarity=2, gain=0.5），输出 ≈ [-1,1] */
+function fbm(x: number, y: number, z: number, seed: number, octaves = 5): number {
   let amp = 0.5, freq = 1, sum = 0, norm = 0;
   for (let i = 0; i < octaves; i++) {
-    sum += amp * noise3(x * freq, y * freq, z * freq, seed + i * 101);
+    sum += amp * perlin3(x * freq, y * freq, z * freq, seed + i * 131);
     norm += amp;
     amp *= 0.5;
-    freq *= 2.03;
+    freq *= 2.0;
   }
   return sum / norm;
 }
+
+/** 山脊 FBM：(1−|n|)² 累积 → 连绵山脊（非鼓包） */
+function ridged(x: number, y: number, z: number, seed: number, octaves = 5): number {
+  let amp = 0.5, freq = 1, sum = 0, norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    const n = perlin3(x * freq, y * freq, z * freq, seed + 700 + i * 37);
+    const r = 1 - Math.abs(n);
+    sum += amp * r * r;
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2.0;
+  }
+  return sum / norm;
+}
+
+const smoothstep = (e0: number, e1: number, x: number): number => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
 
 type V3 = { x: number; y: number; z: number };
 
@@ -62,72 +99,61 @@ function unitOf(lonDeg: number, latDeg: number): V3 {
 }
 
 /**
- * 高度场：**球面 3D 域扭曲噪声（大陆度）+ 宽幅穿极脊 + 大陆核 + 细节/海底**。
- * - 噪声在单位球向量上求值（无缝、不拉伸）；域扭曲用**向量噪声**撕破圆形海岸；
- * - 穿极大陆 = 沿随机大圆的**宽脊**（宽 30°–50°，噪声撕边）——宽大陆穿极，
- *   不是细长条；天然穿过两极与日界线；
- * - 大陆核 = 宽高斯包络 × 噪声；海底起伏防整片同高。
+ * 高度场（Perlin-FBM 组合，见文件头数据流）。
  */
 function heightField(cells: Cell[], seed: number, shape: WorldShape, rng: () => number): Float64Array {
   const n = cells.length;
   const f = new Float64Array(n);
-  const rough = 0.5 + 0.5 * Math.max(0, Math.min(1, shape.roughness));
-  const rugged = 0.25 + 0.75 * Math.max(0, Math.min(1, shape.seaRugged));
+  // 参数 → 算法量
+  const fC = 1.1 + 2.6 * (1 - Math.max(0, Math.min(1, shape.continentScale))); // 大陆尺度（频率）
+  const kappa = 0.1 + 0.5 * Math.max(0, Math.min(1, shape.coastBreak));         // 海岸破碎度（域扭曲）
+  const mu = 0.18 + 1.0 * Math.max(0, Math.min(1, shape.mountain));             // 山脉强度
+  const delta = 0.12 + 0.5 * Math.max(0, Math.min(1, shape.detail));            // 细节量
+  const sigma = 0.25 + 1.0 * Math.max(0, Math.min(1, shape.seaRugged));         // 海底起伏
 
-  // 穿极宽脊：随机经线大圆（过两极）+ 宽度
+  // 穿极大陆：沿随机大圆的宽帽（穿两极 + 日界线，噪声撕边）
   const lon0 = rng() * 360 - 180;
-  const spineN = unitOf(lon0 + 90, 0); // 大圆所在平面的法向
-  const spineW = 0.52 + rng() * 0.28;
-  const spineAmp = 0.5 + rng() * 0.3;
-
-  // 大陆核（宽包络，随机分布）
-  const k = Math.max(0, Math.round(shape.continentCount));
-  const cores: { v: V3; r: number; amp: number }[] = [];
-  for (let i = 0; i < k; i++) {
-    const u = rng() * 2 - 1;
-    const lon = rng() * 360 - 180;
-    const lat = (Math.asin(Math.max(-1, Math.min(1, u))) * 180) / Math.PI;
-    cores.push({ v: unitOf(lon, lat), r: 0.5 + rng() * 0.55, amp: 0.4 + rng() * 0.5 });
-  }
+  const spineN = unitOf(lon0 + 90, 0);
+  const spineW = 0.5 + rng() * 0.22;
 
   for (let i = 0; i < n; i++) {
     const c = cells[i];
     const p = unitOf(c.center.lon, c.center.lat);
-    // 域扭曲（向量噪声）：撕圆海岸，方向对称 → 无拉伸/旋绕
-    const wx = fbm3(p.x * 1.9 + 3.1, p.y * 1.9 + 5.7, p.z * 1.9 + 1.3, seed + 11, 3) - 0.5;
-    const wy = fbm3(p.x * 1.9 + 8.2, p.y * 1.9 + 2.4, p.z * 1.9 + 6.9, seed + 23, 3) - 0.5;
-    const wz = fbm3(p.x * 1.9 + 1.7, p.y * 1.9 + 9.1, p.z * 1.9 + 4.2, seed + 37, 3) - 0.5;
-    let qx = p.x + wx * 0.34, qy = p.y + wy * 0.34, qz = p.z + wz * 0.34;
+    // 域扭曲 W(p)：向量 FBM（三通道各不同 → 方向对称撕海岸，无拉伸感）
+    const wx = fbm(p.x * 1.6 + 3.1, p.y * 1.6 + 5.7, p.z * 1.6 + 1.3, seed + 11, 3);
+    const wy = fbm(p.x * 1.6 + 8.2, p.y * 1.6 + 2.4, p.z * 1.6 + 6.9, seed + 23, 3);
+    const wz = fbm(p.x * 1.6 + 1.7, p.y * 1.9 + 9.1, p.z * 1.6 + 4.2, seed + 37, 3);
+    let qx = p.x + wx * kappa, qy = p.y + wy * kappa, qz = p.z + wz * kappa;
     const ql = Math.hypot(qx, qy, qz) || 1;
     qx /= ql; qy /= ql; qz /= ql;
 
-    // 大陆度：低/中频 fbm（撕边后的球面坐标）
-    let v = (fbm3(qx * 2.3, qy * 2.3, qz * 2.3, seed + 101, 5) - 0.44) * 1.7;
+    // 大陆度 C
+    let v = fbm(qx * fC, qy * fC, qz * fC, seed + 101, 6);
 
     if (shape.polar) {
-      // 穿极宽脊：到大圆的角距（跨两极/日界线连续）
       const d = Math.abs(p.x * spineN.x + p.y * spineN.y + p.z * spineN.z);
       const ang = Math.asin(Math.max(0, Math.min(1, d)));
       const t = ang / spineW;
       if (t < 2.2) {
-        const warp = 1 + (fbm3(qx * 2.8, qy * 2.8, qz * 2.8, seed + 201, 3) - 0.5) * 0.55;
-        v += Math.exp(-t * t * warp) * spineAmp * (0.65 + 0.7 * fbm3(qx * 3.1, qy * 3.1, qz * 3.1, seed + 211, 3));
+        const warp = 1 + fbm(qx * 2.4, qy * 2.4, qz * 2.4, seed + 201, 3) * 0.4;
+        v += Math.exp(-t * t * warp) * 0.62 * (0.7 + 0.5 * fbm(qx * 3.0, qy * 3.0, qz * 3.0, seed + 211, 3));
       }
-      // 贴极保障：极区小幅抬升（产品默认「至少一端贴极」）
       const pole = Math.max(0, Math.abs(p.y) - 0.93) / 0.07;
-      if (pole > 0) v += pole * pole * 0.32;
-    }
-    for (let ci = 0; ci < cores.length; ci++) {
-      const s = cores[ci];
-      const dot = Math.max(-1, Math.min(1, p.x * s.v.x + p.y * s.v.y + p.z * s.v.z));
-      const t = Math.acos(dot) / s.r;
-      if (t > 2.2) continue;
-      v += Math.exp(-t * t * 1.1) * s.amp * (0.6 + 0.8 * fbm3(qx * 3.2 + ci * 7, qy * 3.2, qz * 3.2, seed + 301, 3));
+      if (pole > 0) v += pole * pole * 0.3; // 贴极保障
     }
 
-    // 细节 + 海底起伏（防整片同高；无弧带噪声）
-    const detail = fbm3(p.x * 12, p.y * 12, p.z * 12, seed + 501, 4) - 0.5;
-    v += detail * (0.5 + 1.1 * rough) * (0.7 + 0.6 * rugged);
+    // 山系 M：ridged FBM × 内陆度
+    const inland = smoothstep(0.02, 0.5, v);
+    v += inland * ridged(qx * 3.4, qy * 3.4, qz * 3.4, seed + 301, 5) * mu;
+
+    // 细节 D
+    v += fbm(p.x * 11, p.y * 11, p.z * 11, seed + 501, 4) * delta * (0.55 + 0.45 * inland);
+
+    // 海底 S：海床起伏 + 海沟（ridged）
+    const deep = smoothstep(0.02, -0.55, v);
+    v += deep * fbm(p.x * 2.0, p.y * 2.0, p.z * 2.0, seed + 601, 4) * sigma;
+    v -= deep * ridged(p.x * 2.8, p.y * 2.8, p.z * 2.8, seed + 701, 3) * sigma * 0.45;
+
     f[i] = v;
   }
   return f;
@@ -140,7 +166,7 @@ function quantile(arr: Float64Array, q: number): number {
   return copy[i];
 }
 
-/** 建地形：写 cell.height / cell.isOcean。onProgress 同旧接口。 */
+/** 建地形：写 cell.height / cell.isOcean。 */
 export function buildTerrain(
   world: World,
   seed: number,
@@ -152,10 +178,9 @@ export function buildTerrain(
   if (!n) return;
   const rng = createRng(hashSeed(seed, 17));
 
-  onProgress?.('撒点扩散', 0.15);
+  onProgress?.('Perlin-FBM 地形', 0.15);
   const f = heightField(cells, seed, shape, rng);
 
-  // 侵蚀：热松弛（限坡）+ 去尖刺
   const iters = Math.max(0, Math.min(6, Math.round(shape.erosion)));
   if (iters > 0) {
     onProgress?.('热侵蚀', 0.5);
@@ -185,23 +210,22 @@ export function buildTerrain(
       for (const nid of nb) sum += f[nid];
       const mean = sum / nb.length;
       const dv = f[c.id] - mean;
-      if (Math.abs(dv) > 0.6) {
+      if (Math.abs(dv) > 0.28) {
         let far = dv > 0 ? Infinity : -Infinity;
         for (const nid of nb) far = dv > 0 ? Math.min(far, f[nid]) : Math.max(far, f[nid]);
         const extreme = dv > 0 ? f[c.id] > far : f[c.id] < far;
-        if (extreme) next[c.id] = mean + Math.sign(dv) * 0.6;
+        if (extreme) next[c.id] = mean + Math.sign(dv) * 0.28;
       }
     }
     f.set(next);
   }
 
-  // 刻度：海平面 = 场的 landRatio 分位（占比精确）；扩散场线性映射（保模型形状）；
-  // 落差 = max−min 精确；平整率 = 向海平面幂弯。
+  // 刻度：海平面 = landRatio 分位（占比精确）；线性映射保算法形状；落差精确；平整率幂弯
   onProgress?.('刻度', 0.85);
   const gamma = 1 + 1.2 * Math.max(0, Math.min(1, shape.flatness));
   const H = Math.max(10, Math.min(127, shape.relief)) / 2;
   const p = Math.max(0.01, Math.min(0.95, shape.landRatio));
-  const sea = quantile(f, 1 - p); // 场内海平面
+  const sea = quantile(f, 1 - p);
   let dTop = 1e-9;
   let dBot = -1e-9;
   for (let i = 0; i < n; i++) {
@@ -222,7 +246,7 @@ export function buildTerrain(
     c.isOcean = isOcean(c);
   }
 
-  // 整数域去尖刺：峰顶零散点再收拢；随后仿射拉回实差（去尖刺会压缩极值）
+  // 整数域去尖刺 + 各侧仿射拉满（落差精确）
   onProgress?.('收尾', 0.95);
   for (let pass = 0; pass < 2; pass++) {
     for (const c of cells) {
@@ -247,7 +271,6 @@ export function buildTerrain(
     if (c.height < mn) mn = c.height;
     if (c.height > mx) mx = c.height;
   }
-  // 各侧独立拉满（保海平面符号）：陆到 +H、海到 −H → 落差 = 2H = relief 精确
   const kl = H / Math.max(1, mx);
   const ks = H / Math.max(1, -mn);
   for (const c of cells) {

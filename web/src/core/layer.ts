@@ -136,10 +136,12 @@ export function genConfigFromParams(
   if (typeof params.landRatio === 'number') { shape.landRatio = params.landRatio; hasShape = true; }
   if (typeof params.relief === 'number') { shape.relief = params.relief; hasShape = true; }
   if (typeof params.flatness === 'number') { shape.flatness = params.flatness; hasShape = true; }
-  if (typeof params.continentCount === 'number') { shape.continentCount = params.continentCount; hasShape = true; }
-  if (typeof params.polar === 'boolean') { shape.polar = params.polar; hasShape = true; }
-  if (typeof params.roughness === 'number') { shape.roughness = params.roughness; hasShape = true; }
+  if (typeof params.continentScale === 'number') { shape.continentScale = params.continentScale; hasShape = true; }
+  if (typeof params.coastBreak === 'number') { shape.coastBreak = params.coastBreak; hasShape = true; }
+  if (typeof params.mountain === 'number') { shape.mountain = params.mountain; hasShape = true; }
+  if (typeof params.detail === 'number') { shape.detail = params.detail; hasShape = true; }
   if (typeof params.seaRugged === 'number') { shape.seaRugged = params.seaRugged; hasShape = true; }
+  if (typeof params.polar === 'boolean') { shape.polar = params.polar; hasShape = true; }
   if (typeof params.erosion === 'number') { shape.erosion = params.erosion; hasShape = true; }
   if (hasShape) cfg.worldShape = shape;
   return cfg;

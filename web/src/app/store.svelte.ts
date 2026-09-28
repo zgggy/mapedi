@@ -552,10 +552,12 @@ export class EditorStore {
       landRatio: num('landRatio', DEFAULT_WORLD_SHAPE.landRatio),
       relief: num('relief', DEFAULT_WORLD_SHAPE.relief),
       flatness: num('flatness', DEFAULT_WORLD_SHAPE.flatness),
-      continentCount: num('continentCount', DEFAULT_WORLD_SHAPE.continentCount),
-      polar: bool('polar', DEFAULT_WORLD_SHAPE.polar),
-      roughness: num('roughness', DEFAULT_WORLD_SHAPE.roughness),
+      continentScale: num('continentScale', DEFAULT_WORLD_SHAPE.continentScale),
+      coastBreak: num('coastBreak', DEFAULT_WORLD_SHAPE.coastBreak),
+      mountain: num('mountain', DEFAULT_WORLD_SHAPE.mountain),
+      detail: num('detail', DEFAULT_WORLD_SHAPE.detail),
       seaRugged: num('seaRugged', DEFAULT_WORLD_SHAPE.seaRugged),
+      polar: bool('polar', DEFAULT_WORLD_SHAPE.polar),
       erosion: num('erosion', DEFAULT_WORLD_SHAPE.erosion),
     };
   }
@@ -572,7 +574,7 @@ export class EditorStore {
     };
     switch (name) {
       case '群岛':
-        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentCount: 10, roughness: 0.9 });
+        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentScale: 0.25, coastBreak: 0.85, mountain: 0.6, detail: 0.7 });
         set('country', { count: 12, fromLayerCount: 2, allowOcean: true });
         set('province', { count: 24 });
         break;
@@ -581,12 +583,12 @@ export class EditorStore {
         set('culture', { allowOcean: true });
         break;
       case '高原世界':
-        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentCount: 4, roughness: 0.6 });
+        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentScale: 0.75, coastBreak: 0.35, mountain: 0.55, detail: 0.35 });
         set('culture', { coreSelector: 'highElevation' });
         break;
       case '默认大陆':
       default:
-        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentCount: 5, polar: true });
+        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentScale: 0.5, coastBreak: 0.55, mountain: 0.7, detail: 0.5, polar: true });
         set('country', { count: 8, fromLayerCount: 3, allowOcean: false });
         set('province', { count: 15 });
         set('culture', { allowOcean: false });
