@@ -475,6 +475,9 @@ export class EditorStore {
     rebuildLandSeaRegions(world);
     world.astro = defaultStarSystem(seed, world.climate);
     this.replaceWorld(world);
+    // 生成后默认选中并显示高度层（产品默认：生成 → 直接看地形）
+    world.layers.find((l) => l.id === 'height')!.visible = true;
+    this.focusLayer = 'height';
     this.status = `${world.cells.length} 地块 · Worker`;
     this.scheduleAutosave();
     this.notify();
@@ -497,6 +500,9 @@ export class EditorStore {
     rebuildLandSeaRegions(world);
     if (seq !== this.generationSeq) return;
     this.replaceWorld(world);
+    // 生成后默认选中并显示高度层（产品默认：生成 → 直接看地形）
+    world.layers.find((l) => l.id === 'height')!.visible = true;
+    this.focusLayer = 'height';
     const ms = Math.round(performance.now() - t0);
     if (!quiet) this.status = `${world.cells.length} 地块 · ${ms}ms`;
     void CASCADE_LABELS;
@@ -520,6 +526,12 @@ export class EditorStore {
       enabled,
     );
     this.touchWorld();
+    if (layerId === 'height') {
+      // 高度重生成后默认显示并聚焦高度层（与整世界生成同规则）
+      const h = this.world?.layers.find((l) => l.id === 'height');
+      if (h) h.visible = true;
+      this.focusLayer = 'height';
+    }
     this.status = `已重新生成：${layerId}`;
   }
 

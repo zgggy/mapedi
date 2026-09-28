@@ -7,6 +7,7 @@
   import { editor } from './app/store.svelte';
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
+  import ViewPanel from './ui/shell/ViewPanel.svelte';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
   import LayerInfoPanel from './ui/shell/LayerInfoPanel.svelte';
@@ -33,17 +34,19 @@
   let bootError = $state('');
   let styleLayerId = $state<string | null>(null);
 
-  /** 五个同级面板：Dock 图标切换；黄框 = 打开 */
+  /** 同级面板：Dock 图标切换；黄框 = 打开 */
   let panels = $state({
     layers: true,
     workspace: false,
     layerInfo: false,
     style: false,
     elementInfo: false,
+    view: false,
   });
 
   const dockItems = $derived([
     { id: 'project', icon: '🗃', title: '项目', open: shell.projectOpen },
+    { id: 'view', icon: '🎛️', title: '视图', open: panels.view },
     { id: 'layers', icon: '📚', title: '图层', open: panels.layers },
     { id: 'workspace', icon: '🗂', title: '工作区', open: panels.workspace },
     { id: 'layerInfo', icon: 'ℹ', title: '图层信息', open: panels.layerInfo },
@@ -226,9 +229,6 @@
   <TopBar
     bind:open={shell.projectOpen}
     mapName={world?.meta ? `世界 ${world.meta.seed}` : '未命名世界'}
-    viewMode={shell.viewMode}
-    {styleId}
-    {reliefSmooth}
     generating={editor.generating}
     genProgress={editor.genProgress}
     genStep={editor.genStep}
@@ -237,29 +237,10 @@
     autosaveAt={editor.autosaveAt}
     shape={editor.worldShape}
     onShape={(k, v) => editor.setProfileParam('height', k, v)}
-    globeShowAxis={globeAxis}
-    globeShowEcliptic={globeEcliptic}
-    globeSpin={globeSpin}
-    globeFov={globeFov}
-    globeTilt={editor.climateDraft.axialTiltDeg}
-    globeRotHours={editor.climateDraft.rotationHours}
     onGenerate={(s, n) => {
       bootError = '';
       return editor.generate(s, n);
     }}
-    onSwitchView={switchView}
-    onStyle={(s) => (styleId = s)}
-    onRelief={(v) => (reliefSmooth = v)}
-    onGlobeShowAxis={(v) => (globeAxis = v)}
-    onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
-    onGlobeSpin={(v) => (globeSpin = v)}
-    onGlobeTilt={(v) => {
-      editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
-    }}
-    onGlobeRotHours={(v) => {
-      editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
-    }}
-    onGlobeFov={(v) => (globeFov = v)}
     onExport={(k) => {
       if (k === 'json') editor.exportProject?.();
       else if (k === 'png') {
@@ -275,6 +256,32 @@
       }
     }}
     onClearCache={() => editor.clearAutosave()}
+  />
+
+  <ViewPanel
+    bind:open={panels.view}
+    viewMode={shell.viewMode}
+    {styleId}
+    {reliefSmooth}
+    globeShowAxis={globeAxis}
+    globeShowEcliptic={globeEcliptic}
+    globeSpin={globeSpin}
+    globeTilt={editor.climateDraft.axialTiltDeg}
+    globeRotHours={editor.climateDraft.rotationHours}
+    globeFov={globeFov}
+    onSwitchView={switchView}
+    onStyle={(s) => (styleId = s)}
+    onRelief={(v) => (reliefSmooth = v)}
+    onGlobeShowAxis={(v) => (globeAxis = v)}
+    onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
+    onGlobeSpin={(v) => (globeSpin = v)}
+    onGlobeTilt={(v) => {
+      editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
+    }}
+    onGlobeRotHours={(v) => {
+      editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
+    }}
+    onGlobeFov={(v) => (globeFov = v)}
   />
 
   <LayersPanel

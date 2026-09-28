@@ -60,6 +60,7 @@
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
   let controls: OrbitControls;
+  let lensRoot: THREE.Group;
   let planetRoot: THREE.Group;
   let meshHolder: THREE.Group;
   let overlay: THREE.Group;
@@ -348,35 +349,48 @@
 
     overlay = new THREE.Group();
     scene.add(overlay);
+    // lensRoot 只承载「超半球压扁」镜头特效（对准相机的压扁变换），
+    // planetRoot 保倾角——两者解耦：调 FOV/倾角不再互相打乱
+    lensRoot = new THREE.Group();
+    scene.add(lensRoot);
     planetRoot = new THREE.Group();
-    scene.add(planetRoot);
+    lensRoot.add(planetRoot);
     meshHolder = new THREE.Group();
     planetRoot.add(meshHolder);
     contentGroup = new THREE.Group();
     meshHolder.add(contentGroup);
 
     /**
-     * 镜头（Shift+滚轮 / 顶栏「视野」滑块）：**只改 FOV + 沿视线压扁**，绝不改相机距离。
-     * 压扁 ellipsoid 才能在球外「看到超过半球」的地面（近 2/3）；
-     * 单靠 FOV 几何上仍只见 ≤50% 球面。
+     * 镜头（Shift+滚轮 / 顶栏「视野」滑块）：**只改 FOV**，绝不改相机距离与球体姿态。
+     * Shift+滚轮额外做「沿视线压扁」：压扁 ellipsoid 才能在球外「看到超过半球」的地面；
+     * 单靠 FOV 几何上仍只见 ≤50% 球面。压扁只作用于 lensRoot（planetRoot 倾角不动）。
      * 向上滚：FOV 变大、压扁加强 → 更多地面、内容向盘面中间收拢。
      * FOV 单源 = 父状态（fov prop / onFov 回写）。
      */
     let lensFov = Math.max(18, Math.min(150, fov));
     let lensFlatten = 1;
-    const applyLens = () => {
-      camera.fov = lensFov;
-      camera.updateProjectionMatrix();
-      if (!planetRoot) return;
+    const applyFlatten = () => {
+      if (!lensRoot) return;
+      if (lensFlatten >= 0.999) {
+        lensRoot.quaternion.identity();
+        lensRoot.scale.set(1, 1, 1);
+        return;
+      }
       const d = camera.position.clone().normalize();
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
-      planetRoot.quaternion.copy(q);
-      planetRoot.scale.set(1, 1, lensFlatten);
+      lensRoot.quaternion.copy(q);
+      lensRoot.scale.set(1, 1, lensFlatten);
+    };
+    const applyFovOnly = () => {
+      camera.fov = lensFov;
+      camera.updateProjectionMatrix();
     };
     applyFov = (v: number) => {
       lensFov = Math.max(18, Math.min(150, v));
-      applyLens();
+      applyFovOnly();
     };
+    applyFovOnly();
+    applyFlatten();
     renderer.domElement.addEventListener(
       'wheel',
       (e: WheelEvent) => {
@@ -386,12 +400,12 @@
         const up = e.deltaY < 0;
         lensFov = Math.max(18, Math.min(150, lensFov + (up ? 6 : -6)));
         lensFlatten = Math.max(0.5, Math.min(1, lensFlatten + (up ? -0.05 : 0.05)));
-        applyLens();
+        applyFovOnly();
+        applyFlatten();
         onFov?.(lensFov);
       },
       { passive: false, capture: true },
     );
-    applyLens();
 
     pickSphere = new THREE.Mesh(
       new THREE.SphereGeometry(0.995, 32, 16),
@@ -439,7 +453,7 @@
       }
       controls.update();
       // 压扁轴始终对准相机（轨道旋转时保持「超半球」观感）
-      if (lensFlatten < 0.999) applyLens();
+      if (lensFlatten < 0.999) applyFlatten();
       renderer.render(scene, camera);
     };
     loop();
