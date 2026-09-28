@@ -10,12 +10,12 @@ import {
   type BoundEdge,
 } from '../core/ring/build';
 import type { MidRing } from '../core/ring/displayRing';
-import type { Pt, LonLat } from '../render/space';
+import { frameRect, type Pt, type LonLat } from '../render/space';
+import { poleSideForRing, prepareDisplayRings } from '../core/ring/normalize';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
 import { landSeaKindOf } from '../core/layer/landSea';
 import { projectionWorldPeriod, type ProjectionId } from '../core/project/projections';
-import { polarCellIds } from '../core/voronoi';
 import {
   buildIncidentEdges,
   patchBoundaryBook,
@@ -29,7 +29,6 @@ export type Ring = MidRing;
 
 export type Entry = {
   rings: Ring[];
-  poles: { north: boolean; south: boolean };
   fullWorld: boolean;
   /** 奇偶填充需补「框矩形外环」才能覆盖成员（见 computeFrameFlip） */
   frameFlip: boolean;
@@ -107,10 +106,8 @@ export function patchPieceEntry(
     projectionWorldPeriod(projKey) ?? Math.PI * 2,
     entry.rings,
   );
-  const owners = polarCellIds(world.cells);
-  entry.poles = { north: b.set.has(owners.north), south: b.set.has(owners.south) };
   entry.fullWorld = world.cells.length > 0 && b.set.size === world.cells.length;
-  entry.frameFlip = computeFrameFlip(world, b.set, [...b.set], entry.rings, project);
+  entry.frameFlip = computeFrameFlip(world, b.set, [...b.set], entry.rings, project, projKey);
   entry.bbox = ringBBox(entry.rings);
   return true;
 }
@@ -172,12 +169,10 @@ export function getCellSetRingsCached(
   const rings = cellSetBoundaryRings(
     world, set, project, edges, projectionWorldPeriod(projKey) ?? Math.PI * 2,
   );
-  const owners = polarCellIds(world.cells);
   const entry: Entry = {
     rings,
-    poles: { north: set.has(owners.north), south: set.has(owners.south) },
     fullWorld: world.cells.length > 0 && set.size === world.cells.length,
-    frameFlip: computeFrameFlip(world, set, cellIds, rings, project),
+    frameFlip: computeFrameFlip(world, set, cellIds, rings, project, projKey),
     bbox: ringBBox(rings),
     // 增量载体：边集/成员集在建缓存时零成本播种；补丁路径就地维护
     book: {
@@ -207,10 +202,13 @@ function ringParity(rings: Ring[], x: number, y: number): boolean {
 }
 
 /**
- * 奇偶探针：环集的 evenodd 填充应「盖住成员、排除非成员」。
+ * 奇偶探针：**闭合后**的显示环 evenodd 填充应「盖住成员、排除非成员」。
  * 恰好「翻转奇偶（补框矩形外环）」才成立 → true：极区/贴框集合的外轮廓常缺失
  * （边界只含内环时 evenodd 填到补丁里，远海/深海因此对调），框外环一次翻转即正确。
  * 两种都不成立 → false（维持旧语义，不在未知拓扑上冒险）。
+ *
+ * 必须探**闭合环**（与绘制同一条 closeRingForCylindrical 补边），不能探裸环：
+ * 裸环不含绕行环的补边奇偶，同侧/异侧补边会给出相反结论（「圈」/「带」两案）。
  */
 function computeFrameFlip(
   world: World,
@@ -218,9 +216,18 @@ function computeFrameFlip(
   cellIds: CellId[],
   rings: Ring[],
   project: (ll: { lon: number; lat: number }) => Pt,
+  projKey: ProjectionId,
 ): boolean {
   const n = world.cells.length;
   if (!n) return false;
+  const frameY = {
+    ...frameRect(project),
+    cylindrical: projectionWorldPeriod(projKey) !== null,
+  };
+  const closed: Ring[] = [];
+  for (const r of rings) {
+    for (const d of prepareDisplayRings(r, frameY, poleSideForRing(r))) closed.push(d);
+  }
   let okPlain = true;
   let okFlip = true;
   const step = Math.max(1, (cellIds.length / 4) | 0);
@@ -228,7 +235,7 @@ function computeFrameFlip(
     const c = world.cells[cellIds[i]];
     if (!c) continue;
     const p = project(c.center);
-    const par = ringParity(rings, p.x, p.y);
+    const par = ringParity(closed, p.x, p.y);
     if (!par) okPlain = false;
     else okFlip = false;
     if (!okPlain && !okFlip) return false;
@@ -239,7 +246,7 @@ function computeFrameFlip(
     for (const c of world.cells) {
       if (set.has(c.id)) continue;
       const p = project(c.center);
-      const par = ringParity(rings, p.x, p.y);
+      const par = ringParity(closed, p.x, p.y);
       if (par) okPlain = false;
       else okFlip = false;
       if (!okPlain && !okFlip) return false;

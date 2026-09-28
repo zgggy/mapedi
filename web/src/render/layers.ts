@@ -202,10 +202,10 @@ export const cellsLayer: RenderLayer = {
   },
 };
 
-/** 外框 y（±85° 投影）—— fill/stroke 共用 */
+/** 外框 y（±85° 投影）—— fill/stroke 共用；圆柱判定与世界副本周期同源（period≠null） */
 function frameYOf(env: RenderEnv) {
   const fr = getFrameRect(env);
-  return { ...fr, cylindrical: env.proj === 'mercator' || env.proj === 'behrmann' || env.proj === 'globe' };
+  return { ...fr, cylindrical: projectionWorldPeriod(env.proj) !== null };
 }
 
 /** CSS 颜色 → [r,g,b,a]（0..1）。解析不了返回 null（非纯色解析失败即拒）。 */
@@ -345,7 +345,7 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       continue;
     }
     if (!rings.length) continue;
-    const prepared = preparePieces(rings, fr, entry.poles, entry.frameFlip);
+    const prepared = preparePieces(rings, fr, entry.frameFlip);
     if (!prepared.length) continue;
 
     const needFill = fillOn && !seenFill.has(dp.key);
@@ -383,10 +383,9 @@ const prepCache = new WeakMap<object, Map<string, DisplayRing[]>>();
 function preparePieces(
   rings: MidRing[],
   frameY: ReturnType<typeof frameYOf>,
-  poles: { north: boolean; south: boolean },
   frameFlip = false,
 ): DisplayRing[] {
-  const fk = `${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical},${poles.north},${poles.south}|${frameFlip ? 1 : 0}`;
+  const fk = `${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical}|${frameFlip ? 1 : 0}`;
   let byF = prepCache.get(rings as unknown as object);
   if (!byF) {
     byF = new Map();
@@ -396,13 +395,15 @@ function preparePieces(
   if (cached) return cached;
   const out: DisplayRing[] = [];
   for (const r of rings) {
-    for (const piece of prepareDisplayRings(r, frameY, poleSideForRing(r, poles))) {
+    for (const piece of prepareDisplayRings(r, frameY, poleSideForRing(r))) {
       if (piece.pts.length >= 2) out.push(piece);
     }
   }
   // 框矩形外环：evenodd 翻转（奇偶探针判定，见 computeFrameFlip）——
   // 集合贴框/含极时外轮廓常缺失，补框环一次翻转即「盖成员、排非成员」。
-  // 矩形外扩余量：圆角/描边发生在可见框外，显示被 clip 裁掉。
+  // pts = 四角 + virtualFrom = 0：全段走 lineTo 折线——这是**渲染临时几何**，
+  // 不适用元素边界的「过边中点 Hermite」（Hermite 会把矩形啃成内接圆角，四角缺色）；
+  // virtualFrom 同时把它排除出描边（框边只用于填充）。
   if (frameFlip) {
     const m = 0.08;
     const x0 = frameY.minX - m;
@@ -413,17 +414,18 @@ function preparePieces(
     const ym = (y0 + y1) / 2;
     out.push({
       pts: [
-        { x: x0, y: ym },
-        { x: xm, y: y0 },
-        { x: x1, y: ym },
-        { x: xm, y: y1 },
-      ],
-      verts: [
         { x: x0, y: y0 },
         { x: x1, y: y0 },
         { x: x1, y: y1 },
         { x: x0, y: y1 },
       ],
+      verts: [
+        { x: xm, y: y0 },
+        { x: x1, y: ym },
+        { x: xm, y: y1 },
+        { x: x0, y: ym },
+      ],
+      virtualFrom: 0,
       closed: true,
     });
   }

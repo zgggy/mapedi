@@ -286,8 +286,7 @@
     }}
     onToggleVisible={(id) => editor.toggleLayerVisible(id)}
     onDrawLayer={(id) => {
-      // 行点击 = 持久切换显隐（与眼睛同一开关）+ 聚焦 + 开工作区
-      editor.toggleLayerVisible(id);
+      // 行点击 = 聚焦 + 开工作区；显隐只由眼睛开关（用户定）
       editor.focusLayerForDraw(id);
       panels.workspace = true;
     }}

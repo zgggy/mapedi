@@ -11,18 +11,14 @@ import {
   type MidRing,
 } from './displayRing';
 
-/** 极点归属只用于选择绕行环的虚拟框边，真实边保持球面原样。 */
-export function poleSideForRing(
-  ring: MidRing,
-  poles: { north: boolean; south: boolean },
-): 'north' | 'south' {
-  if (poles.north && !poles.south) return 'north';
-  if (poles.south && !poles.north) return 'south';
-  if (poles.north && poles.south) {
-    const sumY = ring.pts.reduce((sum, p) => sum + p.y, 0);
-    return sumY >= 0 ? 'north' : 'south';
-  }
-  return 'south';
+/**
+ * 绕行环的虚拟框边补在哪一侧：**由环自身贴哪侧极区决定**（sumY 符号），
+ * 与集合是否含极点无关——同一绕行环在含极集合里是「集内极冠」、在不含极集合里
+ * 是「集外极冠」，但补边都必须走环自己那一侧框边，否则补边穿越全图（「圈」bug）。
+ */
+export function poleSideForRing(ring: MidRing): 'north' | 'south' {
+  const sumY = ring.pts.reduce((sum, p) => sum + p.y, 0);
+  return sumY >= 0 ? 'north' : 'south';
 }
 
 /**
