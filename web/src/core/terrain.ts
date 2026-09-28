@@ -62,81 +62,72 @@ function unitOf(lonDeg: number, latDeg: number): V3 {
 }
 
 /**
- * 扩散点：起始高度（峰顶值）/ 扩散半径（角距）/ 扩散浓度（越高衰减越慢）。
- */
-type Seed = { v: V3; peak: number; radius: number; conc: number };
-
-function buildSeeds(seed: number, shape: WorldShape, rng: () => number): Seed[] {
-  const seeds: Seed[] = [];
-  // 穿极大陆：沿随机大圆的核链（随机撒点 → 自然穿过两极与日界线）
-  if (shape.polar) {
-    const lon0 = rng() * 360 - 180;
-    for (let lat = -90; lat <= 90; lat += 17) {
-      seeds.push({
-        v: unitOf(lon0 + rng() * 12 - 6, lat),
-        peak: 14 + rng() * 50,
-        radius: 0.3 + rng() * 0.22,
-        conc: 0.3 + rng() * 0.6,
-      });
-    }
-  }
-  const k = Math.max(0, Math.round(shape.continentCount));
-  for (let i = 0; i < k; i++) {
-    const u = rng() * 2 - 1;
-    const lon = rng() * 360 - 180;
-    const lat = (Math.asin(Math.max(-1, Math.min(1, u))) * 180) / Math.PI;
-    seeds.push({
-      v: unitOf(lon, lat),
-      peak: 10 + rng() * 54,
-      radius: 0.26 + rng() * 0.6,
-      conc: 0.2 + rng() * 0.75,
-    });
-  }
-  // 海山/海盆（峰高低于海平面的撒点）：让深海底不平板
-  const m = 8 + Math.round(rng() * 10);
-  for (let i = 0; i < m; i++) {
-    const u = rng() * 2 - 1;
-    const lon = rng() * 360 - 180;
-    const lat = (Math.asin(Math.max(-1, Math.min(1, u))) * 180) / Math.PI;
-    seeds.push({
-      v: unitOf(lon, lat),
-      peak: -34 + rng() * 32,
-      radius: 0.14 + rng() * 0.3,
-      conc: 0.15 + rng() * 0.6,
-    });
-  }
-  return seeds;
-}
-
-/**
- * 扩散场：f(p) = Σ (峰高+63)·exp(−λ·(角距/半径)²)·撕边；λ 由浓度定（浓度高 → 衰减慢）。
- * 底 = 0（对应高度 −63）；叠加即大陆合并。
+ * 高度场：**球面 3D 域扭曲噪声（大陆度）+ 宽幅穿极脊 + 大陆核 + 细节/海底**。
+ * - 噪声在单位球向量上求值（无缝、不拉伸）；域扭曲用**向量噪声**撕破圆形海岸；
+ * - 穿极大陆 = 沿随机大圆的**宽脊**（宽 30°–50°，噪声撕边）——宽大陆穿极，
+ *   不是细长条；天然穿过两极与日界线；
+ * - 大陆核 = 宽高斯包络 × 噪声；海底起伏防整片同高。
  */
 function heightField(cells: Cell[], seed: number, shape: WorldShape, rng: () => number): Float64Array {
   const n = cells.length;
   const f = new Float64Array(n);
-  const seeds = buildSeeds(seed, shape, rng);
   const rough = 0.5 + 0.5 * Math.max(0, Math.min(1, shape.roughness));
   const rugged = 0.25 + 0.75 * Math.max(0, Math.min(1, shape.seaRugged));
+
+  // 穿极宽脊：随机经线大圆（过两极）+ 宽度
+  const lon0 = rng() * 360 - 180;
+  const spineN = unitOf(lon0 + 90, 0); // 大圆所在平面的法向
+  const spineW = 0.52 + rng() * 0.28;
+  const spineAmp = 0.5 + rng() * 0.3;
+
+  // 大陆核（宽包络，随机分布）
+  const k = Math.max(0, Math.round(shape.continentCount));
+  const cores: { v: V3; r: number; amp: number }[] = [];
+  for (let i = 0; i < k; i++) {
+    const u = rng() * 2 - 1;
+    const lon = rng() * 360 - 180;
+    const lat = (Math.asin(Math.max(-1, Math.min(1, u))) * 180) / Math.PI;
+    cores.push({ v: unitOf(lon, lat), r: 0.5 + rng() * 0.55, amp: 0.4 + rng() * 0.5 });
+  }
 
   for (let i = 0; i < n; i++) {
     const c = cells[i];
     const p = unitOf(c.center.lon, c.center.lat);
-    let v = 0;
-    for (const s of seeds) {
-      const dot = Math.max(-1, Math.min(1, p.x * s.v.x + p.y * s.v.y + p.z * s.v.z));
-      const d = Math.acos(dot); // 大圆角距：跨日界线/极点连续
-      const t0 = d / s.radius;
-      if (t0 > 3) continue;
-      // 域扭曲只扰动角距（方向对称 → 无拉伸/旋绕感），撕破圆形轮廓
-      const w = (fbm3(p.x * 2.2 + 3.1, p.y * 2.2 + 5.7, p.z * 2.2 + 1.3, seed + 31, 3) - 0.5) * 0.5;
-      const t = t0 * (1 + w * 0.22);
-      const lam = 0.55 + 3.3 * (1 - Math.max(0, Math.min(1, s.conc))); // 浓度高 → 下降慢
-      v += (s.peak + 63) * Math.exp(-lam * t * t);
+    // 域扭曲（向量噪声）：撕圆海岸，方向对称 → 无拉伸/旋绕
+    const wx = fbm3(p.x * 1.9 + 3.1, p.y * 1.9 + 5.7, p.z * 1.9 + 1.3, seed + 11, 3) - 0.5;
+    const wy = fbm3(p.x * 1.9 + 8.2, p.y * 1.9 + 2.4, p.z * 1.9 + 6.9, seed + 23, 3) - 0.5;
+    const wz = fbm3(p.x * 1.9 + 1.7, p.y * 1.9 + 9.1, p.z * 1.9 + 4.2, seed + 37, 3) - 0.5;
+    let qx = p.x + wx * 0.34, qy = p.y + wy * 0.34, qz = p.z + wz * 0.34;
+    const ql = Math.hypot(qx, qy, qz) || 1;
+    qx /= ql; qy /= ql; qz /= ql;
+
+    // 大陆度：低/中频 fbm（撕边后的球面坐标）
+    let v = (fbm3(qx * 2.3, qy * 2.3, qz * 2.3, seed + 101, 5) - 0.44) * 1.7;
+
+    if (shape.polar) {
+      // 穿极宽脊：到大圆的角距（跨两极/日界线连续）
+      const d = Math.abs(p.x * spineN.x + p.y * spineN.y + p.z * spineN.z);
+      const ang = Math.asin(Math.max(0, Math.min(1, d)));
+      const t = ang / spineW;
+      if (t < 2.2) {
+        const warp = 1 + (fbm3(qx * 2.8, qy * 2.8, qz * 2.8, seed + 201, 3) - 0.5) * 0.55;
+        v += Math.exp(-t * t * warp) * spineAmp * (0.65 + 0.7 * fbm3(qx * 3.1, qy * 3.1, qz * 3.1, seed + 211, 3));
+      }
+      // 贴极保障：极区小幅抬升（产品默认「至少一端贴极」）
+      const pole = Math.max(0, Math.abs(p.y) - 0.93) / 0.07;
+      if (pole > 0) v += pole * pole * 0.32;
     }
-    // 细节（小幅度，无弧带）+ 海底起伏（防整片同高）
-    const detail = (fbm3(p.x * 13, p.y * 13, p.z * 13, seed + 501, 4) - 0.5);
-    v += detail * (1.2 + 3.2 * rough) * (0.6 + 0.6 * rugged);
+    for (let ci = 0; ci < cores.length; ci++) {
+      const s = cores[ci];
+      const dot = Math.max(-1, Math.min(1, p.x * s.v.x + p.y * s.v.y + p.z * s.v.z));
+      const t = Math.acos(dot) / s.r;
+      if (t > 2.2) continue;
+      v += Math.exp(-t * t * 1.1) * s.amp * (0.6 + 0.8 * fbm3(qx * 3.2 + ci * 7, qy * 3.2, qz * 3.2, seed + 301, 3));
+    }
+
+    // 细节 + 海底起伏（防整片同高；无弧带噪声）
+    const detail = fbm3(p.x * 12, p.y * 12, p.z * 12, seed + 501, 4) - 0.5;
+    v += detail * (0.5 + 1.1 * rough) * (0.7 + 0.6 * rugged);
     f[i] = v;
   }
   return f;
@@ -231,7 +222,7 @@ export function buildTerrain(
     c.isOcean = isOcean(c);
   }
 
-  // 整数域去尖刺：峰顶零散点再收拢
+  // 整数域去尖刺：峰顶零散点再收拢；随后仿射拉回实差（去尖刺会压缩极值）
   onProgress?.('收尾', 0.95);
   for (let pass = 0; pass < 2; pass++) {
     for (const c of cells) {
@@ -249,6 +240,21 @@ export function buildTerrain(
       c.height = Math.max(-63, Math.min(64, Math.round(mean + Math.sign(dv) * 6)));
       c.isOcean = isOcean(c);
     }
+  }
+  let mn = 999;
+  let mx = -999;
+  for (const c of cells) {
+    if (c.height < mn) mn = c.height;
+    if (c.height > mx) mx = c.height;
+  }
+  // 各侧独立拉满（保海平面符号）：陆到 +H、海到 −H → 落差 = 2H = relief 精确
+  const kl = H / Math.max(1, mx);
+  const ks = H / Math.max(1, -mn);
+  for (const c of cells) {
+    const v = c.height;
+    c.height = Math.max(-63, Math.min(64, Math.round(v >= 0 ? v * kl : v * ks)));
+    if (c.height === 0) c.height = v >= 0 ? 1 : -1;
+    c.isOcean = isOcean(c);
   }
   onProgress?.('完成', 1);
 }

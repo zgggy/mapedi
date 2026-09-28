@@ -12,13 +12,15 @@ import {
 } from './displayRing';
 
 /**
- * 绕行环的虚拟框边补在哪一侧：**由环自身贴哪侧极区决定**（sumY 符号），
- * 与集合是否含极点无关——同一绕行环在含极集合里是「集内极冠」、在不含极集合里
- * 是「集外极冠」，但补边都必须走环自己那一侧框边，否则补边穿越全图（「圈」bug）。
+ * 绕行环补边侧 = **统一南侧**（不变量，勿逐环选择）。
+ *
+ * 原理：所有绕行环同侧闭合时，「成员 ≡ XOR(闭合环) ⊕ flip」全局成立——
+ * 穿越任何一条环，奇偶与成员同步翻转，差值是常数（flip），由奇偶探针在闭合环上定。
+ * 逐环选侧（如按环均值 y）会破坏可加性：区间件（带状+散布）被整体翻转成「补色」
+ * ——这正是「浅滩地块没涂色、非浅滩反被涂浅滩色」的根因（球面逐 cell 着色无此问题）。
  */
-export function poleSideForRing(ring: MidRing): 'north' | 'south' {
-  const sumY = ring.pts.reduce((sum, p) => sum + p.y, 0);
-  return sumY >= 0 ? 'north' : 'south';
+export function poleSideForRing(_ring: MidRing): 'north' | 'south' {
+  return 'south';
 }
 
 /**

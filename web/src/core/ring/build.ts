@@ -291,7 +291,28 @@ export function edgeListToRings(
     if (!Number.isFinite(midpoint.x) || !Number.isFinite(midpoint.y)) continue;
     projected.push({ p0, p1: bu, midpoint, k0: lonlatKey(pa), k1: lonlatKey(pb) });
   }
-  return chainEdgesToMidpointRings(projected, period);
+  const rings = chainEdgesToMidpointRings(projected, period);
+  // **同件各环必须落在同一周期窗**：逐链 unwrap 会把不同链放到不同副本（相差整数周期），
+  // 实例化绘制时跨副本 evenodd 相互抵消 → 整体「内外颠倒」（区间件尤甚）。
+  // 以首环中心为基准把各环心 unwrap 对齐（只整体平移整数周期，件的周期语义不变）。
+  if (rings.length > 1) {
+    const centerX = (r: MidRing): number => {
+      let mn = Infinity, mx = -Infinity;
+      for (const p of r.pts) { if (p.x < mn) mn = p.x; if (p.x > mx) mx = p.x; }
+      return (mn + mx) / 2;
+    };
+    const ref = centerX(rings[0]);
+    for (let i = 1; i < rings.length; i++) {
+      const r = rings[i];
+      const cx = centerX(r);
+      const k = Math.round((cx - ref) / period);
+      if (k === 0) continue;
+      const dx = -k * period;
+      for (const p of r.pts) p.x += dx;
+      for (const v of r.verts ?? []) v.x += dx;
+    }
+  }
+  return rings;
 }
 
 /** 唯一求环入口：cell 集 → 中点环 */
