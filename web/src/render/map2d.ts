@@ -9,7 +9,7 @@ import { styleById } from '../core/styles';
 import { getProjCache } from './projCache';
 import { getRegionIndex } from '../core/index/regionIndex';
 import { buildPieceParams, defaultPipeline, type RenderEnv, type RenderLayer } from './layers';
-import { worldCopyDxs } from './space';
+import { contentOffsetAt, worldCopyKs } from './space';
 import { composeShownPieces } from '../core/displayCompose';
 import { ringPath2D } from '../core/ring/path2d';
 
@@ -54,25 +54,18 @@ export function buildRenderEnv(
   const proj = opts?.projection ?? 'mercator';
   const pp = opts?.projParams ?? defaultProjParams();
   const contentOffsetX = opts?.contentOffsetX ?? 0;
-  const period = projectionWorldPeriod(proj);
   const pcache = getProjCache(world, proj, pp);
-  const rawDxs = opts?.singleWorldCopy || period === null
-    ? [contentOffsetX]
-    : worldCopyDxs(contentOffsetX, cam, w, period, pcache.worldBBox);
+  // 副本 = 整数 k（worldCopyKs 已按 scale(y) 极值判可见）；平移 = Δλ
+  const copyKs = opts?.singleWorldCopy
+    ? [0]
+    : worldCopyKs(contentOffsetX, cam, w, proj, pcache.worldBBox);
   const padX = 4 / Math.max(cam.scale, 1e-6);
   const padY = 4 / Math.max(cam.scale, 1e-6);
   const bb = pcache.worldBBox;
   const halfW = w / 2 / Math.max(cam.scale, 1e-6);
   const halfH = h / 2 / Math.max(cam.scale, 1e-6);
-  let dxs = rawDxs.filter((dx) => {
-    const viewL = cam.x - dx - halfW - padX;
-    const viewR = cam.x - dx + halfW + padX;
-    const viewT = cam.y + halfH + padY;
-    const viewB = cam.y - halfH - padY;
-    return !(bb.maxX < viewL || bb.minX > viewR || bb.maxY < viewB || bb.minY > viewT);
-  });
-  if (!dxs.length) dxs = [rawDxs.length ? rawDxs[0] : contentOffsetX];
-  return {
+  void padX; void padY; void bb; void halfW; void halfH;
+  const env: RenderEnv = {
     ctx,
     world,
     cam,
@@ -92,7 +85,7 @@ export function buildRenderEnv(
     showLabels: opts?.showLabels,
     contentOffsetX,
     drawDx: contentOffsetX,
-    worldDxs: dxs,
+    copyKs,
     highlightRegionId: opts?.highlightRegionId,
     hidePathId: opts?.hidePathId,
     displayPieces: opts?.displayPieces,
@@ -104,6 +97,9 @@ export function buildRenderEnv(
     borderStyle: opts?.borderStyle,
     isDragging: opts?.isDragging,
   };
+  // 点级内容位移：投影域 = scale(y)·λ偏移（圆柱族退化常数；非回绕 = λ 即投影域）
+  env.offsetAt = (y: number) => contentOffsetAt(proj, y, env.drawDx ?? contentOffsetX);
+  return env;
 }
 
 /**
@@ -211,32 +207,11 @@ export function drawWorld(
   const proj = opts?.projection ?? 'mercator';
   const pp = opts?.projParams ?? defaultProjParams();
   const contentOffsetX = opts?.contentOffsetX ?? 0;
-  const period = projectionWorldPeriod(proj);
   const pcache = getProjCache(world, proj, pp);
-  // Non-cylindrical projections have no horizontal world copies.
-  const rawDxs = opts?.singleWorldCopy || period === null
-    ? [contentOffsetX]
-    : worldCopyDxs(
-        contentOffsetX,
-        cam,
-        w,
-        period,
-        // 全图包围盒收紧副本（小地图/zoom in 时少画空 pass）
-        pcache.worldBBox,
-      );
-  const padX = 4 / Math.max(cam.scale, 1e-6);
-  const padY = 4 / Math.max(cam.scale, 1e-6);
-  const bb = pcache.worldBBox;
-  const halfW = w / 2 / Math.max(cam.scale, 1e-6);
-  const halfH = h / 2 / Math.max(cam.scale, 1e-6);
-  let dxs = rawDxs.filter((dx) => {
-    const viewL = cam.x - dx - halfW - padX;
-    const viewR = cam.x - dx + halfW + padX;
-    const viewT = cam.y + halfH + padY;
-    const viewB = cam.y - halfH - padY;
-    return !(bb.maxX < viewL || bb.minX > viewR || bb.maxY < viewB || bb.minY > viewT);
-  });
-  if (!dxs.length) dxs = [rawDxs.length ? rawDxs[0] : contentOffsetX];
+  // 副本 = 整数 k（scale(y) 判可见）；rest 层按 λ 语义逐 pass 取 drawDx
+  const copyKs = opts?.singleWorldCopy
+    ? [0]
+    : worldCopyKs(contentOffsetX, cam, w, proj, pcache.worldBBox);
   const env = buildRenderEnv(ctx, world, cam, hoverId, dpr, opts);
 
   const pipeline = opts?.pipeline ?? defaultPipeline;
@@ -258,8 +233,9 @@ export function drawWorld(
       layer.draw(env);
       continue;
     }
-    for (const dx of dxs) {
-      env.drawDx = dx;
+    for (const k of copyKs) {
+      // drawDx = λ 总偏移（Δλ + k·2π）；投影域位移由 offsetAt(y) 点级派生
+      env.drawDx = contentOffsetX + k * Math.PI * 2;
       layer.draw(env);
     }
   }

@@ -12,7 +12,7 @@ import { getCellSetRingsCached, invalidateBorderCache, getContinentCentersCached
 import { project, defaultProjParams } from '../src/core/project/projections';
 import { generatePolitical } from '../src/core/political';
 import { getProjCache } from '../src/render/projCache';
-import { worldCopyDxs } from '../src/render/space';
+import { worldCopyKs } from '../src/render/space';
 
 const pp = defaultProjParams();
 const proj = (ll: { lon: number; lat: number }) => project(ll, 'mercator', pp);
@@ -70,7 +70,7 @@ describe('border edge index + proj worldBBox', () => {
     expect(Number.isFinite(pc.worldBBox.minX)).toBe(true);
     expect(pc.worldBBox.maxX).toBeGreaterThan(pc.worldBBox.minX);
     const cam = { x: 0, y: 0, scale: 400 };
-    const dxs = worldCopyDxs(0, cam, 800, undefined, pc.worldBBox);
+    const dxs = worldCopyKs(0, cam, 800, 'mercator', pc.worldBBox);
     expect(dxs.length).toBeGreaterThan(0);
   });
 

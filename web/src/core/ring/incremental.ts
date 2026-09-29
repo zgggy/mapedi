@@ -16,7 +16,7 @@ import type { LonLat } from '../../render/space';
 import type { Pt } from '../../render/space';
 import type { BoundEdge } from './build';
 import type { MidRing } from './displayRing';
-import { edgeListToRings, orientMemberLeft } from './build';
+import { edgeListToRings, orientMemberLeft, type PeriodAt } from './build';
 
 /** cell → 关联边（含 pair 表里的伪边/极区补边）；世界拓扑变化时重建 */
 export type IncidentEdges = Map<CellId, BoundEdge[]>;
@@ -125,7 +125,7 @@ export function ringsFromBook(
   book: BoundaryBook,
   world: World,
   project: (ll: LonLat) => Pt,
-  period: number,
+  period: PeriodAt,
   prev?: MidRing[],
 ): MidRing[] {
   const rings = edgeListToRings([...book.edges.values()], project, period);

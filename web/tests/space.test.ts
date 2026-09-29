@@ -10,7 +10,7 @@ import {
   unwrapSegments,
   unwrapXAgainst,
   vertexKey,
-  worldCopyDxs,
+  worldCopyKs,
   worldToScreenX,
   wrapLon,
   wrapPeriod,
@@ -59,12 +59,15 @@ describe('space wrap/unwrap', () => {
   });
 });
 
-describe('world copies compose with contentOffset', () => {
+describe('world copies compose with contentOffset（k 序号语义）', () => {
   const cam = { x: 0, y: 0, scale: 100 };
   const viewW = 800;
+  // 副本 = 整数 k；投影域位移 = scale(y)·(Δλ + k·2π)（圆柱族 scale=1 → 退化旧 dx 语义）
+  const dxsOf = (pan: number, c: { x: number; y: number; scale: number }) =>
+    worldCopyKs(pan, c, viewW, 'mercator').map((k) => pan + k * WORLD_PERIOD);
 
   it('includes primary offset and ±period copies near origin', () => {
-    const dxs = worldCopyDxs(0, cam, viewW);
+    const dxs = dxsOf(0, cam);
     expect(dxs.some((d) => Math.abs(d) < 1e-9)).toBe(true);
     expect(dxs.some((d) => Math.abs(d - WORLD_PERIOD) < 1e-9)).toBe(true);
     expect(dxs.some((d) => Math.abs(d + WORLD_PERIOD) < 1e-9)).toBe(true);
@@ -72,7 +75,7 @@ describe('world copies compose with contentOffset', () => {
 
   it('composes contentOffset instead of replacing it', () => {
     const off = 0.5;
-    const dxs = worldCopyDxs(off, cam, viewW);
+    const dxs = dxsOf(off, cam);
     expect(dxs.some((d) => Math.abs(d - off) < 1e-9)).toBe(true);
     expect(dxs.some((d) => Math.abs(d - (off + WORLD_PERIOD)) < 1e-9)).toBe(true);
     expect(dxs.some((d) => Math.abs(d - (off - WORLD_PERIOD)) < 1e-9)).toBe(true);
@@ -81,13 +84,21 @@ describe('world copies compose with contentOffset', () => {
   it('tracks camera far from origin without wrapping', () => {
     // 中键拖动后 cam.x 可任意大：副本应落在相机附近，而不是仍钉在 0 附近
     const farCam = { x: 20, y: 0, scale: 100 };
-    const dxs = worldCopyDxs(0, farCam, viewW);
-    const near = dxs.some((d) => Math.abs(d + 20) < WORLD_PERIOD);
-    // 存在某个副本使内容 0 出现在视口附近：|0+dx-cam.x| < halfW+period
+    const dxs = dxsOf(0, farCam);
     const halfW = viewW / 2 / farCam.scale;
+    // 存在某个副本使内容 0 出现在视口附近：|0+dx-cam.x| < halfW+period
     const visible = dxs.some((d) => Math.abs(d - farCam.x) < halfW + WORLD_PERIOD);
+    const near = dxs.some((d) => Math.abs(d - 20) < WORLD_PERIOD);
     expect(visible).toBe(true);
     expect(near || visible).toBe(true);
+  });
+
+  it('罗宾森（scale(y) 随纬度变）也能给出可见副本 k', () => {
+    const c = { x: 0, y: 0, scale: 100 };
+    const ks = worldCopyKs(0, c, viewW, 'robinson');
+    expect(ks.length).toBeGreaterThan(0);
+    expect(ks).toContain(0);
+    expect(worldCopyKs(0, c, viewW, 'aeqd')).toEqual([0]); // 非回绕单副本
   });
 
   it('screen inverse uses the same drawDx', () => {

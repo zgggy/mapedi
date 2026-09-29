@@ -11,7 +11,13 @@
  * - OpenLayers：数据 CRS 不动，渲染时由 view/extent 决定显示范围与 wrap。
  */
 
-import { projectionPeriodAt, projectionWraps } from '../core/project/projections';
+import {
+  projectionFrameLat,
+  projectionPeriodAt,
+  projectionWraps,
+  projectionXScale,
+  type ProjectionId,
+} from '../core/project/projections';
 
 export type Pt = { x: number; y: number };
 export type LonLat = { lon: number; lat: number };
@@ -76,8 +82,12 @@ export interface FrameRect {
 }
 
 /**
- * 地图外框：固定在投影空间 ±π / ±lat，**不随 contentOffset 移动**。
- * 「内容是否显示在地图上」只由这里 + ctx.clip 决定。
+ * 地图外框 bbox：固定在投影空间，**不随 contentOffset 移动**。
+ * 「内容是否显示在地图上」只由这里 + 裁剪（矩形 scissor / 轮廓 stencil）决定。
+ *
+ * 水平半宽取 **赤道与四角的较大者**：圆柱族 λ=±180 的 x 与纬度无关（两者同值，
+ * 行为不变）；两极内收的伪圆柱（罗宾森）赤道最宽——旧纯四角法取到的是 ±lat 处
+ * 的窄角，框比地图窄，赤道两侧大片内容被 scissor 裁掉。
  */
 export function frameRect(
   project: (ll: LonLat) => Pt,
@@ -87,17 +97,14 @@ export function frameRect(
   const b = project({ lon: 180, lat });
   const c = project({ lon: 180, lat: -lat });
   const d = project({ lon: -180, lat: -lat });
+  const ex = Math.max(Math.abs(a.x), Math.abs(b.x), Math.abs(c.x), Math.abs(d.x),
+    Math.abs(project({ lon: 180, lat: 0 }).x));
   return {
-    minX: Math.min(a.x, b.x, c.x, d.x),
-    maxX: Math.max(a.x, b.x, c.x, d.x),
+    minX: -ex,
+    maxX: ex,
     minY: Math.min(a.y, b.y, c.y, d.y),
     maxY: Math.max(a.y, b.y, c.y, d.y),
   };
-}
-
-/** 罗宾森框到 ±90（极点收成半宽线，透镜完整；用户拍板）。其余投影维持 ±85。 */
-export function projectionFrameLat(proj: string): number {
-  return proj === 'robinson' ? 90 : FRAME_LAT;
 }
 
 /**
@@ -109,10 +116,10 @@ export function projectionFrameLat(proj: string): number {
  */
 export function frameYEnv(
   project: (ll: LonLat) => Pt,
-  proj: string,
+  proj: ProjectionId,
 ): {
   minY: number; maxY: number; minX: number; maxX: number;
-  cylindrical: boolean; periodAt: (y: number) => number;
+  cylindrical: boolean; periodAt: (y: number) => number; scaleAt: (y: number) => number;
 } {
   const lat = projectionFrameLat(proj);
   const fr = frameRect(project, lat);
@@ -121,6 +128,7 @@ export function frameYEnv(
     ...fr,
     cylindrical: projectionWraps(proj),
     periodAt: (y: number) => projectionPeriodAt(proj, y) ?? fallback(),
+    scaleAt: (y: number) => projectionXScale(proj, y) ?? 1,
   };
 }
 
@@ -138,34 +146,84 @@ export interface CameraLike {
  * 相机/contentOffset 可以不 wrap（拖动中 wrap 会瞬移），因此 k 不固定为 ±1。
  * contentL/R：内容在投影空间的大致包围（默认 ±period；可用 projCache.worldBBox 收紧）。
  */
-export function worldCopyDxs(
-  contentOffsetX: number,
+/**
+ * 内容在 y 处的投影域位移 = scale(y)·λ偏移（`x = scale(y)·λ` 的平移像）。
+ * 圆柱族 scale 常数 → 退化为刚性平移（= 旧行为）；非回绕投影 λ偏移即投影域位移。
+ */
+export function contentOffsetAt(proj: ProjectionId, y: number, lambdaOff: number): number {
+  const s = projectionXScale(proj, y);
+  return s === null ? lambdaOff : s * lambdaOff;
+}
+
+/**
+ * 世界副本 = **整数序号 k**（单一语义；投影域位移由 scale(y)·(Δλ+k·2π) 派生）。
+ *
+ * 罗宾森周期随纬度变 → 不存在常数 dx 副本；以内容 y 范围上的 scale 极值做
+ * 保守相交判定（off 区间 = [sMin·T, sMax·T]，T=Δλ+k·2π）。
+ * 数学前提：透镜轮廓宽 = 局部周期 → 副本逐纬度首尾相接（奇偶接缝精确）。
+ */
+export function worldCopyKs(
+  panLambda: number,
   cam: CameraLike,
   viewWidth: number,
-  period = WORLD_PERIOD,
-  contentBounds?: { minX: number; maxX: number },
+  proj: ProjectionId,
+  contentBounds?: { minX: number; maxX: number; minY: number; maxY: number },
 ): number[] {
+  if (!projectionWraps(proj)) return [0];
   const halfW = viewWidth / 2 / Math.max(cam.scale, 1e-6);
   const viewL = cam.x - halfW;
   const viewR = cam.x + halfW;
-  // 展开后的内容大致占一个 period（再放宽半个 period 覆盖 unwrap 刺）
-  const contentL = contentBounds?.minX ?? -period;
-  const contentR = contentBounds?.maxX ?? period;
-  // 内容 x 出现在视口：content + dx ∈ [viewL, viewR]
-  const dxMin = viewL - contentR;
-  const dxMax = viewR - contentL;
-  const kMin = Math.floor((dxMin - contentOffsetX) / period);
-  const kMax = Math.ceil((dxMax - contentOffsetX) / period);
-  // 居中裁剪，避免相机远离原点时副本爆炸
-  const kCenter = Math.round((cam.x - contentOffsetX) / period);
-  const k0 = Math.max(kMin, kCenter - 2);
-  const k1 = Math.min(kMax, kCenter + 2);
-  const dxs: number[] = [];
-  for (let k = k0; k <= k1; k++) dxs.push(contentOffsetX + k * period);
-  const primary = contentOffsetX + kCenter * period;
-  if (!dxs.some((d) => Math.abs(d - primary) < 1e-9)) dxs.push(primary);
-  dxs.sort((a, b) => a - b);
-  return dxs;
+  const cL = contentBounds?.minX ?? -Math.PI;
+  const cR = contentBounds?.maxX ?? Math.PI;
+  const y0 = contentBounds?.minY ?? -2;
+  const y1 = contentBounds?.maxY ?? 2;
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  for (const y of [y0, (y0 + y1) / 2, y1]) {
+    const s = projectionXScale(proj, y);
+    if (s === null) return [0];
+    sMin = Math.min(sMin, s);
+    sMax = Math.max(sMax, s);
+  }
+  // T 的可行界（scale 恒正）：off = s·T 要让 [cL,cR] 平移后与视口相交
+  const tA = (viewL - cR) / sMax;
+  const tB = (viewR - cL) / sMin;
+  const tLo = Math.min(tA, tB);
+  const tHi = Math.max(tA, tB);
+  const kMin = Math.floor((tLo - panLambda) / (Math.PI * 2)) - 1;
+  const kMax = Math.ceil((tHi - panLambda) / (Math.PI * 2)) + 1;
+  const ks: number[] = [];
+  for (let k = kMin; k <= kMax && ks.length < 12; k++) {
+    const T = panLambda + k * Math.PI * 2;
+    const lo = Math.min(sMin * T, sMax * T);
+    const hi = Math.max(sMin * T, sMax * T);
+    // 内容平移后覆盖 [cL+lo, cR+hi]（off 随 scale 取区间），与视口相交即保留
+    if (cL + lo <= viewR && cR + hi >= viewL) ks.push(k);
+  }
+  if (!ks.length) ks.push(Math.round(-panLambda / (Math.PI * 2)));
+  return ks;
+}
+
+/**
+ * 外框轮廓多边形（未闭合，调用方闭合）：λ=±180 采样曲线 + 顶/底边。
+ * 圆柱族 x=±kπ 常数 → 退化为矩形 4 角（与 frameRect 等价）；
+ * 罗宾森 = 透镜（弧边 = 局部半宽 scale(y)·π，副本偏移下逐点重合 → 奇偶接缝精确）。
+ * 消费方：evenodd 翻转外环、框外遮罩、GL stencil、命中判定——必须同源。
+ */
+export function frameOutline(
+  project: (ll: LonLat) => Pt,
+  proj: ProjectionId,
+  lat = projectionFrameLat(proj),
+): Pt[] {
+  const N = proj === 'robinson' ? 48 : 1;
+  const pts: Pt[] = [];
+  for (let i = 0; i <= N; i++) {
+    pts.push(project({ lon: 180, lat: -lat + (2 * lat * i) / N }));
+  }
+  for (let i = 0; i <= N; i++) {
+    pts.push(project({ lon: -180, lat: lat - (2 * lat * i) / N }));
+  }
+  return pts;
 }
 
 /**
@@ -252,27 +310,25 @@ export function screenToContentLonLat(
   contentOffsetX: number,
   unproject: (x: number, y: number) => LonLat,
   project: (ll: LonLat) => Pt,
+  proj: ProjectionId = 'mercator',
   lat = FRAME_LAT,
 ): LonLat {
-  const fr = frameRect(project, lat);
-  const dxs = worldCopyDxs(contentOffsetX, cam, cssW);
+  const ks = worldCopyKs(contentOffsetX, cam, cssW, proj);
+  const py = screenToContentY(sy, cam, cssH);
+  // 副本位移是 y 依赖的 scale(y)·(Δλ+k·2π)：先解 y（与 x 无关），再按该 y 取位移——零迭代
+  const outline = frameOutline(project, proj, lat); // 视口形状 = 轮廓（外框固定投影空间）
   let best: LonLat | null = null;
   let bestScore = Infinity;
-  for (const dx of dxs) {
+  for (const k of ks) {
+    const dx = contentOffsetAt(proj, py, contentOffsetX + k * Math.PI * 2);
     const px = screenToContentX(sx, cam, cssW, dx);
-    const py = screenToContentY(sy, cam, cssH);
     const ll = unproject(px, py);
     // 该 lonLat 在本副本下的屏幕位置
     const p = project(ll);
     const drawnX = worldToScreenX(p.x, cam, cssW, dx);
     const drawnY = worldToScreenY(p.y, cam, cssH);
-    // 外框屏幕矩形
-    const fL = worldToScreenX(fr.minX, cam, cssW, 0);
-    const fR = worldToScreenX(fr.maxX, cam, cssW, 0);
-    const fT = worldToScreenY(fr.minY, cam, cssH);
-    const fB = worldToScreenY(fr.maxY, cam, cssH);
-    const inside =
-      drawnX >= fL - 1 && drawnX <= fR + 1 && drawnY >= fT - 1 && drawnY <= fB + 1;
+    // 外框内判定 = 投影域点在**轮廓**内（罗宾森=透镜弧边；旧矩形会让四角误判）
+    const inside = pointInOutline(p.x, p.y, outline);
     const dist = Math.hypot(drawnX - sx, drawnY - sy);
     // 外框内优先，其次距离
     const score = inside ? dist : dist + 1e6;
@@ -285,6 +341,21 @@ export function screenToContentLonLat(
     }
   }
   return best ?? { lon: wrapLon(unproject(screenToContentX(sx, cam, cssW, contentOffsetX), screenToContentY(sy, cam, cssH)).lon), lat: unproject(screenToContentX(sx, cam, cssW, contentOffsetX), screenToContentY(sy, cam, cssH)).lat };
+}
+
+/** 点在轮廓多边形内（even-odd 射线法）；轮廓未闭合按首尾相连处理。 */
+export function pointInOutline(x: number, y: number, outline: Pt[]): boolean {
+  let inside = false;
+  const n = outline.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const a = outline[i];
+    const b = outline[j];
+    if ((a.y > y) !== (b.y > y)) {
+      const t = (y - a.y) / (b.y - a.y);
+      if (x < a.x + t * (b.x - a.x)) inside = !inside;
+    }
+  }
+  return inside;
 }
 
 export function wrapLon(lon: number): number {

@@ -255,7 +255,7 @@ export function chainEdgesToMidpointRings(
     for (let i = 0; i < nE; i++) {
       const e = edges[edgeIdx[i]];
       const m = e.midpoint ?? edgeMidpoint(e.p0, e.p1, period);
-      const mm = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, per(period, m.y)), y: m.y };
+      const mm: Pt = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, per(period, m.y)), y: m.y };
       pts.push(mm);
       prevX = mm.x;
     }

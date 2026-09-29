@@ -28,7 +28,16 @@ import {
 } from '../layers';
 import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geometry';
 import { triangulateRings, trianglesMatchRings } from './triangulate';
-import { projectionWorldPeriod } from '../../core/project/projections';
+import { frameOutline } from '../space';
+import {
+  project,
+  projectionWorldPeriod,
+  projectionWraps,
+  projectionXScale,
+  ROB_PLEN,
+  ROB_PDFE,
+  type ProjectionId,
+} from '../../core/project/projections';
 
 interface BBox {
   minX: number;
@@ -59,14 +68,38 @@ interface GpuBuf {
   last: number;
 }
 
+/**
+ * 水平结构统一在 shader：`x' = x + scale(y)·(uPan + aK·2π)`。
+ * - uPan = Δλ（内容经度平移）；aK = 副本整数序号（instance attribute）。
+ * - scale(y)：圆柱族常数 uScaleC（=旧行为，刚性平移）；罗宾森按 PDFE/PLEN 表
+ *   与 CPU `robinsonPlenAtY` 同一插值（单一真相源=projections 表）→ 副本在
+ *   每条纬度精确首尾相接（透镜轮廓宽 = 局部周期，奇偶接缝精确）。
+ */
+const SCALE_FN = `
+uniform float uPan;
+uniform float uRobMode;
+uniform float uScaleC;
+uniform float uPdf[19];
+uniform float uPl[19];
+float scaleAt(float y) {
+  if (uRobMode < 0.5) return uScaleC;
+  float a = min(1.0, abs(y) / 1.3523);
+  int i = 0;
+  for (int j = 0; j < 18; j++) { if (uPdf[j + 1] < a) i = j + 1; }
+  float span = uPdf[i + 1] - uPdf[i];
+  float t = span > 1e-9 ? clamp((a - uPdf[i]) / span, 0.0, 1.0) : 0.0;
+  return 0.8487 * (uPl[i] + (uPl[i + 1] - uPl[i]) * t);
+}`;
+
 const VERT_FAN = `#version 300 es
 layout(location=0) in vec2 aPos;
-layout(location=1) in float aDx;
+layout(location=1) in float aK;
 uniform vec2 uCam;
 uniform float uScale;
 uniform vec2 uSize;
+${SCALE_FN}
 void main() {
-  float x = (aPos.x + aDx - uCam.x) * uScale + uSize.x * 0.5;
+  float x = (aPos.x + scaleAt(aPos.y) * (uPan + aK * 6.283185307179586) - uCam.x) * uScale + uSize.x * 0.5;
   float y = (uCam.y - aPos.y) * uScale + uSize.y * 0.5;
   gl_Position = vec4(x * 2.0 / uSize.x - 1.0, 1.0 - y * 2.0 / uSize.y, 0.0, 1.0);
 }`;
@@ -88,15 +121,28 @@ void main() {
 const VERT_STRIP = `#version 300 es
 layout(location=0) in vec2 aBase;
 layout(location=1) in vec2 aDir;
-layout(location=2) in float aDx;
+layout(location=2) in float aK;
 uniform vec2 uCam;
 uniform float uScale;
 uniform vec2 uSize;
 uniform float uHalfW;
+${SCALE_FN}
 void main() {
   vec2 p = aBase + aDir * uHalfW;
-  float x = (p.x + aDx - uCam.x) * uScale + uSize.x * 0.5;
+  float x = (p.x + scaleAt(p.y) * (uPan + aK * 6.283185307179586) - uCam.x) * uScale + uSize.x * 0.5;
   float y = (uCam.y - p.y) * uScale + uSize.y * 0.5;
+  gl_Position = vec4(x * 2.0 / uSize.x - 1.0, 1.0 - y * 2.0 / uSize.y, 0.0, 1.0);
+}`;
+
+/** 外框轮廓 stencil：外框固定在投影空间，不参与内容平移/scale 重映射 */
+const VERT_PLAIN = `#version 300 es
+layout(location=0) in vec2 aPos;
+uniform vec2 uCam;
+uniform float uScale;
+uniform vec2 uSize;
+void main() {
+  float x = (aPos.x - uCam.x) * uScale + uSize.x * 0.5;
+  float y = (uCam.y - aPos.y) * uScale + uSize.y * 0.5;
   gl_Position = vec4(x * 2.0 / uSize.x - 1.0, 1.0 - y * 2.0 / uSize.y, 0.0, 1.0);
 }`;
 
@@ -116,6 +162,11 @@ interface Program {
   uColor: WebGLUniformLocation | null;
   uHalfW: WebGLUniformLocation | null;
   uRect: WebGLUniformLocation | null;
+  uPan: WebGLUniformLocation | null;
+  uRobMode: WebGLUniformLocation | null;
+  uScaleC: WebGLUniformLocation | null;
+  uPdf: WebGLUniformLocation | null;
+  uPl: WebGLUniformLocation | null;
 }
 
 function compile(
@@ -169,6 +220,11 @@ function toProgram(gl: WebGL2RenderingContext, prog: WebGLProgram): Program {
     uColor: gl.getUniformLocation(prog, 'uColor'),
     uHalfW: gl.getUniformLocation(prog, 'uHalfW'),
     uRect: gl.getUniformLocation(prog, 'uRect'),
+    uPan: gl.getUniformLocation(prog, 'uPan'),
+    uRobMode: gl.getUniformLocation(prog, 'uRobMode'),
+    uScaleC: gl.getUniformLocation(prog, 'uScaleC'),
+    uPdf: gl.getUniformLocation(prog, 'uPdf'),
+    uPl: gl.getUniformLocation(prog, 'uPl'),
   };
 }
 
@@ -201,6 +257,11 @@ export class MapGlRenderer {
   private progFan: Program;
   private progQuad: Program;
   private progStrip: Program;
+  private progPlain: Program;
+  private outlineVbo: WebGLBuffer | null = null;
+  private outlineVao: WebGLVertexArrayObject | null = null;
+  private outlineCount = 0;
+  private outlineKey = '';
   private dxsBuf: WebGLBuffer;
   private quadVbo: WebGLBuffer;
   private quadVao: WebGLVertexArrayObject;
@@ -219,10 +280,12 @@ export class MapGlRenderer {
     const pFan = compile(gl, VERT_FAN, FRAG_COLOR, 'fan');
     const pQuad = compile(gl, VERT_QUAD, FRAG_COLOR, 'quad');
     const pStrip = compile(gl, VERT_STRIP, FRAG_COLOR, 'strip');
-    if (!pFan || !pQuad || !pStrip) throw new Error('shader compile failed');
+    const pPlain = compile(gl, VERT_PLAIN, FRAG_COLOR, 'plain');
+    if (!pFan || !pQuad || !pStrip || !pPlain) throw new Error('shader compile failed');
     this.progFan = toProgram(gl, pFan);
     this.progQuad = toProgram(gl, pQuad);
     this.progStrip = toProgram(gl, pStrip);
+    this.progPlain = toProgram(gl, pPlain);
 
     this.dxsBuf = gl.createBuffer()!;
     this.quadVbo = gl.createBuffer()!;
@@ -296,13 +359,20 @@ export class MapGlRenderer {
       gl.disable(gl.STENCIL_TEST);
       gl.colorMask(true, true, true, true);
       gl.clearColor(ocean[0], ocean[1], ocean[2], 1);
+      gl.stencilMask(0xff); // 显式全位清（帧尾 mask 可能残留 0x00）
       gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
-      // 地图外框 scissor（与 clipToMapFrame 同矩形：外框固定在投影空间，不随 drawDx）
+      // 地图外框 bbox scissor（省 ROP；精确弧边由下方轮廓 stencil 承担）
       const fr = getFrameRect(env);
       const s = this.frameRectDevice(env, fr, devH);
       gl.enable(gl.SCISSOR_TEST);
       gl.scissor(s.x, s.y, s.w, s.h);
+
+      // 轮廓 stencil（bit0=1 在轮廓内）：视口形状一步到位（罗宾森=透镜弧边，
+      // 圆柱族=矩形与 scissor 同效；非回绕投影无轮廓语义 → 纯 scissor 原行为）。
+      // 位面分工：bit0 轮廓（每帧一次）；bit1 = piece 环奇偶（stencil 填色路径）。
+      if (projectionWraps(env.proj)) this.drawOutlineMask(env);
+      else gl.disable(gl.STENCIL_TEST);
 
       this.setCam(env, this.progFan);
       this.setCam(env, this.progQuad);
@@ -342,6 +412,80 @@ export class MapGlRenderer {
     if (pr.uCam) gl.uniform2f(pr.uCam, env.cam.x, env.cam.y);
     if (pr.uScale) gl.uniform1f(pr.uScale, env.cam.scale);
     if (pr.uSize) gl.uniform2f(pr.uSize, env.w, env.h);
+    // 水平结构（scale(y)·λ）：uPan=Δλ；圆柱族 scale 常数；罗宾森走表（与 CPU 同源）
+    if (pr.uPan) gl.uniform1f(pr.uPan, env.contentOffsetX ?? 0);
+    if (pr.uScaleC) gl.uniform1f(pr.uScaleC, projectionXScale(env.proj, 0) ?? 1);
+    if (pr.uRobMode) gl.uniform1f(pr.uRobMode, env.proj === 'robinson' ? 1 : 0);
+    if (pr.uPdf) gl.uniform1fv(pr.uPdf, ROB_PDFE);
+    if (pr.uPl) gl.uniform1fv(pr.uPl, ROB_PLEN);
+  }
+
+  /**
+   * 轮廓 stencil mask（bit0）：视口形状 = frameOutline 多边形（一步到位的弧边裁剪）。
+   *
+   * 位面分工：**bit0 = 轮廓内**（本方法每帧一次，INVERT 0→1）；**bit1 = piece 环奇偶**
+   * （stencil 填色路径用 mask 0x02，与轮廓互不干扰）。此后所有绘制
+   * stencilFunc(EQUAL, 0x01) —— 圆柱族轮廓=矩形与 scissor 同效，罗宾森=透镜弧边。
+   * 外框固定在投影空间 → 不带 scale/pan（VERT_PLAIN）。
+   * 轮廓是中心对称凸状（透镜/矩形）→ centroid 三角扇足够。
+   */
+  private drawOutlineMask(env: RenderEnv): void {
+    const gl = this.gl;
+    const key = `${env.proj}|${JSON.stringify(env.pp)}`;
+    if (this.outlineKey !== key) {
+      const pts = frameOutline((ll) => project(ll, env.proj, env.pp), env.proj);
+      let cx = 0;
+      let cy = 0;
+      for (const pt of pts) { cx += pt.x; cy += pt.y; }
+      cx /= pts.length;
+      cy /= pts.length;
+      const arr = new Float32Array((pts.length + 1) * 2);
+      arr[0] = cx;
+      arr[1] = cy;
+      for (let i = 0; i < pts.length; i++) {
+        arr[2 + i * 2] = pts[i].x;
+        arr[3 + i * 2] = pts[i].y;
+      }
+      if (!this.outlineVbo) {
+        this.outlineVbo = gl.createBuffer();
+        this.outlineVao = gl.createVertexArray();
+      }
+      gl.bindVertexArray(this.outlineVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.outlineVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+      gl.bindVertexArray(null);
+      this.outlineCount = pts.length + 1;
+      this.outlineKey = key;
+    }
+    gl.enable(gl.STENCIL_TEST);
+    gl.colorMask(false, false, false, false);
+    gl.stencilMask(0x01);
+    gl.stencilFunc(gl.ALWAYS, 0, 0x01);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+    gl.useProgram(this.progPlain.prog);
+    this.setCam(env, this.progPlain);
+    gl.bindVertexArray(this.outlineVao);
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, this.outlineCount);
+    gl.bindVertexArray(null);
+    gl.colorMask(true, true, true, true);
+    // 之后的默认位面状态：只画轮廓内（bit0=1），不写 stencil；piece 奇偶路径临时切 bit1
+    gl.stencilMask(0x00);
+    gl.stencilFunc(gl.EQUAL, 0x01, 0x01);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+  }
+
+  /** scale(y) 在 piece y 范围上的极值（副本位移区间 / 可见性判定用；三点含 0 采样） */
+  private scaleRange(proj: ProjectionId, yMin: number, yMax: number): [number, number] {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const y of [yMin, yMax, yMin <= 0 && yMax >= 0 ? 0 : (yMin + yMax) / 2]) {
+      const s = projectionXScale(proj, y) ?? 1;
+      if (s < lo) lo = s;
+      if (s > hi) hi = s;
+    }
+    return [lo, hi];
   }
 
   /** 外框 → 设备像素 scissor 矩形（GL 原点在左下） */
@@ -382,10 +526,11 @@ export class MapGlRenderer {
     return { x: gx0, y: gy0, w: Math.max(1, gx1 - gx0), h: Math.max(1, gy1 - gy0) };
   }
 
-  private setDxs(dxs: number[]): void {
+  /** 上传副本整数序号 k（instance attribute；位移由 shader scale(y)·(uPan+k·2π) 派生） */
+  private setKs(ks: number[]): void {
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.dxsBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, Float32Array.from(dxs), gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, Float32Array.from(ks), gl.DYNAMIC_DRAW);
   }
 
   /** 数组 → VAO（按角色布局） */
@@ -520,45 +665,61 @@ export class MapGlRenderer {
     const viewL = env.cam.x - env.w / 2 / scale;
     const viewR = env.cam.x + env.w / 2 / scale;
     const all = piece.copies.length ? piece.copies : [0];
-    const copies = all.filter((dx) => gbox.maxX + dx > viewL - 1e-9 && gbox.minX + dx < viewR + 1e-9);
+    // 副本 = k；位移 = scale(y)·(Δλ+k·2π) 且随 y 变 → 用 scale 极值算位移区间做保守可见判定
+    const pan = env.contentOffsetX ?? 0;
+    const [sLo, sHi] = this.scaleRange(env.proj, gbox.minY, gbox.maxY);
+    const offRangeOf = (k: number): [number, number] => {
+      const T = pan + k * Math.PI * 2;
+      const lo = Math.min(sLo * T, sHi * T);
+      const hi = Math.max(sLo * T, sHi * T);
+      return [lo, hi];
+    };
+    const copies = all.filter((k) => {
+      const [lo, hi] = offRangeOf(k);
+      return gbox.maxX + lo > viewL - 1e-9 && gbox.minX + hi < viewR + 1e-9;
+    });
     if (!copies.length) return;
-    let minDx = Infinity;
-    let maxDx = -Infinity;
-    for (const dx of copies) {
-      if (dx < minDx) minDx = dx;
-      if (dx > maxDx) maxDx = dx;
+    let minOff = Infinity;
+    let maxOff = -Infinity;
+    for (const k of copies) {
+      const [lo, hi] = offRangeOf(k);
+      if (lo < minOff) minOff = lo;
+      if (hi > maxOff) maxOff = hi;
     }
-    const period = projectionWorldPeriod(env.proj);
-    const overlap = period !== null && gbox.maxX - gbox.minX >= period;
+    // 重叠（单副本内几何宽 ≥ 最小局部周期 → 窗内自叠）：stencil 精确路径
+    const overlap = projectionWraps(env.proj) && gbox.maxX - gbox.minX >= sLo * Math.PI * 2;
     const fast = !!geo.tri && geo.triOk;
 
     if (fast) {
       const triBuf = this.bufFor(geo.tri!, 'fan');
       const af = piece.fillOn && fillC ? Math.max(0, Math.min(1, piece.fillAlpha)) * fillC[3] : 0;
-      this.setDxs(copies);
+      this.setKs(copies);
       if (overlap) {
         const margin = piece.strokeW + 1 / env.cam.scale;
         const bbx: BBox = {
-          minX: gbox.minX + minDx - margin,
-          maxX: gbox.maxX + maxDx + margin,
+          minX: gbox.minX + minOff - margin,
+          maxX: gbox.maxX + maxOff + margin,
           minY: gbox.minY - margin,
           maxY: gbox.maxY + margin,
         };
         const scx = this.pieceScissor(env, bbx, frame, devH);
         gl.enable(gl.STENCIL_TEST);
         gl.scissor(scx.x, scx.y, scx.w, scx.h);
-        gl.stencilMask(0xff);
+        // 环奇偶写 bit1（bit0=轮廓 mask 不能动）
+        gl.stencilMask(0x02);
         gl.clearStencil(0);
         gl.clear(gl.STENCIL_BUFFER_BIT);
         gl.colorMask(false, false, false, false);
-        gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+        gl.stencilFunc(gl.ALWAYS, 0, 0x02);
         gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
         gl.useProgram(this.progFan.prog); // 必须设程序：否则沿用上一件的着色器，奇偶画的是垃圾几何
         gl.bindVertexArray(triBuf.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, triBuf.count, copies.length);
         gl.colorMask(true, true, true, true);
-        gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
+        // 上色 = 轮廓内(bit0) ∧ 环奇偶翻转(bit1)
+        gl.stencilFunc(gl.EQUAL, 0x03, 0x03);
         gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+        gl.stencilMask(0x00);
       }
       gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
       gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -570,9 +731,11 @@ export class MapGlRenderer {
         gl.drawArraysInstanced(gl.TRIANGLES, 0, triBuf.count, copies.length);
         gl.bindVertexArray(null);
       }
-      if (overlap) gl.disable(gl.STENCIL_TEST);
+      // 恢复默认位面状态（轮廓内判定），不 disable——后续 stroke/描边仍要轮廓裁剪
+      gl.stencilMask(0x00);
+      gl.stencilFunc(gl.EQUAL, 0x01, 0x01);
     } else {
-      this.drawPieceStencil(env, piece, geo, frame, copies, minDx, maxDx, {
+      this.drawPieceStencil(env, piece, geo, frame, copies, minOff, maxOff, {
         devW,
         devH,
         fillC,
@@ -604,8 +767,8 @@ export class MapGlRenderer {
     geo: PieceGeo,
     frame: { x: number; y: number; w: number; h: number },
     copies: number[],
-    minDx: number,
-    maxDx: number,
+    minOff: number,
+    maxOff: number,
     s: {
       devW: number;
       devH: number;
@@ -621,21 +784,22 @@ export class MapGlRenderer {
     const gl = this.gl;
     const margin = piece.strokeW + 1 / env.cam.scale;
     const bb: BBox = {
-      minX: gbox.minX + minDx - margin,
-      maxX: gbox.maxX + maxDx + margin,
+      minX: gbox.minX + minOff - margin,
+      maxX: gbox.maxX + maxOff + margin,
       minY: gbox.minY - margin,
       maxY: gbox.maxY + margin,
     };
     const sc = this.pieceScissor(env, bb, frame, s.devH);
     gl.enable(gl.STENCIL_TEST);
     gl.scissor(sc.x, sc.y, sc.w, sc.h);
-    gl.stencilMask(0xff);
+    // 环奇偶写 bit1（bit0=轮廓 mask 保留）
+    gl.stencilMask(0x02);
     gl.clearStencil(0);
     gl.clear(gl.STENCIL_BUFFER_BIT);
     gl.colorMask(false, false, false, false);
-    gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+    gl.stencilFunc(gl.ALWAYS, 0, 0x02);
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
-    this.setDxs(copies);
+    this.setKs(copies);
     if (geo.xorTris) {
       const buf = this.bufFor(geo.xorTris, 'fan');
       gl.useProgram(this.progFan.prog);
@@ -644,15 +808,18 @@ export class MapGlRenderer {
       gl.bindVertexArray(null);
     }
     gl.colorMask(true, true, true, true);
-    gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
+    // 上色 = 轮廓内(bit0) ∧ 环奇偶翻转(bit1)
+    gl.stencilFunc(gl.EQUAL, 0x03, 0x03);
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.stencilMask(0x00);
     gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     if (piece.fillOn && s.fillC) {
+      // 覆盖面只需盖住「被翻成 stencil=1」的像素（NOTEQUAL 上色，多盖无害）
       this.drawQuad(
-        gbox.minX + minDx,
+        gbox.minX + minOff,
         gbox.minY,
-        gbox.maxX - gbox.minX + (maxDx - minDx),
+        gbox.maxX - gbox.minX + (maxOff - minOff),
         gbox.maxY - gbox.minY,
         s.fillC[0],
         s.fillC[1],
@@ -660,7 +827,9 @@ export class MapGlRenderer {
         Math.max(0, Math.min(1, piece.fillAlpha)) * s.fillC[3],
       );
     }
-    gl.disable(gl.STENCIL_TEST);
+    // 恢复默认位面状态（轮廓内判定）
+    gl.stencilMask(0x00);
+    gl.stencilFunc(gl.EQUAL, 0x01, 0x01);
     gl.scissor(frame.x, frame.y, frame.w, frame.h);
   }
 
@@ -691,6 +860,7 @@ export class MapGlRenderer {
     // 每 pcache 构建一次网格条带（共享边去重 + 桶化）；相机变化只改 uniform
     let entry = this.meshCache.get(env.pcache as unknown as object);
     if (!entry) {
+      // 极区闭合边 unwrap 只在圆柱族 polarOutlines 路径执行（罗宾森无 polarOutlines）
       const period = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
       const geo = buildCellMeshStrips(env.pcache.polys, env.pcache.polarOutlines, period);
       entry = { geo, buf: geo.data.length ? this.bufFor(geo.data, 'strip') : null };
@@ -702,11 +872,19 @@ export class MapGlRenderer {
     const viewR = env.cam.x + env.w / 2 / scale;
     const viewT = env.cam.y + env.h / 2 / scale;
     const viewB = env.cam.y - env.h / 2 / scale;
-    const all = env.worldDxs?.length ? env.worldDxs : [env.contentOffsetX ?? 0];
+    // 副本 = 整数 k（位移在 shader 内由 scale(y)·(uPan+k·2π) 派生）
+    const all: number[] = env.copyKs?.length ? env.copyKs : [0];
     const bb = env.pcache.worldBBox;
-    const copies = all.filter((dx) => bb.maxX + dx > viewL && bb.minX + dx < viewR);
+    const pan = env.contentOffsetX ?? 0;
+    const [msLo, msHi] = this.scaleRange(env.proj, bb.minY, bb.maxY);
+    const copies = all.filter((k) => {
+      const T = pan + k * Math.PI * 2;
+      const lo = Math.min(msLo * T, msHi * T);
+      const hi = Math.max(msLo * T, msHi * T);
+      return bb.maxX + lo > viewL && bb.minX + hi < viewR;
+    });
     if (!copies.length) return;
-    this.setDxs(copies);
+    this.setKs(copies);
     gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(this.progStrip.prog);
@@ -722,9 +900,12 @@ export class MapGlRenderer {
     const pad = Math.max(stroke.width, 0.35) / scale / 2 + g.cell;
     let uL = Infinity;
     let uR = -Infinity;
-    for (const dx of copies) {
-      const l = viewL - dx;
-      const r = viewR - dx;
+    for (const k of copies) {
+      const T = pan + k * Math.PI * 2;
+      const lo = Math.min(msLo * T, msHi * T);
+      const hi = Math.max(msLo * T, msHi * T);
+      const l = viewL - hi;
+      const r = viewR - lo;
       if (l < uL) uL = l;
       if (r > uR) uR = r;
     }

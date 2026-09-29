@@ -27,6 +27,8 @@ export function prepareDisplayRings(
     cylindrical?: boolean;
     /** 世界局部周期（伪圆柱 = scale(y)·2π）；缺省 = 框宽（圆柱族等价） */
     periodAt?: PeriodAt;
+    /** 水平结构 x = scale(y)·λ 的 scale（补边经线弧用）；缺省 1 = 圆柱族退化 */
+    scaleAt?: (y: number) => number;
   },
 ): DisplayRing[] {
   if (frameY.cylindrical === false) {
@@ -87,7 +89,10 @@ export function prepareDisplayRings(
  */
 function closeRingForCylindrical(
   ring: MidRing,
-  frameLatY: { minY: number; maxY: number; minX?: number; maxX?: number },
+  frameLatY: {
+    minY: number; maxY: number; minX?: number; maxX?: number;
+    periodAt?: PeriodAt; scaleAt?: (y: number) => number;
+  },
   period: PeriodAt,
 ): DisplayRing[] {
   const base = toDisplayRing(ring);
@@ -101,21 +106,46 @@ function closeRingForCylindrical(
   const seamX = unwrapXAgainst(pN.x, p0.x, pp);
   const winding = Math.round((seamX - p0.x) / pp);
   if (winding === 0) return [base];
-  const end = { x: seamX, y: p0.y };
-  // 成员侧 = 行进方向左侧：东行(k>0)成员在北 → 补 maxY；西行(k<0)成员在南 → 补 minY
   const edgeY = winding > 0 ? frameLatY.maxY : frameLatY.minY;
-  const bottomEnd = { x: seamX, y: edgeY };
-  const bottomStart = { x: p0.x, y: edgeY };
+  const scaleAt = frameLatY.scaleAt ?? (() => 1);
+
+  // **补边沿「经线 + 极线」走**（不是矩形）：x = scale(y)·λ 下矩形补边的横线宽
+  // = periodAt(p0.y)，而副本在 edgeY 高度的位移 = scale(edgeY)·2π —— 伪圆柱两者
+  // 不等（接缝裂）；改走经线弧 + 极线段后，每个顶点的副本位移 = scale(顶点 y)·2π，
+  // 相邻副本**逐顶点重合**（极线段宽恰 = 2π·scale(edgeY)）→ 奇偶接缝精确。
+  // 圆柱族 scale≡1：经线 = 竖直线、极线 = 横线 → 退化为原矩形几何，零差异。
+  const lam0 = p0.x / Math.max(1e-9, scaleAt(p0.y)); // 断点经度（窗口内可超 ±π）
+  const lamN = (p0.x + winding * pp) / Math.max(1e-9, scaleAt(p0.y)); // = lam0 + winding·2π
+  const N = 8; // 经线弧插值（副本重合只依赖顶点共享，插值精度无关紧要）
+  const span = edgeY - p0.y;
+  const mid: Pt[] = [];
+  for (let i = 1; i < N; i++) {
+    const y = p0.y + (span * i) / N;
+    mid.push({ x: lamN * scaleAt(y), y });
+  }
+  const edgeEnd = { x: lamN * scaleAt(edgeY), y: edgeY };
+  const edgeStart = { x: lam0 * scaleAt(edgeY), y: edgeY };
+  const back: Pt[] = [];
+  for (let i = N - 1; i >= 1; i--) {
+    const y = p0.y + (span * i) / N;
+    back.push({ x: lam0 * scaleAt(y), y });
+  }
+  const added = [...mid, edgeEnd, edgeStart, ...back]; // 闭合自动回 p0
+  const ptsAll = [...pts, ...added];
+  // 虚拟段（补边）排除描边：verts[i] = 段 (pts[i], pts[i+1]) 中点（与原实现同口径）
+  const virtualFrom = pts.length;
+  const vertsAll = [...verts];
+  for (let i = virtualFrom; i < ptsAll.length; i++) {
+    const a = ptsAll[i];
+    const b = ptsAll[(i + 1) % ptsAll.length];
+    vertsAll.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  }
   const display = toDisplayRing({
-    pts: [...pts, end, bottomEnd, bottomStart],
-    verts: [
-      ...verts,
-      { x: end.x, y: (end.y + bottomEnd.y) / 2 },
-      { x: (bottomEnd.x + bottomStart.x) / 2, y: bottomEnd.y },
-      { x: (bottomStart.x + p0.x) / 2, y: (bottomStart.y + p0.y) / 2 },
-    ],
+    pts: ptsAll,
+    verts: vertsAll,
     closed: true,
-    virtualFrom: pts.length,
+    virtualFrom,
   });
   return display ? [display] : [];
 }
+

@@ -220,10 +220,15 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
           // 净方向（原始环 unwrap 后首尾 x 差的符号）
           const k = Math.sign(r.pts[r.pts.length - 1].x - r.pts[0].x);
           if (k === 0) continue;
-          // 补边虚段（end→bottomEnd）必须贴**行进方向左侧**的框边：k>0 成员在北→maxY
-          const edgeY = d.pts[v + 1]?.y;
-          expect(edgeY).toBeDefined();
-          expect(Math.abs(edgeY! - (k > 0 ? frameMax : frameMin))).toBeLessThan(1e-9);
+          // 补边虚段 = 经线弧 + 极线段：必须贴**行进方向左侧**的极线
+          // （k>0 成员在北→极线贴 maxY；k<0→minY）。经线弧点在中间高度，极线点在框边。
+          const virtual = d.pts.slice(v);
+          const side = k > 0 ? frameMax : frameMin;
+          const onEdge = virtual.filter((q) => Math.abs(q.y - side) < 1e-9);
+          expect(onEdge.length).toBeGreaterThanOrEqual(2); // 极线段两端点在框边上
+          // 补边不过极线：虚拟点全部在成员侧（k>0 北闭合 ≤ maxY；k<0 ≥ minY）
+          const inSide = virtual.every((q) => (k > 0 ? q.y <= side + 1e-9 : q.y >= side - 1e-9));
+          expect(inSide).toBe(true);
           wrapChecked++;
         }
       }

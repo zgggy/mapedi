@@ -3,6 +3,7 @@ import type { StyleSet } from '../core/styles';
 import type { Camera } from './map2d';
 import {
   project,
+  projectionFrameLat,
   projectionWorldPeriod,
   type ProjectionId,
   type ProjectionParams,
@@ -22,7 +23,11 @@ import {
   worldToScreenX,
   worldToScreenY,
   MapTransform,
-  type Pt,, frameYEnv } from './space';
+  type Pt,
+  frameYEnv,
+  contentOffsetAt,
+  frameOutline,
+} from './space';
 import { catmullRomPolyline } from '../core/paths';
 import { ringPath2D, cellPolyPath2D } from '../core/ring/path2d';
 import type { DisplayPiece } from '../core/displayCompose';
@@ -44,12 +49,17 @@ export interface RenderEnv {
   smooth: number;
   pcache: ProjCache;
   showLabels?: boolean;
-  /** 右键拖动：内容相对外框的水平偏移（用户态，不由副本覆盖） */
+  /**
+   * 内容平移 = **经度偏移 Δλ**（回绕投影「转动地球经度」的重映射语义；
+   * 非回绕投影保留投影域位移，由 offsetAt 退化解释）。
+   */
   contentOffsetX?: number;
-  /** 本 pass 的完整横向偏移 = contentOffsetX + k·2π */
+  /** 本 pass 的总经度偏移 = Δλ + k·2π（副本按 pass 循环赋值） */
   drawDx?: number;
-  /** 本帧所有世界副本偏移（标注层挑最优放置用） */
-  worldDxs?: number[];
+  /** 本帧世界副本（整数序号 k；投影域位移由 offsetAt 点级派生） */
+  copyKs?: number[];
+  /** 点级内容位移：投影域 x 位移 = scale(y)·drawDx（圆柱族退化常数）。消费方唯一求值点。 */
+  offsetAt?: (y: number) => number;
   /** 平移/缩放中：跳过脏区域重烘焙（贴图本身仍 1:1，不拉伸） */
   isDragging?: boolean;
   /** 渐现：冷件（环未预热）跳过并入队，空闲补热后由 onGeometryReady 触发重绘 */
@@ -96,22 +106,26 @@ export function projectPt(env: RenderEnv, ll: { lon: number; lat: number }) {
   return project(ll, env.proj, env.pp);
 }
 
-/** 地图外框矩形（显示裁剪用；固定，不随内容偏移） */
+/** 地图外框 bbox（显示裁剪用；固定，不随内容偏移）；框高按投影（罗宾森 ±90） */
 export function getFrameRect(env: RenderEnv) {
-  return frameRect((ll) => projectPt(env, ll));
+  return frameRect((ll) => projectPt(env, ll), projectionFrameLat(env.proj));
 }
 
-/** 世界变换：使用本 pass 的 drawDx（= contentOffset + 副本偏移） */
+/**
+ * 世界变换：**只含相机**（唯一 y 翻转点）。
+ *
+ * 内容平移不再进矩阵——平移是 y 依赖的重映射（罗宾森 scale(y)·Δλ），刚性
+ * translate 表达不了；各层点级走 `env.offsetAt(y)`（圆柱族退化为常数 = 原行为）。
+ * offsetX 保留给特殊调用方（烘焙补偿等）。
+ */
 export function beginWorld(
   ctx: CanvasRenderingContext2D,
   env: RenderEnv,
   offsetX = 0,
-  skipContent = false,
+  _skipContent = false,
 ): void {
-  const drawDx = skipContent ? 0 : (env.drawDx ?? env.contentOffsetX ?? 0);
   ctx.save();
-  // 统一坐标变换（唯一 y 翻转点）
-  const t = new MapTransform(env.cam, env.w, env.h, offsetX + drawDx);
+  const t = new MapTransform(env.cam, env.w, env.h, offsetX);
   t.applyToCanvas(ctx);
 }
 
@@ -127,13 +141,22 @@ export function endWorld(ctx: CanvasRenderingContext2D): void {
  * cell/边界路径本身不判断是否在边界，框外部分只被这里裁掉。
  */
 export function clipToMapFrame(ctx: CanvasRenderingContext2D, env: RenderEnv, drawDxOverride?: number): void {
-  const fr = getFrameRect(env);
-  const drawDx = (drawDxOverride ?? env.drawDx ?? env.contentOffsetX ?? 0) + (env.clipDxBias ?? 0);
-  const clip = frameClipInUserSpace(fr, drawDx);
+  // 外框固定在投影空间（beginWorld 已不含内容平移）→ 直接裁**轮廓**：
+  // 圆柱族轮廓=矩形（与旧等价）；罗宾森=透镜弧边（旧矩形会把赤道鼓出部分裁掉）。
+  void drawDxOverride;
+  const outline = frameOutline((ll) => projectPt(env, ll), env.proj);
   const pad = env.periodicTilePadX ?? 0;
   ctx.save();
   ctx.beginPath();
-  ctx.rect(clip.minX - pad, clip.minY, clip.maxX - clip.minX + pad * 2, clip.maxY - clip.minY);
+  if (pad > 0) {
+    // 周期贴图接缝余量：矩形近似外扩（仅离屏烘焙用）
+    const fr = getFrameRect(env);
+    ctx.rect(fr.minX - pad, fr.minY, fr.maxX - fr.minX + pad * 2, fr.maxY - fr.minY);
+  } else {
+    ctx.moveTo(outline[0].x, outline[0].y);
+    for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i].x, outline[i].y);
+    ctx.closePath();
+  }
   ctx.clip();
 }
 
@@ -158,20 +181,23 @@ export const frameLayer: RenderLayer = {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     beginWorld(ctx, env, 0, true);
 
-    // 框外遮罩（evenodd：外大矩形挖掉地图外框）
+    // 框外遮罩（evenodd：外大矩形挖掉地图**轮廓**——罗宾森=透镜弧边，视口不再是方框）
+    const outline = frameOutline((ll) => projectPt(env, ll), env.proj);
     ctx.beginPath();
     ctx.rect(fr.minX - margin, fr.minY - margin, fw + 2 * margin, fh + 2 * margin);
-    ctx.rect(fr.minX, fr.minY, fw, fh);
+    ctx.moveTo(outline[0].x, outline[0].y);
+    for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i].x, outline[i].y);
+    ctx.closePath();
     ctx.fillStyle = style.frameVoid ?? 'rgba(8,10,14,0.92)';
     ctx.fill('evenodd');
 
-    // 黑描边压在洞缘（先浅底再黑线，保证看得见）
+    // 描边沿轮廓（先浅底再黑线，保证看得见）
     ctx.lineWidth = 2.5 / cam.scale;
     ctx.strokeStyle = 'rgba(240,235,220,0.35)';
-    ctx.strokeRect(fr.minX, fr.minY, fw, fh);
+    ctx.stroke();
     ctx.lineWidth = 1.4 / cam.scale;
     ctx.strokeStyle = style.border.color || 'rgba(0,0,0,0.85)';
-    ctx.strokeRect(fr.minX, fr.minY, fw, fh);
+    ctx.stroke();
 
     endWorld(ctx);
   },
@@ -186,13 +212,7 @@ export const cellsLayer: RenderLayer = {
   name: 'cells',
   repeat: true,
   draw(env) {
-    const { ctx, world, cam, pcache, w, h } = env;
-    const pad = 2 / cam.scale;
-    const drawDx = env.drawDx ?? env.contentOffsetX ?? 0;
-    const viewL = cam.x - drawDx - w / 2 / cam.scale - pad;
-    const viewR = cam.x - drawDx + w / 2 / cam.scale + pad;
-    const viewT = cam.y + h / 2 / cam.scale + pad;
-    const viewB = cam.y - h / 2 / cam.scale - pad;
+    const { ctx } = env;
     beginWorld(ctx, env);
     clipToMapFrame(ctx, env);
     ctx.restore();
@@ -342,7 +362,7 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       continue;
     }
     if (!rings.length) continue;
-    const prepared = preparePieces(rings, fr, entry.frameFlip);
+    const prepared = preparePieces(env, rings, fr, entry.frameFlip);
     if (!prepared.length) continue;
 
     const needFill = fillOn && !seenFill.has(dp.key);
@@ -378,11 +398,12 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
 /** raw MidRing[] → display pieces。键含 frameY，换投影不得复用旧 unwrap/闭合 */
 const prepCache = new WeakMap<object, Map<string, DisplayRing[]>>();
 function preparePieces(
+  env: RenderEnv,
   rings: MidRing[],
   frameY: ReturnType<typeof frameYOf>,
   frameFlip = false,
 ): DisplayRing[] {
-  const fk = `${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical}|${frameFlip ? 1 : 0}`;
+  const fk = `${env.proj}|${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical}|${frameFlip ? 1 : 0}`;
   let byF = prepCache.get(rings as unknown as object);
   if (!byF) {
     byF = new Map();
@@ -402,31 +423,19 @@ function preparePieces(
   // 不适用元素边界的「过边中点 Hermite」（Hermite 会把矩形啃成内接圆角，四角缺色）；
   // virtualFrom 同时把它排除出描边（框边只用于填充）。
   if (frameFlip) {
-    // 余量必须为 0：框环随副本实例化，外扩会让相邻副本的框环重叠——
-    // evenodd 下重叠带被抵消 → 换日线处出现竖条（「175～-175 之间竖线」）。
-    const m = 0;
-    const x0 = frameY.minX - m;
-    const x1 = (frameY.maxX ?? Math.PI) + m;
-    const y0 = frameY.minY - m;
-    const y1 = frameY.maxY + m;
-    const xm = (x0 + x1) / 2;
-    const ym = (y0 + y1) / 2;
-    out.push({
-      pts: [
-        { x: x0, y: y0 },
-        { x: x1, y: y0 },
-        { x: x1, y: y1 },
-        { x: x0, y: y1 },
-      ],
-      verts: [
-        { x: xm, y: y0 },
-        { x: x1, y: ym },
-        { x: xm, y: y1 },
-        { x: x0, y: ym },
-      ],
-      virtualFrom: 0,
-      closed: true,
+    // 翻转外环 = **外框轮廓**（frameOutline 单源：圆柱族=矩形退化，罗宾森=透镜弧边）。
+    // 关键不变量：副本位移 scale(y)·k·2π 下轮廓边逐点重合（透镜半宽恰 = 局部半周期
+    // scale(y)·π）→ 相邻副本精确接缝、无重叠带 → evenodd 不抵消。旧矩形宽是常数，
+    // 伪圆柱下接缝必裂。余量 0（外扩 → 副本重叠带奇偶抵消 → 换日线竖条）。
+    // pts 全段 lineTo（渲染临时几何，不走元素边界 Hermite）；virtualFrom=0 排除描边。
+    const outline = frameOutline((ll) => projectPt(env, ll), env.proj);
+    const n = outline.length;
+    const verts: Pt[] = outline.map((_, i) => {
+      const a = outline[i];
+      const b = outline[(i + 1) % n];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     });
+    out.push({ pts: outline, verts, virtualFrom: 0, closed: true });
   }
   byF.set(fk, out);
   return out;
@@ -448,20 +457,16 @@ const labelWidthCache = new Map<string, number>();
 /** 元素中心缓存：rev + id + cells 长度为键 */
 const regionCenterCache = new Map<string, { x: number; y: number }>();
 
-/** 展开环可跨相邻世界；按整数副本序号去重，不能按浮点偏移去重。 */
+/** 元素级副本：在帧级 k 集上再展开 ±1（元素 bbox 比全图窄，需邻副本余量）。 */
 function elementCopies(env: RenderEnv): number[] {
-  const base = env.worldDxs ?? [env.contentOffsetX ?? 0];
-  const period = projectionWorldPeriod(env.proj);
-  if (period === null) return base;
-  const origin = env.contentOffsetX ?? 0;
+  const base = env.copyKs ?? [0];
   const indices = new Set<number>();
-  for (const dx of base) {
-    const k = Math.round((dx - origin) / period);
+  for (const k of base) {
     indices.add(k - 1);
     indices.add(k);
     indices.add(k + 1);
   }
-  return [...indices].sort((a, b) => a - b).map((k) => origin + k * period);
+  return [...indices].sort((a, b) => a - b);
 }
 
 function darkenHex(hex: string, f = 0.6): string {
@@ -514,10 +519,13 @@ export const pathsLayer: RenderLayer = {
       }
       if (!poly || poly.length < 2) continue;
 
+      const offAt = env.offsetAt;
       const strokePoly = (width: number, color: string, dash: number[]) => {
         ctx.beginPath();
-        ctx.moveTo(poly[0].x, poly[0].y);
-        for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+        ctx.moveTo(poly[0].x + (offAt?.(poly[0].y) ?? 0), poly[0].y);
+        for (let i = 1; i < poly.length; i++) {
+          ctx.lineTo(poly[i].x + (offAt?.(poly[i].y) ?? 0), poly[i].y);
+        }
         ctx.setLineDash(dash.map((d) => d / cam.scale));
         ctx.strokeStyle = color;
         ctx.lineWidth = width / cam.scale;
@@ -541,8 +549,8 @@ export const pathsLayer: RenderLayer = {
           const a = poly[i];
           const b = poly[i + 1];
           ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
+          ctx.moveTo(a.x + (offAt?.(a.y) ?? 0), a.y);
+          ctx.lineTo(b.x + (offAt?.(b.y) ?? 0), b.y);
           ctx.strokeStyle = 'rgba(10,28,48,0.35)';
           ctx.lineWidth = (w * 1.45) / cam.scale;
           ctx.stroke();
@@ -651,12 +659,23 @@ export const decorationsLayer: RenderLayer = {
     const font = style.labels.default;
     beginWorld(ctx, env);
     clipToMapFrame(ctx, env);
-    // 屏幕空间文字的坐标换算：与 beginWorld 同一 MapTransform（含内容偏移，唯一换算点）
-    const tScreen = new MapTransform(cam, w, h, env.drawDx ?? env.contentOffsetX ?? 0);
-    // 视口裁剪：装饰只画视口内 cell（视口外像素本就不可见，不是抽稀）
+    // 屏幕坐标换算：MapTransform 只含相机；内容平移是 y 依赖重映射 → 点级 off(y)
+    const tScreen = new MapTransform(cam, w, h, 0);
+    const offAt = env.offsetAt;
+    const lambdaOff = env.drawDx ?? env.contentOffsetX ?? 0;
+    // 视口裁剪（装饰只画视口内 cell）：内容位移 y 依赖 → frame y 三点采样取位移极值，
+    // 保守区间判定（漏画比错画安全）
+    const frBox = getFrameRect(env);
+    let sMin = Infinity;
+    let sMax = -Infinity;
+    for (const fy of [frBox.minY, (frBox.minY + frBox.maxY) / 2, frBox.maxY]) {
+      const o = contentOffsetAt(env.proj, fy, lambdaOff);
+      sMin = Math.min(sMin, o);
+      sMax = Math.max(sMax, o);
+    }
     const padV = 4 / Math.max(cam.scale, 1e-6);
-    const vL = cam.x - tScreen.drawDx - w / 2 / cam.scale - padV;
-    const vR = cam.x - tScreen.drawDx + w / 2 / cam.scale + padV;
+    const vL = cam.x - sMax - w / 2 / cam.scale - padV;
+    const vR = cam.x - sMin + w / 2 / cam.scale + padV;
     const vT = cam.y + h / 2 / cam.scale + padV;
     const vB = cam.y - h / 2 / cam.scale + padV;
     const inView = (id: number) => {
@@ -700,7 +719,8 @@ export const decorationsLayer: RenderLayer = {
           occupied.push({ x: bx, y: by, w: bw, h: bh });
         };
         /** 屏幕坐标投影（走统一 MapTransform，标签随内容平移） */
-        const toScreen = (x: number, y: number) => tScreen.worldToScreen(x, y);
+        const toScreen = (x: number, y: number) =>
+          tScreen.worldToScreen(x + (offAt?.(y) ?? 0), y);
         const regionCenter = (r: { id: string; cells: number[] }): { x: number; y: number } | null => {
           const key = `${dataRev()}|${r.id}|${r.cells.length}`;
           const hit = regionCenterCache.get(key);
@@ -763,7 +783,7 @@ export const decorationsLayer: RenderLayer = {
             if (coreId === undefined) continue;
             const x = pcache.centers[coreId * 2];
             const y = pcache.centers[coreId * 2 + 1];
-            drawCoreSymbol(ctx, coreSym, x, y, sc2, r.color, style);
+            drawCoreSymbol(ctx, coreSym, x + (offAt?.(y) ?? 0), y, sc2, r.color, style);
           }
         }
 
@@ -774,7 +794,7 @@ export const decorationsLayer: RenderLayer = {
               if (!cell || !inView(id)) continue;
               const x = pcache.centers[id * 2];
               const y = pcache.centers[id * 2 + 1];
-              drawTree(ctx, x, y, (0.55 * sc) / cam.scale, ((id * 9973) % 100) / 100);
+              drawTree(ctx, x + (offAt?.(y) ?? 0), y, (0.55 * sc) / cam.scale, ((id * 9973) % 100) / 100);
             }
           }
         }
@@ -798,7 +818,7 @@ export const decorationsLayer: RenderLayer = {
             const x = pcache.centers[id * 2];
             const y = pcache.centers[id * 2 + 1];
             const label = cellMarker === 'id' ? String(id) : String(Math.round(cell.height));
-            const sp = tScreen.worldToScreen(x, y);
+            const sp = tScreen.worldToScreen(x + (offAt?.(y) ?? 0), y);
             if (sp.sx < -20 || sp.sx > w + 20 || sp.sy < -20 || sp.sy > h + 20) continue;
             ctx.fillStyle = 'rgba(255,255,255,0.7)';
             ctx.fillText(label, sp.sx, sp.sy);

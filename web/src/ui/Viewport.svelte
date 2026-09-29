@@ -28,7 +28,7 @@
   import {
     screenToContentLonLat,
     unwrapXAgainst,
-    worldCopyDxs,
+    contentOffsetAt,
     worldToScreenX,
     worldToScreenY,
   } from '../render/space';
@@ -184,13 +184,15 @@
       contentOffsetX,
       (x, y) => unproject(x, y, projection, pp),
       (ll) => project(ll, projection, pp),
+      projection,
     );
   }
 
   /** 投影点 → 屏幕（与地图 beginWorld 一致） */
   function toScreenXY(px: number, py: number, rect: DOMRect) {
+    // 内容位移 y 依赖（罗宾森 scale(y)·Δλ）；圆柱族退化常数
     return {
-      sx: worldToScreenX(px, cam, rect.width, contentOffsetX),
+      sx: worldToScreenX(px + contentOffsetAt(projection, py, contentOffsetX), cam, rect.width, 0),
       sy: worldToScreenY(py, cam, rect.height),
     };
   }
@@ -1106,8 +1108,11 @@
         const dx = e.clientX - lastX;
         lastX = e.clientX;
         lastY = e.clientY;
-        // 不 wrap：外框固定，wrap contentOffset 会让内容相对外框瞬移一个世界宽
-        contentOffsetX += dx / cam.scale;
+        // 不 wrap：外框固定，wrap contentOffset 会让内容相对外框瞬移一个世界宽。
+        // 平移 = **转动地球经度**（重映射）：Δλ 使内容位移 scale(cam.y)·Δλ，
+        // 除以相机纬度 scale → 拖动点跟手；墨卡托 scale=1 退化为原行为。
+        const sRef = projectionXScale(projection, cam.y) ?? 1;
+        contentOffsetX += dx / (cam.scale * sRef);
         requestRender();
         return;
       }

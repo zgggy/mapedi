@@ -16,7 +16,12 @@ import { sampleMidRing } from '../core/ring/hermite';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
 import { landSeaKindOf } from '../core/layer/landSea';
-import { projectionPeriodAt, projectionWorldPeriod, type ProjectionId } from '../core/project/projections';
+import {
+  projectionPeriodAt,
+  projectionWraps,
+  projectionXScale,
+  type ProjectionId,
+} from '../core/project/projections';
 import {
   buildIncidentEdges,
   patchBoundaryBook,
@@ -104,7 +109,7 @@ export function patchPieceEntry(
     entry.book,
     world,
     project,
-    projectionWorldPeriod(projKey) ?? Math.PI * 2,
+    (y) => projectionPeriodAt(projKey, y) ?? Math.PI * 2,
     entry.rings,
   );
   entry.fullWorld = world.cells.length > 0 && b.set.size === world.cells.length;
@@ -188,24 +193,32 @@ export function getCellSetRingsCached(
 /**
  * evenodd 奇偶：点被环集包住当且仅当穿越数为奇。
  *
- * **必须含周期副本**（P0：跨副本 evenodd XOR）：绘制把件按 x+k·period 实例化 XOR，
- * 而环集中在**一个**周期窗内；探针采样点落在窗外时（跨反子午线的海洋 / 过大大陆——
- * 用户报 #82474 #4870 #88313、"大陆过大了也会出现"的根因），单窗 raycast 报 0/1 与
- * 实绘相反 → flip 判反 → 整件内外颠倒。副本平铺后每个 x 恰落在一个副本内，取 k∈{-1,0,1}
- * 的 XOR 即实绘奇偶。
+ * **必须与实绘同一套副本语义**（跨副本 evenodd XOR——#82474 #4870 #88313
+ * 海洋/过大大陆整件内外反的根因：单窗 raycast 与实绘实例化 XOR 相反 → flip 判反）：
+ * 副本位移 = scale(y)·k·2π 是**每顶点 y 依赖**的重映射（伪圆柱周期随纬度内收），
+ * 点平移等价只在刚性平移下成立 → 逐段平移两端点做 raycast；
+ * 圆柱族 scale 常数时退化为刚性平移 = 原行为。
  */
-function ringParity(rings: Ring[], x: number, y: number, copies = true): boolean {
+function ringParity(
+  rings: Ring[],
+  x: number,
+  y: number,
+  copies = true,
+  scaleAt: (y: number) => number = () => 1,
+): boolean {
   let cross = 0;
   for (const k of copies ? [-1, 0, 1] : [0]) {
-    const xs = x + k * (Math.PI * 2);
+    const off = k * (Math.PI * 2);
     for (const ring of rings) {
       const pts = ring.pts;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
         const a = pts[j];
         const b = pts[i];
         if ((a.y > y) !== (b.y > y)) {
+          const ax = a.x + scaleAt(a.y) * off;
+          const bx = b.x + scaleAt(b.y) * off;
           const t = (y - a.y) / (b.y - a.y);
-          if (xs < a.x + t * (b.x - a.x)) cross++;
+          if (x < ax + t * (bx - ax)) cross++;
         }
       }
     }
@@ -235,7 +248,9 @@ function computeFrameFlip(
   if (!n) return false;
   // 补边 frameY 与绘制同源（frameYEnv）；ringParity 的副本开关 = draw 是否有副本
   const frameY = frameYEnv(project, projKey);
-  const copies = projectionWorldPeriod(projKey) !== null;
+  // 实绘有副本 ⟺ 投影支持回绕（含罗宾森）；探针副本语义必须与实绘一致
+  const copies = projectionWraps(projKey);
+  const scaleAt = (y: number) => projectionXScale(projKey, y) ?? 1;
   const closed: Ring[] = [];
   for (const r of rings) {
     for (const d of prepareDisplayRings(r, frameY)) closed.push(d);
@@ -251,7 +266,7 @@ function computeFrameFlip(
     const c = world.cells[cellIds[i]];
     if (!c) continue;
     const p = project(c.center);
-    if (ringParity(sampled, p.x, p.y, copies)) plain++;
+    if (ringParity(sampled, p.x, p.y, copies, scaleAt)) plain++;
     else flip++;
   }
   if (set.size < n) {
@@ -262,7 +277,7 @@ function computeFrameFlip(
       const c = world.cells[i];
       if (!c) continue;
       const p = project(c.center);
-      if (ringParity(sampled, p.x, p.y, copies)) flip++;
+      if (ringParity(sampled, p.x, p.y, copies, scaleAt)) flip++;
       else plain++;
       seen++;
     }
