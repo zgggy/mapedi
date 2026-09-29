@@ -7,6 +7,7 @@
   import {
     unproject,
     project,
+    projectionXScale,
     type ProjectionId,
     type ProjectionParams,
     defaultProjParams,
