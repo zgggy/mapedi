@@ -45,7 +45,10 @@ export interface RenderEnv {
   h: number;
   style: StyleSet;
   focus: string;
+  /** 几何档投影（动画**量化档**；缓存键来源）：环/三角化/paths 用它 */
   proj: ProjSpec;
+  /** 连续投影（动画实时 t）：scale/轮廓/裁剪/命中等视图侧用它——平滑且不入键 */
+  viewSpec?: ProjSpec;
   pp: ProjectionParams;
   smooth: number;
   pcache: ProjCache;
@@ -259,6 +262,8 @@ export interface PieceParams {
   smooth: number;
   selected: boolean;
   copies: number[];
+  /** 动画下一档的环（与本件 rings 同件同序）；GL 顶点 mix 到连续 t */
+  ringsNext?: DisplayRing[];
   /** px→用户单位换算 */
   camScale: number;
 }

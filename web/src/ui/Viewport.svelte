@@ -3,16 +3,21 @@
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
-  import { patchPieceEntry, invalidatePieceEntries } from '../render/borderCache';
+  import { patchPieceEntry, invalidatePieceEntries, invalidateSpecEntries } from '../render/borderCache';
   import {
+    PROJ_ANIM_SEG,
+    blendProj,
     unproject,
     project,
     projectionXScale,
+    quantizeBlend,
+    type ProjSpec,
     type ProjectionId,
     type ProjectionParams,
     defaultProjParams,
   } from '../core/project/projections';
   import {
+    buildRenderEnv,
     defaultCamera,
     drawWorld,
     screenToWorld,
@@ -20,8 +25,9 @@
     type Camera,
     type HoverInfo,
   } from '../render/map2d';
-  import { getProjCache } from '../render/projCache';
+  import { getProjCache, invalidateProjSpec } from '../render/projCache';
   import {
+    buildPieceParams,
     cellsLayer,
     frameLayer,
     pathsLayer,
@@ -117,6 +123,26 @@
   let lastY = 0;
   /** 右键拖动：地图内容相对于矩形的偏移 */
   let contentOffsetX = $state(0);
+  /** 投影动画：viewSpec = 连续 t（视图侧平滑）；proj = 量化几何档（缓存键有限）。
+   *  档几何顶点 mix 到连续 t —— project 对 t 线性 → mix ≡ 连续 t 的严格投影。 */
+  let viewSpec = $state<ProjSpec>(projection);
+  const proj = $derived(quantizeBlend(viewSpec));
+  let animFrom: ProjectionId | null = null;
+  let animStart = -1;
+  let pendingPrime = false;
+  let lastProjection = projection;
+  const PROJ_ANIM_MS = 400;
+  const easeInOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+  $effect(() => {
+    if (projection === lastProjection) return;
+    const from = lastProjection;
+    lastProjection = projection;
+    if (animFrom === null) animFrom = from; // 动画中再切换：保留源、blend 目标跟随新 projection（平滑转向）
+    pendingPrime = true;
+    animStart = -1;
+    requestRender();
+  });
   let panningMode: 'cam' | 'content' | null = null;
   /** 路/航/河：正在绘制的路径控制点 */
   let pathDraft = $state<LonLat[] | null>(null);
@@ -183,9 +209,9 @@
       rect.width,
       rect.height,
       contentOffsetX,
-      (x, y) => unproject(x, y, projection, pp),
+      (x, y) => unproject(x, y, viewSpec, pp),
       (ll) => project(ll, projection, pp),
-      projection,
+      viewSpec,
     );
   }
 
@@ -193,7 +219,7 @@
   function toScreenXY(px: number, py: number, rect: DOMRect) {
     // 内容位移 y 依赖（罗宾森 scale(y)·Δλ）；圆柱族退化常数
     return {
-      sx: worldToScreenX(px + contentOffsetAt(projection, py, contentOffsetX), cam, rect.width, 0),
+      sx: worldToScreenX(px + contentOffsetAt(viewSpec, py, contentOffsetX), cam, rect.width, 0),
       sy: worldToScreenY(py, cam, rect.height),
     };
   }
@@ -218,10 +244,10 @@
     const pp = projParamsOr();
     if (!lls.length) return [];
     const out: { x: number; y: number }[] = [];
-    let prev = project(lls[0], projection, pp);
+    let prev = project(lls[0], viewSpec, pp);
     out.push(prev);
     for (let i = 1; i < lls.length; i++) {
-      const p = project(lls[i], projection, pp);
+      const p = project(lls[i], viewSpec, pp);
       out.push({ x: unwrapXAgainst(prev.x, p.x), y: p.y });
       prev = out[out.length - 1];
     }
@@ -475,7 +501,7 @@
         if (!poly?.length) continue;
         const p = new Path2D();
         for (let i = 0; i < poly.length; i++) {
-          const q = project(poly[i], projection, ppp);
+          const q = project(poly[i], viewSpec, ppp);
           const s = toScreen(q.x, q.y);
           if (i === 0) p.moveTo(s.sx, s.sy);
           else p.lineTo(s.sx, s.sy);
@@ -505,7 +531,7 @@
         ctx.fillStyle = strong ? '#ffe68c' : 'rgba(235,240,245,0.88)';
         ctx.fillText(text, sx, sy);
       };
-      const pc = getProjCache(world, projection, projParamsOr());
+      const pc = getProjCache(world, proj, projParamsOr());
       const brushR = brushRadiusPx();
       // 笔刷圈内 cell 才标高度（与 hover 光标一致，不扫全图）
       const hits = cellsInBrush(world, brushLon, brushLat, brushRadiusDeg);
@@ -662,6 +688,7 @@
           focusLayer,
           focusLayerId: focusLayer,
           projection,
+          viewSpec,
           projParams,
           reliefSmooth,
           styleId,
@@ -706,6 +733,34 @@
     }
   }
 
+  /** 预建动画关键帧档（几何全链：ProjCache → 件环 → 三角化）；v1 同步执行（点击后冻结一次，批3 Worker 化） */
+  function primeBlendSegs(
+    from: ProjectionId,
+    to: ProjectionId,
+    baseOpts: Record<string, unknown>,
+  ) {
+    const ctx = canvas?.getContext('2d');
+    if (!ctx) return;
+    for (const q of [1 / PROJ_ANIM_SEG, 2 / PROJ_ANIM_SEG, 1]) {
+      const spec = quantizeBlend(blendProj(from, to, q), PROJ_ANIM_SEG);
+      const envP = buildRenderEnv(ctx, world, cam, hoverId, window.devicePixelRatio || 1, {
+        ...(baseOpts as Parameters<typeof drawWorld>[5]),
+        projection: spec,
+        viewSpec: spec,
+        progressiveBoot: false,
+      });
+      const ps = buildPieceParams(envP);
+      ensureMapGl()?.prime(ps);
+    }
+  }
+
+  /** 动画结束清中间档缓存（档键 = from>to@，端点档并入 id 键天然保留） */
+  function clearBlendMid(from: ProjectionId, to: ProjectionId): void {
+    const prefix = `${from}>${to}@`;
+    invalidateSpecEntries(prefix);
+    invalidateProjSpec(prefix);
+  }
+
   function render() {
     if (!canvas) return;
     syncBackingStore();
@@ -716,8 +771,8 @@
         patchPieceEntry(
           world,
           `piece:${d.layerId}:${d.regionId}:0`,
-          projection,
-          (ll) => project(ll, projection, projParams ?? defaultProjParams()),
+          proj,
+          (ll) => project(ll, proj, projParams ?? defaultProjParams()),
           d.added,
           d.removed,
         );
@@ -732,7 +787,7 @@
     const patches = editor.consumePiecePatches();
     if (patches?.length) {
       for (const pt of patches) {
-        patchPieceEntry(world, pt.setKey, projection, (ll) => project(ll, projection, projParams ?? defaultProjParams()), pt.added, pt.removed);
+        patchPieceEntry(world, pt.setKey, proj, (ll) => project(ll, proj, projParams ?? defaultProjParams()), pt.added, pt.removed);
       }
     }
     // 松手重算已落地 → 清色块高亮（元素由真实件接替出现）
@@ -750,7 +805,7 @@
     const displayPieces = pathEdit
       ? undefined
       : composeShownPieces(world, focusLayer, highlightRegionId);
-    drawWorld(ctx, world, cam, hoverId, dpr, {
+    const opts = {
       focusLayer,
       focusLayerId: focusLayer,
       highlightRegionId,
@@ -776,7 +831,27 @@
         pathEdit && dragPathIdx >= 0 && world.paths?.[dragPathIdx]
           ? world.paths[dragPathIdx].id
           : null,
-    });
+    };
+    // —— 投影动画：先预建关键帧档（同步全量重建 ~3×档；批3 Worker 化后消除冻结），
+    //    再推进连续 t；几何档 = quantizeBlend(viewSpec)，顶点 mix 到连续 t ——
+    if (animFrom !== null) {
+      if (pendingPrime) {
+        primeBlendSegs(animFrom, projection, opts);
+        pendingPrime = false;
+        animStart = performance.now();
+      }
+      if (animStart >= 0) {
+        const raw = Math.min(1, (performance.now() - animStart) / PROJ_ANIM_MS);
+        viewSpec = raw >= 1 ? projection : blendProj(animFrom, projection, easeInOut(raw));
+        if (raw >= 1) {
+          clearBlendMid(animFrom, projection);
+          animFrom = null;
+        } else {
+          requestRender();
+        }
+      }
+    }
+    drawWorld(ctx, world, cam, hoverId, dpr, { ...opts, projection: proj, viewSpec });
     // GPU 填充已在 drawPreparedElement 内按绘制序合成进 2d，这里不再叠加。
     renderOverlay();
   }
@@ -846,6 +921,8 @@
     void pathDraft;
     void roadSegments.length;
     void projection;
+    void proj;
+    void viewSpec;
     void reliefSmooth;
     void projParams;
     void styleId;
@@ -1112,7 +1189,7 @@
         // 不 wrap：外框固定，wrap contentOffset 会让内容相对外框瞬移一个世界宽。
         // 平移 = **转动地球经度**（重映射）：Δλ 使内容位移 scale(cam.y)·Δλ，
         // 除以相机纬度 scale → 拖动点跟手；墨卡托 scale=1 退化为原行为。
-        const sRef = projectionXScale(projection, cam.y) ?? 1;
+        const sRef = projectionXScale(viewSpec, cam.y) ?? 1;
         contentOffsetX += dx / (cam.scale * sRef);
         requestRender();
         return;

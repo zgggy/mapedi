@@ -18,6 +18,7 @@ import {
   projectionWraps,
   projectionXScale,
   projSpecKey,
+  quantizeBlend,
   unproject,
 } from '../src/core/project/projections';
 
@@ -88,6 +89,27 @@ describe('blendProj 值插值投影族', () => {
     expect(projectionFrameLat(blendProj('mercator', 'robinson', 0))).toBe(85);
     expect(projectionFrameLat(blendProj('mercator', 'robinson', 1))).toBe(90);
     expect(projectionFrameLat(blendProj('mercator', 'robinson', 0.5))).toBeCloseTo(87.5, 9);
+  });
+
+  it('quantizeBlend：档 = floor 段（与渲染 alpha 推导同式）；端点并入 id 键', () => {
+    const A = 'mercator' as const;
+    const B = 'robinson' as const;
+    // 档 0 → from id（复用现缓存）
+    expect(quantizeBlend(blendProj(A, B, 0))).toBe(A);
+    expect(quantizeBlend(blendProj(A, B, 0.01))).toBe(A);
+    // 终点 → to id 本身（键合一，动画结束零重建）
+    expect(quantizeBlend(blendProj(A, B, 1))).toBe(B);
+    expect(quantizeBlend(blendProj(A, B, 0.999))).toEqual(blendProj(A, B, 2 / 3));
+    // 段下界（与 mapRenderer alpha = t·n - floor(t·n) 推导一致）
+    expect(quantizeBlend(blendProj(A, B, 0.4))).toEqual(blendProj(A, B, 1 / 3));
+    expect(quantizeBlend(blendProj(A, B, 1 / 3))).toEqual(blendProj(A, B, 1 / 3)); // 段左闭
+    expect(quantizeBlend(blendProj(A, B, 0.3333333))).toBe('mercator'); // 严格小于 1/3 → 段 0
+    // 非 blend 原样
+    expect(quantizeBlend(A)).toBe(A);
+    // 档键有限（3 档 + 两端 id）
+    const keys = new Set<string>();
+    for (let i = 0; i <= 100; i++) keys.add(projSpecKey(quantizeBlend(blendProj(A, B, i / 100))));
+    expect(keys.size).toBeLessThanOrEqual(5); // A、B、1/3、2/3（+端点别名）
   });
 
   it('projSpecKey：对象 key 化（防 [object Object] 撞键）+ 有限档', () => {

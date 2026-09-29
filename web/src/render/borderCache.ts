@@ -64,6 +64,13 @@ export function invalidatePieceEntries(prefix: string): void {
   }
 }
 
+/** 清指定投影规格前缀的件环缓存（动画结束清中间档；键 = setKey|projSpecKey|geomRev） */
+export function invalidateSpecEntries(prefix: string): void {
+  for (const k of [...ringsCache.keys()]) {
+    if (k.includes(`|${prefix}`)) ringsCache.delete(k);
+  }
+}
+
 export function invalidateBorderCache(): void {
   ringsCache = new Map();
   pairEdgeCache = null;

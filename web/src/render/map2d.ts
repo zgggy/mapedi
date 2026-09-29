@@ -51,14 +51,15 @@ export function buildRenderEnv(
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
   const style = styleById(opts?.styleId ?? 'dark');
-  const proj = opts?.projection ?? 'mercator';
+  const proj = opts?.projection ?? 'mercator'; // 几何档（量化键）
+  const viewSpec = opts?.viewSpec ?? proj; // 连续投影（动画实时 t；缺省=档）
   const pp = opts?.projParams ?? defaultProjParams();
   const contentOffsetX = opts?.contentOffsetX ?? 0;
   const pcache = getProjCache(world, proj, pp);
-  // 副本 = 整数 k（worldCopyKs 已按 scale(y) 极值判可见）；平移 = Δλ
+  // 副本 = 整数 k（worldCopyKs 按 scale(y) 极值判可见——viewSpec 连续判定平滑）；平移 = Δλ
   const copyKs = opts?.singleWorldCopy
     ? [0]
-    : worldCopyKs(contentOffsetX, cam, w, proj, pcache.worldBBox);
+    : worldCopyKs(contentOffsetX, cam, w, viewSpec, pcache.worldBBox);
   const padX = 4 / Math.max(cam.scale, 1e-6);
   const padY = 4 / Math.max(cam.scale, 1e-6);
   const bb = pcache.worldBBox;
@@ -79,6 +80,7 @@ export function buildRenderEnv(
     style,
     focus: opts?.focusLayer ?? 'height',
     proj,
+    viewSpec,
     pp,
     smooth: opts?.reliefSmooth ?? 0,
     pcache,
@@ -98,7 +100,7 @@ export function buildRenderEnv(
     isDragging: opts?.isDragging,
   };
   // 点级内容位移：投影域 = scale(y)·λ偏移（圆柱族退化常数；非回绕 = λ 即投影域）
-  env.offsetAt = (y: number) => contentOffsetAt(proj, y, env.drawDx ?? contentOffsetX);
+  env.offsetAt = (y: number) => contentOffsetAt(viewSpec, y, env.drawDx ?? contentOffsetX);
   return env;
 }
 
@@ -171,6 +173,8 @@ export function drawWorld(
     focusLayer?: string;
     highlightRegionId?: string | null;
     projection?: ProjSpec;
+    /** 连续投影（动画实时 t）；缺省 = projection */
+    viewSpec?: ProjSpec;
     projParams?: ProjectionParams;
     reliefSmooth?: number;
     styleId?: string;
@@ -204,14 +208,15 @@ export function drawWorld(
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
   const style = styleById(opts?.styleId ?? 'dark');
-  const proj = opts?.projection ?? 'mercator';
+  const proj = opts?.projection ?? 'mercator'; // 几何档（量化键）
+  const viewSpec = opts?.viewSpec ?? proj; // 连续投影（动画实时 t）
   const pp = opts?.projParams ?? defaultProjParams();
   const contentOffsetX = opts?.contentOffsetX ?? 0;
   const pcache = getProjCache(world, proj, pp);
-  // 副本 = 整数 k（scale(y) 判可见）；rest 层按 λ 语义逐 pass 取 drawDx
+  // 副本 = 整数 k（viewSpec 连续判定 → 动画中平滑）；rest 层按 λ 语义逐 pass 取 drawDx
   const copyKs = opts?.singleWorldCopy
     ? [0]
-    : worldCopyKs(contentOffsetX, cam, w, proj, pcache.worldBBox);
+    : worldCopyKs(contentOffsetX, cam, w, viewSpec, pcache.worldBBox);
   const env = buildRenderEnv(ctx, world, cam, hoverId, dpr, opts);
 
   const pipeline = opts?.pipeline ?? defaultPipeline;

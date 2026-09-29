@@ -62,6 +62,24 @@ export function projSpecKey(s: ProjSpec): string {
   return isBlend(s) ? `${s.a}>${s.b}@${s.t.toFixed(3)}` : s;
 }
 
+/**
+ * 动画档量化：连续 t → N 段关键帧（几何缓存按档键，键有限不爆）。
+ * - 档 0 → **from id 本身**（复用现缓存，切换零成本）；
+ * - 档 N → blend(from,to,1)（端点几何精确；键与 id 不同，动画结束时统一清理）。
+ * 渲染几何 = 相邻档顶点 mix；因 project 对 t 线性，mix 结果 ≡ 连续 t 的严格投影
+ * （唯一微差在 Hermite 中段，端点严格）。
+ */
+/** 动画关键帧档数（量化的唯一来源——渲染 alpha 推导/预建必须同值） */
+export const PROJ_ANIM_SEG = 3;
+
+export function quantizeBlend(s: ProjSpec, n = PROJ_ANIM_SEG): ProjSpec {
+  if (!isBlend(s)) return s;
+  const q = Math.floor(s.t * n + 1e-9) / n; // floor：档 = 所在段下界（与渲染 alpha 推导同式）
+  if (q <= 0) return s.a;
+  if (q >= 1) return s.b; // 终档 = to id 本身（几何同 blend(...,1)，键合一 → 结束零重建）
+  return blendProj(s.a, s.b, q);
+}
+
 /** UI 元数据/降级显示用基准 id（blend → 过渡中按 t 取主端）。 */
 export function projSpecBase(s: ProjSpec): ProjectionId {
   return isBlend(s) ? (s.t >= 0.5 ? s.b : s.a) : s;

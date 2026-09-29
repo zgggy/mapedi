@@ -22,7 +22,9 @@ export interface ProjCache {
   view: ViewIndex;
 }
 
-let cache: ProjCache | null = null;
+// 多槽 LRU（键控）：动画档切换不得互相驱逐（单槽会让预建失效、每档全量重建）。
+const cacheSlots = new Map<string, ProjCache>();
+const CACHE_SLOTS = 8;
 
 function cacheKey(world: World, proj: ProjSpec, pp: ProjectionParams): string {
   // projSpecKey：blend 对象必须 key 化（直接拼串变 [object Object] 撞键）
@@ -72,17 +74,34 @@ export function getProjCache(
   pp: ProjectionParams,
 ): ProjCache {
   const key = cacheKey(world, proj, pp);
-  // 只按 key 失效：key 含 seed/cellCount/proj/pp，覆盖几何与投影变化。
+  // 只按 key 失效：key 含 seed/cellCount/spec/pp，覆盖几何与投影变化。
   // 不按 world 引用失效——store 浅拷贝 {…world} 会换引用但几何没变，全量重建 O(N) 太贵。
-  if (cache && cache.key === key) return cache;
-  cache = buildProjCache(world, proj, pp);
-  return cache;
+  const hit = cacheSlots.get(key);
+  if (hit) return hit;
+  const built = buildProjCache(world, proj, pp);
+  cacheSlots.set(key, built);
+  if (cacheSlots.size > CACHE_SLOTS) {
+    const first = cacheSlots.keys().next().value;
+    if (first !== undefined) cacheSlots.delete(first);
+  }
+  return built;
 }
 
 /** Worker 预建结果落盘（同 key 才接受；转移对象免主线程 O(N) 首建） */
 export function installProjCache(next: ProjCache): void {
-  if (cache && cache.key === next.key) return;
-  cache = next;
+  if (cacheSlots.get(next.key)) return;
+  cacheSlots.set(next.key, next);
+  if (cacheSlots.size > CACHE_SLOTS) {
+    const first = cacheSlots.keys().next().value;
+    if (first !== undefined) cacheSlots.delete(first);
+  }
+}
+
+/** 清指定投影规格的槽（动画结束清中间档缓存） */
+export function invalidateProjSpec(specKey: string): void {
+  for (const k of [...cacheSlots.keys()]) {
+    if (k.includes(`:${specKey}:`)) cacheSlots.delete(k);
+  }
 }
 
 /** 纯构建（生成/加载 Worker 与同步回退共用同一实现） */
@@ -211,5 +230,5 @@ export function buildProjCache(
 }
 
 export function invalidateProjCache(): void {
-  cache = null;
+  cacheSlots.clear();
 }

@@ -30,8 +30,11 @@ import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geom
 import { triangulateRings, trianglesMatchRings } from './triangulate';
 import { frameOutline } from '../space';
 import {
+  PROJ_ANIM_SEG,
+  blendProj,
   isBlend,
   project,
+  quantizeBlend,
   projectionPeriodAt,
   projectionWraps,
   projectionXScale,
@@ -263,6 +266,38 @@ function mergeF(arrays: Float32Array[]): Float32Array | null {
   return out;
 }
 
+/**
+ * 动画档间顶点 mix：`project` 对 t 线性 → mix(档seg, 档seg+1, α) ≡ 连续 t 的严格投影
+ * （唯一微差在 Hermite 采样段——两档各自样条上的采样点线性插值，端点严格）。
+ * 拓扑不齐（三角数不同）→ 返回 null = 该帧降级本档（不猜、不补）。
+ */
+function mixPieceGeo(a: PieceGeo, b: PieceGeo, alpha: number): PieceGeo | null {
+  const ok = (x: Float32Array | null, y: Float32Array | null): boolean =>
+    (!x && !y) || (!!x && !!y && x.length === y.length);
+  if (!ok(a.tri, b.tri) || !ok(a.xorTris, b.xorTris) || !ok(a.strip, b.strip)) return null;
+  const lf = (x: Float32Array | null, y: Float32Array | null): Float32Array | null => {
+    if (!x || !y) return x;
+    const o = new Float32Array(x.length);
+    for (let i = 0; i < x.length; i++) o[i] = x[i] + (y[i] - x[i]) * alpha;
+    return o;
+  };
+  const box = a.bbox && b.bbox
+    ? {
+        minX: a.bbox.minX + (b.bbox.minX - a.bbox.minX) * alpha,
+        maxX: a.bbox.maxX + (b.bbox.maxX - a.bbox.maxX) * alpha,
+        minY: a.bbox.minY + (b.bbox.minY - a.bbox.minY) * alpha,
+        maxY: a.bbox.maxY + (b.bbox.maxY - a.bbox.maxY) * alpha,
+      }
+    : a.bbox;
+  return {
+    tri: lf(a.tri, b.tri),
+    triOk: a.triOk && b.triOk,
+    xorTris: lf(a.xorTris, b.xorTris),
+    strip: lf(a.strip, b.strip),
+    bbox: box,
+  };
+}
+
 export class MapGlRenderer {
   private gl: WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
@@ -391,7 +426,21 @@ export class MapGlRenderer {
       this.setCam(env, this.progStrip);
 
       const tParams = performance.now();
-      const pieces = channels.elements ? buildPieceParams(env) : [];
+      let pieces = channels.elements ? buildPieceParams(env) : [];
+      // 动画：按下一档再组装一次（同 displayPieces 序 → zip 填 ringsNext，GL 顶点 mix 到连续 t）
+      if (pieces.length && env.viewSpec && isBlend(env.viewSpec)) {
+        const tt = env.viewSpec.t;
+        const nSeg = PROJ_ANIM_SEG;
+        const seg = Math.min(nSeg - 1, Math.floor(tt * nSeg + 1e-9));
+        if (tt * nSeg - seg > 1e-4 && seg < nSeg - 1) {
+          const nextSpec = quantizeBlend(blendProj(env.viewSpec.a, env.viewSpec.b, (seg + 1) / nSeg));
+          const piecesNext = buildPieceParams({ ...env, proj: nextSpec });
+          // zip 按 index（两 env 仅 proj 不同 → 同 displayPieces 序）；key 校验防串件
+          for (let i = 0; i < pieces.length && i < piecesNext.length; i++) {
+            if (pieces[i].key === piecesNext[i].key) pieces[i].ringsNext = piecesNext[i].rings;
+          }
+        }
+      }
       const tSubmit = performance.now();
       if (channels.cellsMesh && env.showCellMesh) this.drawCellMesh(env);
       for (const piece of pieces) this.drawPiece(env, piece, s);
@@ -426,7 +475,8 @@ export class MapGlRenderer {
     if (pr.uSize) gl.uniform2f(pr.uSize, env.w, env.h);
     // 水平结构（scale(y)·λ）：uPan=Δλ；scale 走双通道（静态=两端同投影；动画=值插值）
     if (pr.uPan) gl.uniform1f(pr.uPan, env.contentOffsetX ?? 0);
-    const spec = env.proj;
+    // viewSpec = 连续 t（平移/副本 scale 必须与顶点 mix 同步 → uBlendT 用连续进度）
+    const spec = env.viewSpec ?? env.proj;
     const A = isBlend(spec) ? spec.a : spec;
     const B = isBlend(spec) ? spec.b : spec;
     const rob = (id: ProjSpec) => (id === 'robinson' ? 1 : 0);
@@ -670,7 +720,16 @@ export class MapGlRenderer {
       this.drawQuad(f.minX, f.minY, f.maxX - f.minX, f.maxY - f.minY, c[0], c[1], c[2], f.alpha * c[3]);
       return;
     }
-    const geo = this.pieceGeo(piece.rings, piece.smooth);
+    let geo = this.pieceGeo(piece.rings, piece.smooth);
+    // 动画：下一档几何 mix 到连续 t（α 与 viewSpec.t 段内推导，档与 quantizeBlend 同式）
+    if (piece.ringsNext && env.viewSpec && isBlend(env.viewSpec)) {
+      const tt = env.viewSpec.t;
+      const alpha = tt * PROJ_ANIM_SEG - Math.floor(tt * PROJ_ANIM_SEG + 1e-9);
+      if (alpha > 1e-4 && geo) {
+        const geoB = this.pieceGeo(piece.ringsNext, piece.smooth);
+        if (geoB) geo = mixPieceGeo(geo, geoB, alpha) ?? geo;
+      }
+    }
     const gbox = geo?.bbox;
     if (!geo || !gbox) return;
     const strokeOn = piece.strokeW > 0 && piece.stroke !== 'transparent';

@@ -1,11 +1,11 @@
 # Mapedi 显示逻辑一览（供审阅）
 
 > **现行契约**（过时稿见 `docs/_archive/`，勿参考）  
-> 统一接口：选中 ≡ 显示；唯一边界类 = 元素边界；填充 = 边界内填充
+> 统一接口：显隐唯一开关 = `layer.visible`（旧「选中 ≡ 显示」已于 2026-09-28 废除）；唯一边界类 = 元素边界；填充 = 边界内填充
 
 ## 核心约定
 
-1. **`isLayerShown`**：`visible || 选中(focusLayerId)` —— 点选中与点显隐，地图上**同一套**填充+边界  
+1. **`isLayerShown`**：只看 `layer.visible`（`focusLayerId` 参数已被 `void` 忽略）——**眼睛钮切显隐，行点击只聚焦+开工作区**；焦点/选中不改变显隐  
 2. **`composeShownPieces`**：所有 shown 层的元素碎片（含父内切分 `c(A)`），**无图层特殊性**  
 3. **`elementsLayer`**：唯一绘制入口  
    - 海岸线（陆–海）**默认一直画**（显式常显，不进第二套 pipeline）  
@@ -36,7 +36,7 @@
 - **相机即 uniform**：几何按环对象缓存（WeakMap → VBO），缩放/平移只改 uniform；零重烘、零 drawImage、零读回。世界副本 = 顶点着色器 `aDx` 实例属性。
 - **evenodd = stencil 奇偶**（外部参考点三角扇 + INVERT）：含世界副本重叠不叠色；每片 scissor 局部清 stencil（不做全幅清屏）。
 - **地图外框 = gl.scissor**（与 `clipToMapFrame` 同矩形）；框外遮罩仍在 frame 层。
-- **GL 不可用** = 清屏 + 视口内提示横幅，**不回退 2D 代画**（Canvas2D 已归档）。
+- **GL 不可用** = 清屏 + 视口内提示横幅，**不回退 2D 代画**（Canvas2D 已归档）。**已知缺陷**（2026-09-29 评审 P0-2）：当前失败路径无 `contextrestored` 恢复、失败连 2D 余量层也不画 → 永久黑屏；修复是还债步骤 2（`ROADMAP_REFACTOR.md`）。
 - 非纯色样式（CanvasGradient）不支持即拒（GL 只吃纯色）。
 
 ## 模块边界（`core/ring/*`）
@@ -69,11 +69,11 @@
 | # | 层 | 职责 |
 |---|-----|------|
 | 1 | `bgLayer` | 海色底 |
-| 2 | `cellsLayer` | 选中高亮描边 |
+| 2 | `cellsLayer` | **空壳死层**（仅 clip/restore 无绘制，2026-09-29 评审确认；还债步骤 7 待删） |
 | 3 | `cellsMeshLayer` | 「地块」网格（仅该层选中/显示） |
 | 4 | **`elementsLayer`** | 海岸 + 全部 shown 层元素（填充/边界/内缘） |
-| 5 | `pathsLayer` | 路/航/河 |
-| 6 | `decorationsLayer` / `frameLayer` | 名称/标记 / 外框（GL 模式下 1–4 在 GL 画布、5–6 在 2D 画布，z 序不变） |
+| 5 | `pathsLayer` | 路/航/河（+ 自由层路径编辑用 `pathPipeline = [cellsLayer, pathsLayer, frameLayer]`） |
+| 6 | `decorationsLayer` / `frameLayer` | 名称/标记/符号（**单循环**，四配置 labelMode/coreSymbol/cellSymbol/cellMarker）/ 外框（GL 模式下 1–4 在 GL 画布、5–6 在 2D 画布，z 序不变） |
 
 ## 废弃代码
 
@@ -83,9 +83,9 @@
 
 边界宽 · 内阴影宽（向内渐隐）· 平滑（样条圆度）· 填充开关 · 填充透明  
 
-**【阴影暂时停用】**：按产品决定，架构稳定前**显示不渲染内阴影**（两后端同源停用：`buildPieceParams` 的
-`shadowW/shadowAlpha` 归零，样式参数保留）。恢复条件：二期架构落地后按同一 Φ 剖面恢复——去掉归零即可
-（Canvas 的 clip+blur 与 GL 的场图集实现都在，只是不被触发）。
+**【阴影已整体归档·永不做】**：2026-09-28 用户拍板"不要阴影，所有阴影相关功能全部归档"——`ShadowStyle`、
+样式面板阴影组、Canvas clip+blur、GL Φ 剖面场图集已**物理删除**（仅归档目录留档，2026-09-29 grep 确认
+src 零残留）。旧的"恢复条件"作废；任何地方不要写"阴影恢复时…"（见 `ROADMAP_REFACTOR.md` §四 已否决项）。
 
 ## 元素选中
 
