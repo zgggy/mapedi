@@ -192,7 +192,45 @@ export function chainEdgesToMidpointRings(
   const usedE = new Array(edges.length).fill(false);
   const rings: MidRing[] = [];
 
+  const buildRingFrom = (
+    edgeIdx: number[],
+    keyList: string[],
+    closed: boolean,
+  ): MidRing | null => {
+    const nE = edgeIdx.length;
+    if (nE < 2) return null;
+    const pts: Pt[] = [];
+    let prevX: number | null = null;
+    for (let i = 0; i < nE; i++) {
+      const e = edges[edgeIdx[i]];
+      const m = e.midpoint ?? edgeMidpoint(e.p0, e.p1, period);
+      const mm = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, period), y: m.y };
+      pts.push(mm);
+      prevX = mm.x;
+    }
+    const keys = keyList.slice(0, closed ? nE : nE + 1);
+    const nV = closed ? nE : nE - 1;
+    const rawVerts: Pt[] = [];
+    for (let i = 0; i < nV; i++) {
+      const a = pts[i];
+      const b = pts[i + 1] ?? (closed ? { x: unwrapXAgainst(a.x, pts[0].x, period), y: pts[0].y } : pts[i]);
+      const vk = keys[(i + 1) % keys.length];
+      const v = vk ? rep.get(vk) : undefined;
+      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+        rawVerts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      } else {
+        rawVerts.push({ x: unwrapXAgainst(a.x, v.x, period), y: v.y });
+      }
+    }
+    return { pts, verts: alignVerts(pts, rawVerts), closed };
+  };
+
+  /**
+   * 走链 + **栈式拆环**：到重复顶点即弹出子环、外链保留（此前的拆法会吞掉
+   * 子环之前的链段 → 外环丢失 → 局部内外反）。终点回到起点 = 闭合；走死 = 开链。
+   */
   const walkFrom = (startEdge: number): MidRing[] => {
+    const out: MidRing[] = [];
     const e0 = edges[startEdge];
     usedE[startEdge] = true;
     const startK = e0.k0;
@@ -203,27 +241,42 @@ export function chainEdgesToMidpointRings(
 
     for (let guard = 0; guard < edges.length + 8; guard++) {
       if (curK === startK) break;
+      // 角序续接（同侧转定则）：接触点取「入边反向的下一条」，不走错边
       const nbs = adj.get(curK) ?? [];
       let nextK: string | null = null;
       let nextEi = -1;
-      for (const nk of nbs) {
-        if (nk === prevK && nbs.length > 1) continue;
-        const eis = edgeBetween.get(ekey(curK, nk)) ?? [];
-        const free = eis.find((i) => !usedE[i]);
-        if (free === undefined) continue;
-        nextK = nk;
-        nextEi = free;
-        break;
+      const curPt = rep.get(curK);
+      const prevPt = rep.get(prevK);
+      if (curPt && prevPt) {
+        const inAng = Math.atan2(prevPt.y - curPt.y, prevPt.x - curPt.x);
+        let bestOff = Infinity;
+        for (const nk of nbs) {
+          if (nk === prevK && nbs.length > 1) continue;
+          const eis = edgeBetween.get(ekey(curK, nk)) ?? [];
+          const free = eis.find((i) => !usedE[i]);
+          if (free === undefined) continue;
+          const np = rep.get(nk);
+          if (!np) continue;
+          const outAng = Math.atan2(np.y - curPt.y, np.x - curPt.x);
+          let off = inAng - outAng;
+          while (off <= 1e-12) off += Math.PI * 2;
+          while (off > Math.PI * 2) off -= Math.PI * 2;
+          if (off < bestOff) {
+            bestOff = off;
+            nextK = nk;
+            nextEi = free;
+          }
+        }
       }
       if (!nextK || nextEi < 0) {
         for (const nk of nbs) {
+          if (nk === prevK && nbs.length > 1) continue;
           const eis = edgeBetween.get(ekey(curK, nk)) ?? [];
           const free = eis.find((i) => !usedE[i]);
-          if (free !== undefined) {
-            nextK = nk;
-            nextEi = free;
-            break;
-          }
+          if (free === undefined) continue;
+          nextK = nk;
+          nextEi = free;
+          break;
         }
       }
       if (!nextK || nextEi < 0) break;
@@ -232,63 +285,32 @@ export function chainEdgesToMidpointRings(
       prevK = curK;
       curK = nextK;
       chainKeys.push(curK);
-      if (curK === startK) break;
-    }
 
-    // **在重复顶点处拆环**：8 字结/顶点接触会让链自交——自交环的三角化会吐出
-    // 「错乱三角形」（earcut 在自交环上给出环外三角）。拆成简单子环后一切路径
-    // （逐环三角组/整件剖分/扇形）都成立。
-    const rings: MidRing[] = [];
-    const buildRing = (from: number, to: number, keyFrom: number, keyTo: number, closed: boolean): MidRing | null => {
-      const nE = to - from;
-      if (nE < 2) return null;
-      const pts: Pt[] = [];
-      let prevX: number | null = null;
-      for (let i = from; i < to; i++) {
-        const e = edges[chainEdges[i]];
-        const m = e.midpoint ?? edgeMidpoint(e.p0, e.p1, period);
-        const mm = prevX === null ? m : { x: unwrapXAgainst(prevX, m.x, period), y: m.y };
-        pts.push(mm);
-        prevX = mm.x;
+      if (curK === startK) {
+        const r = buildRingFrom(chainEdges, chainKeys, true);
+        if (r) out.push(r);
+        chainEdges.length = 0;
+        chainKeys.length = 1;
+        break;
       }
-      const keys = chainKeys.slice(keyFrom, keyTo + 1);
-      const nV = closed ? nE : nE - 1;
-      const rawVerts: Pt[] = [];
-      for (let i = 0; i < nV; i++) {
-        const a = pts[i];
-        const b = pts[i + 1] ?? (closed ? { x: unwrapXAgainst(a.x, pts[0].x, period), y: pts[0].y } : pts[i]);
-        const vk = keys[(i + 1) % keys.length];
-        const v = vk ? rep.get(vk) : undefined;
-        if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) {
-          rawVerts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-        } else {
-          rawVerts.push({ x: unwrapXAgainst(a.x, v.x, period), y: v.y });
-        }
+      // 重复顶点 → 弹出子环（keys[s..] 是一个闭环），外链截断到 s 继续
+      let s = -1;
+      for (let j = chainKeys.length - 2; j >= 0; j--) {
+        if (chainKeys[j] === curK) { s = j; break; }
       }
-      return { pts, verts: alignVerts(pts, rawVerts), closed };
-    };
-    const posOf = new Map<string, number>();
-    let segStart = 0;
-    for (let i = 0; i < chainKeys.length; i++) {
-      const k = chainKeys[i];
-      if (posOf.has(k)) {
-        const seg = posOf.get(k)!;
-        if (seg >= segStart) {
-          const r = buildRing(seg, i, seg, i, true);
-          if (r) rings.push(r);
-          for (let j = seg; j <= i; j++) posOf.delete(chainKeys[j]);
-          segStart = i;
-        }
+      if (s >= 0) {
+        const r = buildRingFrom(chainEdges.slice(s), chainKeys.slice(s), true);
+        if (r) out.push(r);
+        chainEdges.length = s;
+        chainKeys.length = s + 1;
       }
-      posOf.set(k, i);
     }
-    // 尾段：闭合判据必须是**尾段自身**首尾同键（不是整链的 startK）——
-    // 链中途拆过 8 字环时尾段起点是拆环点，误判闭合会收出一根横穿地图的长弦
-    // （「直连直线边界」根因）。
-    const closedTail = chainKeys[chainKeys.length - 1] === chainKeys[segStart] && chainEdges.length - segStart >= 3;
-    const tail = buildRing(segStart, chainEdges.length, segStart, chainKeys.length - (closedTail ? 1 : 0), closedTail);
-    if (tail) rings.push(tail);
-    return rings;
+    // 走死的剩余链：保持开链（不补假边）
+    if (chainEdges.length >= 2) {
+      const r = buildRingFrom(chainEdges, chainKeys, false);
+      if (r) out.push(r);
+    }
+    return out;
   };
 
   for (let i = 0; i < edges.length; i++) {
