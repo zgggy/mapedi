@@ -227,6 +227,28 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
     }
   });
 
+
+  it('闭合环收尾弦必短：不得出现横穿地图的直连直线（用户报 8 cell 回归）', () => {
+    // 用户报障 cell：#24978 #74180 #67089 #14919 #68217 #38317 #72451 #27173
+    // 病症 = 环被误标 closed → 收尾弦直连两端 → 画面上一根直线边界
+    for (const reg of world.regions) {
+      if (!reg.cells?.length) continue;
+      const { rings } = buildClosed(reg.cells);
+      for (const r of rings) {
+        if (!r.closed || r.pts.length < 3) continue;
+        if ((r as { virtualFrom?: number }).virtualFrom !== undefined) continue; // 绕行环补边是真实虚边，收尾弦长是设计
+        const n = r.pts.length;
+        const segs: number[] = [];
+        for (let i = 0, j = n - 1; i < n; j = i++) {
+          segs.push(Math.hypot(r.pts[i].x - r.pts[j].x, r.pts[i].y - r.pts[j].y));
+        }
+        const med = [...segs].sort((a, b) => a - b)[Math.floor(n / 2)] || 1e-4;
+        // 收尾弦（pts[n-1]→pts[0]）必须与普通段同量级（≤ 6×中位段）
+        expect(segs[0]).toBeLessThanOrEqual(Math.max(0.02, med * 6));
+      }
+    }
+  });
+
   it('Hermite 远角不甩尾：采样点不得大幅离开环包围盒', () => {
     // 角点被拉到远处（坏角）时，曲线仍须受段长约束
     const ring = {

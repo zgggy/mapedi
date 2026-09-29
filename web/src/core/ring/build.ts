@@ -282,8 +282,10 @@ export function chainEdgesToMidpointRings(
       }
       posOf.set(k, i);
     }
-    // 尾段：闭合（回到 startK）或保持开链
-    const closedTail = chainKeys[chainKeys.length - 1] === startK && chainEdges.length - segStart >= 3;
+    // 尾段：闭合判据必须是**尾段自身**首尾同键（不是整链的 startK）——
+    // 链中途拆过 8 字环时尾段起点是拆环点，误判闭合会收出一根横穿地图的长弦
+    // （「直连直线边界」根因）。
+    const closedTail = chainKeys[chainKeys.length - 1] === chainKeys[segStart] && chainEdges.length - segStart >= 3;
     const tail = buildRing(segStart, chainEdges.length, segStart, chainKeys.length - (closedTail ? 1 : 0), closedTail);
     if (tail) rings.push(tail);
     return rings;
