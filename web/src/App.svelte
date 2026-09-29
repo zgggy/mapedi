@@ -79,7 +79,11 @@
 
   function switchView(m: ViewMode) {
     if (m === shell.viewMode) return;
-    if (m !== 'view-2d') exportCanvas = null;
+    if (m !== 'view-2d') {
+      exportCanvas = null;
+      // 球面为纯展示：离开平面即结束绘制态（残留的绘制状态不得带到球面）
+      if (draw.active) editor.endDraw();
+    }
     viewFade = 0.2;
     shell.viewMode = m;
     requestAnimationFrame(() => {
@@ -229,7 +233,11 @@
     onShape={(k, v) => editor.setProfileParam('height', k, v)}
     onGenerate={(s, n) => {
       bootError = '';
-      return editor.generate(s, n);
+      // 重新生成完成 → 进入球面展示（用户定）
+      return editor.generate(s, n).then((r) => {
+        switchView('view-globe');
+        return r;
+      });
     }}
     onExport={(k) => {
       if (k === 'json') editor.exportProject?.();

@@ -53,19 +53,24 @@
 <PanelShell title="视图" icon="🎛️" {open} side="float" width={320} x={420} y={56} onCollapse={() => (open = false)}>
   <div class="body">
     <section>
-      <h3>视图</h3>
+      <h3>模式</h3>
       <div class="row">
-        <button type="button" class:active={viewMode === 'view-2d'} onclick={() => onSwitchView('view-2d')}>🗺️ 平面</button>
-        <button type="button" class:active={viewMode === 'view-globe'} onclick={() => onSwitchView('view-globe')}>🌐 球面</button>
+        <button type="button" class:active={viewMode === 'view-globe'} onclick={() => onSwitchView('view-globe')}>🌐 球面展示</button>
+        <button type="button" class:active={viewMode === 'view-2d'} onclick={() => onSwitchView('view-2d')}>✏️ 平面绘制</button>
+        <button type="button" disabled title="预留（暂未启用）">◻</button>
+      </div>
+      <div class="row">
         <select value={styleId} onchange={(e) => onStyle(e.currentTarget.value)}>
           <option value="dark">暗色</option>
           <option value="parchment">羊皮纸</option>
           <option value="neon">科幻</option>
         </select>
-        <select value={projection} onchange={(e) => onProjection?.(e.currentTarget.value)}>
-          <option value="mercator">墨卡托</option>
-          <option value="robinson">罗宾森（两极内收）</option>
-        </select>
+        {#if viewMode === 'view-2d'}
+          <select value={projection} onchange={(e) => onProjection?.(e.currentTarget.value)}>
+            <option value="mercator">墨卡托</option>
+            <option value="robinson">罗宾森（两极内收）</option>
+          </select>
+        {/if}
       </div>
       <div class="row">
         <label class="sm">平滑 <CapsuleSlider min={0} max={1} step={0.05} value={reliefSmooth} label="浮雕平滑" width={130} onInput={(v) => onRelief(v)} /></label>
