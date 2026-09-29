@@ -23,7 +23,7 @@
     highlightRegionId = null as string | null,
     showAxis = true,
     showEcliptic = true,
-    spinPreview = true,
+    spinPreview = false,
   }: {
     world: World;
     focusLayer?: string;

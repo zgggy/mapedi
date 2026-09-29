@@ -146,7 +146,8 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
       ],
       closed: true,
     };
-    const out = prepareDisplayRings(ring, frameY, 'north');
+    // 补边侧已由链净方向推导（k>0→北），无需再传
+    const out = prepareDisplayRings(ring, frameY);
     expect(out).toHaveLength(1);
     expect(out[0].closed).toBe(true);
     expect(out[0].pts.length).toBe(out[0].verts.length);
@@ -171,7 +172,8 @@ describe('prepareDisplayRings — fill/stroke/shadow 共用', () => {
       ],
       closed: true,
     };
-    const out = prepareDisplayRings(cutRing, frameY, 'north');
+    // winding=0（非绕行环）不补边；侧别参数已删
+    const out = prepareDisplayRings(cutRing, frameY);
     // 不是极冠框线：任何输出点不得落在框线上（非绕行环 winding=0，不补虚边）
     for (const piece of out) {
       const onFrame = piece.pts.filter((p) => Math.abs(p.y - frameY.maxY) < 1e-6).length;

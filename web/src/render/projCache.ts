@@ -1,6 +1,7 @@
 import type { LonLat, World } from '../core/types';
 import {
   project,
+  projectionPeriodAt,
   projectionWorldPeriod,
   type ProjectionId,
   type ProjectionParams,
@@ -99,7 +100,9 @@ export function buildProjCache(
   let gMinY = Infinity;
   let gMaxY = -Infinity;
   const projectFn = (ll: LonLat) => project(ll, proj, pp);
-  const period = projectionWorldPeriod(proj) ?? Math.PI * 2;
+  // 局部周期（伪圆柱 scale(y)·2π）：跨缝顶点在 y 处按真实周期 unwrap——
+  // 常数 2π 对罗宾森会把缝点错移 +0.95（cell 多边形撕裂、填充乱的根因）。
+  const periodAt = (y: number) => projectionPeriodAt(proj, y) ?? Math.PI * 2;
   const table = buildSharedProjectedVerts(world, projectFn);
   const poles = polarCellIds(world.cells);
 
@@ -122,16 +125,17 @@ export function buildProjCache(
     const xs = vs.map((v) => v.x);
     const ys = vs.map((v) => v.y);
     for (let i = 1; i < xs.length; i++) {
-      xs[i] = unwrapXAgainst(xs[i - 1], xs[i], period);
+      xs[i] = unwrapXAgainst(xs[i - 1], xs[i], periodAt(ys[i]));
     }
     // 整格对齐到中心所在 2π 副，跨日界线邻接仍共用表顶点
-    const cx = wrapPeriod(c.x, period);
+    const cx = wrapPeriod(c.x, periodAt(c.y));
     let midX = 0;
     for (const x of xs) midX += x;
     midX /= xs.length;
-    const shift = period * Math.round((cx - midX) / period);
-    if (shift !== 0) {
-      for (let i = 0; i < xs.length; i++) xs[i] += shift;
+    // 整数窗对齐：per-vertex 的 k·periodAt(y)（伪圆柱周期随 y 变；常数时退化整块平移）
+    const kShift = Math.round((cx - midX) / periodAt(c.y));
+    if (kShift !== 0) {
+      for (let i = 0; i < xs.length; i++) xs[i] += -kShift * periodAt(ys[i]);
     }
 
     const polar = projectionWorldPeriod(proj) !== null &&
@@ -151,7 +155,7 @@ export function buildProjCache(
       const north = cell.id === poles.north;
       const edgeLat = north ? FRAME_LAT : -FRAME_LAT;
       const edgeY = projectFn({ lon: 0, lat: edgeLat }).y;
-      const seamX = unwrapXAgainst(xs[xs.length - 1], xs[0], period);
+      const seamX = unwrapXAgainst(xs[xs.length - 1], xs[0], periodAt(ys[0]));
       for (let i = 0; i < xs.length; i++) out.push(xs[i], ys[i]);
       // 真实末边到相邻副本的首点；随后仅填充沿极侧框线闭合。
       out.push(seamX, ys[0], seamX, edgeY, xs[0], edgeY);

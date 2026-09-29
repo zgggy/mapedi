@@ -22,11 +22,9 @@ import {
   worldToScreenX,
   worldToScreenY,
   MapTransform,
-  type Pt,
-} from './space';
+  type Pt,, frameYEnv } from './space';
 import { catmullRomPolyline } from '../core/paths';
 import { ringPath2D, cellPolyPath2D } from '../core/ring/path2d';
-import { poleSideForRing } from '../core/ring/normalize';
 import type { DisplayPiece } from '../core/displayCompose';
 import { isLayerShown } from '../core/displayCompose';
 import { dataRev } from '../core/rev';
@@ -202,10 +200,9 @@ export const cellsLayer: RenderLayer = {
   },
 };
 
-/** 外框 y（±85° 投影）—— fill/stroke 共用；圆柱判定与世界副本周期同源（period≠null） */
+/** ring 补边 frameY：wraps 投影都补（含罗宾森）；周期 = 局部 periodAt（单一真相源） */
 function frameYOf(env: RenderEnv) {
-  const fr = getFrameRect(env);
-  return { ...fr, cylindrical: projectionWorldPeriod(env.proj) !== null };
+  return frameYEnv((ll) => projectPt(env, ll), env.proj);
 }
 
 /** CSS 颜色 → [r,g,b,a]（0..1）。解析不了返回 null（非纯色解析失败即拒）。 */
@@ -395,7 +392,7 @@ function preparePieces(
   if (cached) return cached;
   const out: DisplayRing[] = [];
   for (const r of rings) {
-    for (const piece of prepareDisplayRings(r, frameY, poleSideForRing(r))) {
+    for (const piece of prepareDisplayRings(r, frameY)) {
       if (piece.pts.length >= 2) out.push(piece);
     }
   }

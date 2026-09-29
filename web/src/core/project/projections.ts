@@ -42,12 +42,65 @@ export function projectionWorldPeriod(id: ProjectionId): number | null {
   return null;
 }
 
+/**
+ * **水平结构统一真相源**：支持水平回绕的投影一律写成 `x = scale(y)·λ`。
+ *
+ * - 圆柱族（墨卡托/球面平铺/贝尔曼）：scale 是**常数**（1 / 1 / sin30°）→
+ *   经度平移、世界副本、环连续化退化为刚性 x 平移 = 现有行为，零差异。
+ * - 伪圆柱（罗宾森）：scale(y) = 0.8487·plen(φ(y))，随纬度内收——透镜轮廓的
+ *   半宽在 y 处恰为 `scale(y)·π`，**世界宽度 = 局部周期 scale(y)·2π**：
+ *   轮廓、周期副本、平移三者由同一个 scale(y) 派生 → 副本偏移下轮廓自我
+ *   复制对齐（相邻副本边重合），这是弧形视口 + 无缝回绕的数学前提。
+ * - aeqd/gk：非回绕投影，无水平结构 → null。
+ *
+ * 消费方（连续化 / 副本 / 平移 / 命中反解）只准经由此函数派生，禁止再散落
+ * `projectionWorldPeriod ?? 2π` 常数假设——那正是罗宾森跨缝错位（+0.951）
+ * 与平移撕裂的根因。
+ */
+export function projectionXScale(id: ProjectionId, y: number): number | null {
+  switch (id) {
+    case 'mercator':
+    case 'globe':
+      return 1;
+    case 'behrmann':
+      return Math.sin(30 * D2R);
+    case 'robinson':
+      return 0.8487 * robinsonPlenAtY(y);
+    default:
+      return null;
+  }
+}
+
+/** y 处的世界周期在 x 上的宽度（无回绕投影 → null）。 */
+export function projectionPeriodAt(id: ProjectionId, y: number): number | null {
+  const s = projectionXScale(id, y);
+  return s === null ? null : s * Math.PI * 2;
+}
+
+/** 是否支持水平回绕（伪圆柱 scale 随 y 变也算——判据不是"周期是否常数"）。 */
+export function projectionWraps(id: ProjectionId): boolean {
+  return id === 'mercator' || id === 'globe' || id === 'behrmann' || id === 'robinson';
+}
+
 // 罗宾森 PLEN（平行线长度）/ PDFE（距赤道距离），0°..90° 每 5°
 const ROB_PLEN = [1.0, 0.9986, 0.9954, 0.99, 0.9822, 0.973, 0.96, 0.9427, 0.9216, 0.8962, 0.8679, 0.835, 0.7986, 0.7597, 0.7186, 0.6732, 0.6213, 0.5722, 0.5322];
 const ROB_PDFE = [0.0, 0.062, 0.124, 0.186, 0.248, 0.31, 0.372, 0.434, 0.4958, 0.5571, 0.6176, 0.6769, 0.7346, 0.7903, 0.8435, 0.8936, 0.9394, 0.9761, 1.0];
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
+
+/**
+ * 罗宾森：由投影 y 反查纬度再插值 PLEN —— `x = scale(y)·λ` 的 scale 因子核心。
+ * 与 `unproject` robinson 分支同一套反查（单一实现，勿复制）。
+ */
+function robinsonPlenAtY(y: number): number {
+  const a = Math.min(1, Math.abs(y) / 1.3523);
+  let i = 0;
+  while (i < 17 && ROB_PDFE[i + 1] < a) i++;
+  const span = ROB_PDFE[i + 1] - ROB_PDFE[i] || 1;
+  const t = Math.max(0, Math.min(1, (a - ROB_PDFE[i]) / span));
+  return ROB_PLEN[i] + (ROB_PLEN[i + 1] - ROB_PLEN[i]) * t;
+}
 
 export function project(
   p: LonLat,
@@ -145,7 +198,7 @@ export function unproject(
       const span = ROB_PDFE[i + 1] - ROB_PDFE[i] || 1;
       const t = Math.max(0, Math.min(1, (a - ROB_PDFE[i]) / span));
       const phi = (i + t) * 5 * Math.sign(y || 1);
-      const plen = ROB_PLEN[i] + (ROB_PLEN[i + 1] - ROB_PLEN[i]) * t;
+      const plen = robinsonPlenAtY(y); // 与 scale 因子同源（单一反查）
       const lam = plen > 1e-9 ? x / (0.8487 * plen) : 0;
       return { lon: lam * R2D, lat: phi };
     }

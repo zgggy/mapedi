@@ -16,7 +16,7 @@ import type { LonLat } from '../../render/space';
 import type { Pt } from '../../render/space';
 import type { BoundEdge } from './build';
 import type { MidRing } from './displayRing';
-import { edgeListToRings } from './build';
+import { edgeListToRings, orientMemberLeft } from './build';
 
 /** cell → 关联边（含 pair 表里的伪边/极区补边）；世界拓扑变化时重建 */
 export type IncidentEdges = Map<CellId, BoundEdge[]>;
@@ -58,15 +58,15 @@ export function seedBoundaryBook(
   pair: Map<string, BoundEdge>,
 ): BoundaryBook {
   const edges = new Map<string, BoundEdge>();
-  // 与 cellSetBoundaryEdges 同语义：成员两侧不一致的边（含 pair 伪边）
+  // 与 cellSetBoundaryEdges 同语义：成员两侧不一致的边（含 pair 伪边），
+  // 且必须**定向**（成员在左）——链化只走有向出边，未定向的边会死链。
   for (const [ek, e] of pair) {
     const dash = ek.indexOf('-');
     if (dash < 0) continue;
     const i = +ek.slice(0, dash);
     const j = +ek.slice(dash + 1);
-    if (set.has(i) !== set.has(j)) edges.set(ek, e);
+    if (set.has(i) !== set.has(j)) edges.set(ek, orientMemberLeft(world, set, e));
   }
-  void world;
   return { set, edges };
 }
 
@@ -75,6 +75,7 @@ export function seedBoundaryBook(
  * 只翻转 changed 的关联边；返回是否发生翻转（无翻转 → 下游无需重建）。
  */
 export function patchBoundaryBook(
+  world: World,
   book: BoundaryBook,
   incident: IncidentEdges,
   changed: CellId[],
@@ -90,10 +91,17 @@ export function patchBoundaryBook(
       const j = +e.ek.slice(dash + 1);
       const want = book.set.has(i) !== book.set.has(j);
       const has = book.edges.has(e.ek);
-      if (want && !has) {
-        book.edges.set(e.ek, e);
-        flipped = true;
-      } else if (!want && has) {
+      if (want) {
+        // 重定向副本：新增边要定；**已存在但成员侧翻转**的边也要重定（cell 进/出
+        // 集合时 ek 不变、方向必须跟着翻）。pa/pb 是 pair 缓存的稳定 LonLat 引用，
+        // 引用比较即可判定方向变化——变了才置 flipped（否则每次补丁都全量重链）。
+        const o = orientMemberLeft(world, book.set, e);
+        const cur = book.edges.get(e.ek);
+        if (!cur || cur.pa !== o.pa || cur.pb !== o.pb) {
+          book.edges.set(e.ek, o);
+          flipped = true;
+        }
+      } else if (has) {
         book.edges.delete(e.ek);
         flipped = true;
       }

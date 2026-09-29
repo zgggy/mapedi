@@ -11,6 +11,8 @@
  * - OpenLayers：数据 CRS 不动，渲染时由 view/extent 决定显示范围与 wrap。
  */
 
+import { projectionPeriodAt, projectionWraps } from '../core/project/projections';
+
 export type Pt = { x: number; y: number };
 export type LonLat = { lon: number; lat: number };
 
@@ -90,6 +92,35 @@ export function frameRect(
     maxX: Math.max(a.x, b.x, c.x, d.x),
     minY: Math.min(a.y, b.y, c.y, d.y),
     maxY: Math.max(a.y, b.y, c.y, d.y),
+  };
+}
+
+/** 罗宾森框到 ±90（极点收成半宽线，透镜完整；用户拍板）。其余投影维持 ±85。 */
+export function projectionFrameLat(proj: string): number {
+  return proj === 'robinson' ? 90 : FRAME_LAT;
+}
+
+/**
+ * ring 补边链路的 frameY 统一构造（normalize.prepareDisplayRings 入口）：
+ * - `cylindrical` = 是否做绕行环补边 = 投影支持水平回绕（罗宾森开——绕极环在
+ *   投影域断在左右轮廓必须封口；旧判据 `period!==null` 把罗宾森误关）。
+ * - `periodAt` = 世界局部周期（伪圆柱 = scale(y)·2π），补边 seamX/winding 由此求；
+ *   框宽只是圆柱族的等价缺省。
+ */
+export function frameYEnv(
+  project: (ll: LonLat) => Pt,
+  proj: string,
+): {
+  minY: number; maxY: number; minX: number; maxX: number;
+  cylindrical: boolean; periodAt: (y: number) => number;
+} {
+  const lat = projectionFrameLat(proj);
+  const fr = frameRect(project, lat);
+  const fallback = (): number => fr.maxX - fr.minX;
+  return {
+    ...fr,
+    cylindrical: projectionWraps(proj),
+    periodAt: (y: number) => projectionPeriodAt(proj, y) ?? fallback(),
   };
 }
 

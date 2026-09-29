@@ -3,7 +3,6 @@ import type { World } from '../core/types';
 import { getCellSetRingsCached } from '../render/borderCache';
 import { prepareDisplayRings } from '../core/ring/normalize';
 import { sampleMidRing } from '../core/ring/hermite';
-import { poleSideForRing } from '../core/ring/normalize';
 import { project } from '../core/project/projections';
 import { defaultProjParams } from '../core/project/projections';
 
@@ -197,7 +196,7 @@ export function exportSvg(world: World, styleLand = '#3d7a4a', styleOcean = '#1a
           return `${i === 0 ? 'M' : 'L'}${px(lon).toFixed(2)},${py(lat).toFixed(2)}`;
         }).join(' ');
       for (const ring of entry.rings) {
-        for (const piece of prepareDisplayRings(ring, frameY, poleSideForRing(ring))) {
+        for (const piece of prepareDisplayRings(ring, frameY)) {
           const fillPts = sampleMidRing(piece, 0.65, 'fill');
           const outlinePts = sampleMidRing(piece, 0.65, 'outline');
           for (let copy = -2; copy <= 2; copy++) {

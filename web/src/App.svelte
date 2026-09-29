@@ -25,7 +25,7 @@
   let projection = $state<import('./core/project/projections').ProjectionId>('mercator');
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
-  let globeSpin = $state(true);
+  let globeSpin = $state(false);
   let projParams = $state(defaultProjParams());
   let fps = $state(0);
   let zoomScale = $state(1);

@@ -11,9 +11,10 @@ import {
   cellSetBoundaryRings,
   cellSetBoundaryEdges,
   indexEdgesByPair,
+  orientMemberLeft,
   pseudoEdgeList,
 } from '../src/core/ring/build';
-import { prepareDisplayRings, poleSideForRing } from '../src/core/ring/normalize';
+import { prepareDisplayRings } from '../src/core/ring/normalize';
 import { sampleMidRing } from '../src/core/ring/hermite';
 import { triangulateRings, trianglesMatchRings } from '../src/render/gl/triangulate';
 import { frameRect } from '../src/render/space';
@@ -25,6 +26,15 @@ import type { LonLat, World } from '../src/core/types';
 const pp = defaultProjParams();
 const proj = (ll: LonLat) => project(ll, 'mercator', pp);
 const PERIOD = projectionWorldPeriod('mercator')!;
+
+/** 定向夹具：cell 0 中心在 (0, 2)，边 (0,1)→(1,1) 北侧 */
+const worldOrient = {
+  cells: [
+    { id: 0, center: { lon: 0.5, lat: 2 }, neighbors: [1], height: 1, polygon: [] },
+    { id: 1, center: { lon: 0.5, lat: 0 }, neighbors: [0], height: 1, polygon: [] },
+  ],
+  regions: [], layers: [], sharedEdges: new Map(),
+} as unknown as World;
 
 function e(a: { x: number; y: number }, b: { x: number; y: number }) {
   return { p0: a, p1: b };
@@ -108,15 +118,25 @@ describe('链化构造保证', () => {
     expect(rings[0].pts.length).toBe(4);
   });
 
-  it('环强制定向：有向面积 > 0（规范手性，顺时针入参也反转）', () => {
-    // 顺时针四边 → 构造保证必须反转为逆时针
+  it('边界边定向：成员中心在有向边左侧（cell 归属定内外，非几何猜测）', () => {
+    // 不再强转手性：方向由 orientMemberLeft（球面三重积）从成员侧给出。
+    const set = new Set([0]);
+    // ek='0-1'：成员 cell 0 在边的北侧 → 边必须东行（左=北）
+    const e1 = { ek: '0-1', pa: { lon: 0, lat: 1 }, pb: { lon: 1, lat: 1 } };
+    const o1 = orientMemberLeft(worldOrient, set, e1);
+    expect(o1.pa).toEqual({ lon: 0, lat: 1 }); // 成员在 pa→pb 左侧，无需换向
+    // 反向入参：成员在右侧 → 换向
+    const o2 = orientMemberLeft(worldOrient, set, { ek: '0-1', pa: e1.pb, pb: e1.pa });
+    expect(o2.pa).toEqual({ lon: 0, lat: 1 });
+    // 链化保留输入方向（有向走链的输入契约）
     const A = { x: 0, y: 0 };
     const B = { x: 0, y: 1 };
     const C = { x: 1, y: 1 };
     const D = { x: 1, y: 0 };
     const rings = chainEdgesToMidpointRings([e(A, B), e(B, C), e(C, D), e(D, A)]);
     expect(rings.length).toBe(1);
-    expect(area2(rings[0].pts)).toBeGreaterThan(0);
+    // 输入为顺时针 → 输出保持顺时针（不再强转）
+    expect(area2(rings[0].pts)).toBeLessThan(0);
   });
 });
 
@@ -127,21 +147,50 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
   const pair = indexEdgesByPair(world);
   const pseudo = pseudoEdgeList(world, pair);
 
+  // **真实集合 fixture**：generateDemoContinents 不建 regions（regions 由生成链后段的
+  // biomes/nature 创建）→ 旧 fixtures 的区域迭代全部空转、断言从不执行
+  // （"全绿但 bug 不断"的根源）。改用真实 cell 集：陆地 / 极冠（必产绕行环）/ 海洋 / 连通分量。
+  const landSets: number[][] = (() => {
+    const out: number[][] = [];
+    const land = world.cells.filter((c) => c.height > 0).map((c) => c.id);
+    if (land.length > 8) out.push(land);
+    const polar = world.cells.filter((c) => Math.abs(c.center.lat) > 60).map((c) => c.id);
+    if (polar.length > 8) out.push(polar); // 极冠 → 边界环绕极点 → 绕行环必现
+    const sea = world.cells.filter((c) => c.height <= 0).map((c) => c.id);
+    if (sea.length > 8) out.push(sea);
+    const byId = new Map(world.cells.map((c) => [c.id, c]));
+    const seen = new Set<number>();
+    let best: number[] = [];
+    for (const id of land) {
+      if (seen.has(id)) continue;
+      const q = [id]; const comp = [id]; seen.add(id);
+      while (q.length) {
+        const u = q.pop()!;
+        for (const n of byId.get(u)?.neighbors ?? []) {
+          if (seen.has(n) || (byId.get(n)?.height ?? 0) <= 0) continue;
+          seen.add(n); q.push(n); comp.push(n);
+        }
+      }
+      if (comp.length > best.length) best = comp;
+    }
+    if (best.length > 8) out.push(best);
+    return out;
+  })();
+
   const buildClosed = (cells: number[]) => {
     const edges = cellSetBoundaryEdges(world, new Set(cells), pair, pseudo);
     const rings = cellSetBoundaryRings(world, new Set(cells), proj, edges, PERIOD);
     const frameY = { ...frameRect(proj), cylindrical: true };
     const closed: { pts: { x: number; y: number }[] }[] = [];
     for (const r of rings) {
-      for (const d of prepareDisplayRings(r, frameY, poleSideForRing(r))) closed.push(d);
+      for (const d of prepareDisplayRings(r, frameY)) closed.push(d);
     }
     return { rings, closed };
   };
 
   it('同件各环同周期窗（副本平铺不互相抵消）', () => {
-    for (const reg of world.regions.slice(0, 8)) {
-      if (!reg.cells?.length) continue;
-      const { rings } = buildClosed(reg.cells);
+    for (const cells of landSets) {
+      const { rings } = buildClosed(cells);
       if (rings.length < 2) continue;
       const cx = (r: { pts: { x: number; y: number }[] }) => {
         let mn = Infinity, mx = -Infinity;
@@ -155,24 +204,42 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
     }
   });
 
-  it('环强制定向 + 绕行环同侧闭合', () => {
-    for (const reg of world.regions.slice(0, 8)) {
-      if (!reg.cells?.length) continue;
-      const { rings } = buildClosed(reg.cells);
+  it('绕行环补边侧 = 链净方向（成员在左 → k>0 补北、k<0 补南，环内侧≡成员侧）', () => {
+    const frameMax = frameRect(proj).maxY;
+    const frameMin = frameRect(proj).minY;
+    let wrapChecked = 0;
+    for (const cells of landSets) {
+      const { rings } = buildClosed(cells);
       for (const r of rings) {
-        if (r.pts.length >= 3 && !r.virtualFrom) expect(area2(r.pts)).toBeGreaterThan(0);
-        expect(poleSideForRing(r)).toBe('south'); // 统一侧（flip 由探针定）
+        if (!r.closed || r.pts.length < 3) continue;
+        // virtualFrom 在 prepareDisplayRings 的**输出**上（原始 MidRing 没有该字段）
+        const disp = prepareDisplayRings(r, { ...frameRect(proj), cylindrical: true });
+        for (const d of disp) {
+          const v = d.virtualFrom;
+          if (v === undefined || v >= d.pts.length) continue; // 非绕行环无补边
+          // 净方向（原始环 unwrap 后首尾 x 差的符号）
+          const k = Math.sign(r.pts[r.pts.length - 1].x - r.pts[0].x);
+          if (k === 0) continue;
+          // 补边虚段（end→bottomEnd）必须贴**行进方向左侧**的框边：k>0 成员在北→maxY
+          const edgeY = d.pts[v + 1]?.y;
+          expect(edgeY).toBeDefined();
+          expect(Math.abs(edgeY! - (k > 0 ? frameMax : frameMin))).toBeLessThan(1e-9);
+          wrapChecked++;
+        }
       }
     }
+    expect(wrapChecked).toBeGreaterThan(0); // 极冠集必产绕行环（fixture 真实生效）
   });
 
   it('奇偶不变量：成员 ≡ XOR(采样闭合环) ⊕ flip（≥95% 吻合）', () => {
-    for (const reg of world.regions.slice(0, 10)) {
-      if (reg.cells.length < 8) continue;
-      const { closed } = buildClosed(reg.cells);
+    let checked = 0;
+    for (const cells of landSets) {
+      if (cells.length < 8) continue;
+      const { closed } = buildClosed(cells);
       if (!closed.length) continue;
+      checked++;
       const sampled = closed.map((d) => ({ pts: sampleMidRing(d as never, 1, 'fill') }));
-      const mem = new Set(reg.cells);
+      const mem = new Set(cells);
       let plain = 0, flip = 0, tot = 0;
       for (let id = 0; id < world.cells.length; id += 3) {
         const c = world.cells[id];
@@ -185,6 +252,7 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
       const rate = Math.max(plain, flip) / Math.max(1, tot);
       expect(rate).toBeGreaterThanOrEqual(0.95);
     }
+    expect(checked).toBeGreaterThan(0); // fixture 必须真实生效（防空转）
   });
 
   it('三角组不变量：三角形 XOR 覆盖数 ≡ 环奇偶（earcut 与扇形同一语义）', () => {
@@ -207,9 +275,8 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
     expect(okTri?.areaOk).toBe(true);
     expect(trianglesMatchRings(okTri!.tris, [sq])).toBe(true);
     // 真实世界：每环取样点上「三角 XOR 覆盖 ≡ 环奇偶」
-    for (const reg of world.regions.slice(0, 6)) {
-      if (!reg.cells?.length) continue;
-      const { rings, closed } = buildClosed(reg.cells);
+    for (const cells of landSets.slice(0, 3)) {
+      const { rings, closed } = buildClosed(cells);
       for (let ri = 0; ri < rings.length; ri++) {
         const d = closed[ri];
         if (!d) continue;
@@ -231,12 +298,14 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
   it('闭合环收尾弦必短：不得出现横穿地图的直连直线（用户报 8 cell 回归）', () => {
     // 用户报障 cell：#24978 #74180 #67089 #14919 #68217 #38317 #72451 #27173
     // 病症 = 环被误标 closed → 收尾弦直连两端 → 画面上一根直线边界
-    for (const reg of world.regions) {
-      if (!reg.cells?.length) continue;
-      const { rings } = buildClosed(reg.cells);
+    for (const cells of landSets) {
+      const { rings } = buildClosed(cells);
       for (const r of rings) {
         if (!r.closed || r.pts.length < 3) continue;
-        if ((r as { virtualFrom?: number }).virtualFrom !== undefined) continue; // 绕行环补边是真实虚边，收尾弦长是设计
+        // 绕行环（prepare 后带补边）平面首尾差一个周期是设计——先判类型再量弦
+        const isWrap = prepareDisplayRings(r, { ...frameRect(proj), cylindrical: true })
+          .some((d) => d.virtualFrom !== undefined && d.virtualFrom < d.pts.length);
+        if (isWrap) continue;
         const n = r.pts.length;
         const segs: number[] = [];
         for (let i = 0, j = n - 1; i < n; j = i++) {

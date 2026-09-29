@@ -10,13 +10,13 @@ import {
   type BoundEdge,
 } from '../core/ring/build';
 import type { MidRing } from '../core/ring/displayRing';
-import { frameRect, type Pt, type LonLat } from '../render/space';
-import { poleSideForRing, prepareDisplayRings } from '../core/ring/normalize';
+import { frameRect, frameYEnv, type Pt, type LonLat } from '../render/space';
+import { prepareDisplayRings } from '../core/ring/normalize';
 import { sampleMidRing } from '../core/ring/hermite';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
 import { landSeaKindOf } from '../core/layer/landSea';
-import { projectionWorldPeriod, type ProjectionId } from '../core/project/projections';
+import { projectionPeriodAt, projectionWorldPeriod, type ProjectionId } from '../core/project/projections';
 import {
   buildIncidentEdges,
   patchBoundaryBook,
@@ -99,7 +99,7 @@ export function patchPieceEntry(
   for (const id of added) b.set.add(id);
   for (const id of removed) b.set.delete(id);
   const changed = [...added, ...removed];
-  if (!changed.length || !patchBoundaryBook(b, incidentCache, changed)) return false;
+  if (!changed.length || !patchBoundaryBook(world, b, incidentCache, changed)) return false;
   entry.rings = ringsFromBook(
     entry.book,
     world,
@@ -168,7 +168,7 @@ export function getCellSetRingsCached(
   const set = cellIds instanceof Set ? cellIds : new Set(cellIds);
   const edges = cellSetBoundaryEdges(world, set, pairEdgeCache, pseudoEdgeCache ?? undefined);
   const rings = cellSetBoundaryRings(
-    world, set, project, edges, projectionWorldPeriod(projKey) ?? Math.PI * 2,
+    world, set, project, edges, (y) => projectionPeriodAt(projKey, y) ?? Math.PI * 2,
   );
   const entry: Entry = {
     rings,
@@ -185,17 +185,28 @@ export function getCellSetRingsCached(
   return entry;
 }
 
-/** evenodd 奇偶：点被环集包住当且仅当穿越数为奇 */
-function ringParity(rings: Ring[], x: number, y: number): boolean {
+/**
+ * evenodd 奇偶：点被环集包住当且仅当穿越数为奇。
+ *
+ * **必须含周期副本**（P0：跨副本 evenodd XOR）：绘制把件按 x+k·period 实例化 XOR，
+ * 而环集中在**一个**周期窗内；探针采样点落在窗外时（跨反子午线的海洋 / 过大大陆——
+ * 用户报 #82474 #4870 #88313、"大陆过大了也会出现"的根因），单窗 raycast 报 0/1 与
+ * 实绘相反 → flip 判反 → 整件内外颠倒。副本平铺后每个 x 恰落在一个副本内，取 k∈{-1,0,1}
+ * 的 XOR 即实绘奇偶。
+ */
+function ringParity(rings: Ring[], x: number, y: number, copies = true): boolean {
   let cross = 0;
-  for (const ring of rings) {
-    const pts = ring.pts;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const a = pts[j];
-      const b = pts[i];
-      if ((a.y > y) !== (b.y > y)) {
-        const t = (y - a.y) / (b.y - a.y);
-        if (x < a.x + t * (b.x - a.x)) cross++;
+  for (const k of copies ? [-1, 0, 1] : [0]) {
+    const xs = x + k * (Math.PI * 2);
+    for (const ring of rings) {
+      const pts = ring.pts;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const a = pts[j];
+        const b = pts[i];
+        if ((a.y > y) !== (b.y > y)) {
+          const t = (y - a.y) / (b.y - a.y);
+          if (xs < a.x + t * (b.x - a.x)) cross++;
+        }
       }
     }
   }
@@ -222,13 +233,12 @@ function computeFrameFlip(
 ): boolean {
   const n = world.cells.length;
   if (!n) return false;
-  const frameY = {
-    ...frameRect(project),
-    cylindrical: projectionWorldPeriod(projKey) !== null,
-  };
+  // 补边 frameY 与绘制同源（frameYEnv）；ringParity 的副本开关 = draw 是否有副本
+  const frameY = frameYEnv(project, projKey);
+  const copies = projectionWorldPeriod(projKey) !== null;
   const closed: Ring[] = [];
   for (const r of rings) {
-    for (const d of prepareDisplayRings(r, frameY, poleSideForRing(r))) closed.push(d);
+    for (const d of prepareDisplayRings(r, frameY)) closed.push(d);
   }
   // 探针用**采样后**的折线（与绘制同一形状）：中点折线在尖角处切角/自交，
   // 与真实填充区域有系统性偏差——那正是单点探针被边界点一票否决的来源。
@@ -241,7 +251,7 @@ function computeFrameFlip(
     const c = world.cells[cellIds[i]];
     if (!c) continue;
     const p = project(c.center);
-    if (ringParity(sampled, p.x, p.y)) plain++;
+    if (ringParity(sampled, p.x, p.y, copies)) plain++;
     else flip++;
   }
   if (set.size < n) {
@@ -252,7 +262,7 @@ function computeFrameFlip(
       const c = world.cells[i];
       if (!c) continue;
       const p = project(c.center);
-      if (ringParity(sampled, p.x, p.y)) flip++;
+      if (ringParity(sampled, p.x, p.y, copies)) flip++;
       else plain++;
       seen++;
     }
