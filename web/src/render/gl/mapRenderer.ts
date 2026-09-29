@@ -439,13 +439,16 @@ export class MapGlRenderer {
       for (const pt of pts) { cx += pt.x; cy += pt.y; }
       cx /= pts.length;
       cy /= pts.length;
-      const arr = new Float32Array((pts.length + 1) * 2);
+      // FAN 需首点重复到末尾才覆盖最后一格（否则 p_{n-1}→p0 缺一个扇形三角）
+      const arr = new Float32Array((pts.length + 2) * 2);
       arr[0] = cx;
       arr[1] = cy;
       for (let i = 0; i < pts.length; i++) {
         arr[2 + i * 2] = pts[i].x;
         arr[3 + i * 2] = pts[i].y;
       }
+      arr[2 + pts.length * 2] = pts[0].x;
+      arr[3 + pts.length * 2] = pts[0].y;
       if (!this.outlineVbo) {
         this.outlineVbo = gl.createBuffer();
         this.outlineVao = gl.createVertexArray();
@@ -456,7 +459,7 @@ export class MapGlRenderer {
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
       gl.bindVertexArray(null);
-      this.outlineCount = pts.length + 1;
+      this.outlineCount = pts.length + 2;
       this.outlineKey = key;
     }
     gl.enable(gl.STENCIL_TEST);
