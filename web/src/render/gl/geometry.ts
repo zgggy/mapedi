@@ -13,6 +13,9 @@ import type { DisplayRing } from '../../core/ring/displayRing';
 import { sampleMidRing } from '../../core/ring/hermite';
 import { triangulateRings, trianglesMatchRings } from './triangulate';
 
+import type { PeriodAt } from '../../core/ring/build';
+const per = (p: PeriodAt, y: number): number => (typeof p === 'function' ? p(y) : p);
+
 export interface Pt {
   x: number;
   y: number;
@@ -164,7 +167,7 @@ export interface CellMeshGeo {
 export function buildCellMeshStrips(
   polys: (Float64Array | undefined)[],
   polarOutlines: Map<number, Float64Array>,
-  period: number,
+  period: PeriodAt,
 ): CellMeshGeo {
   const seen = new Set<string>();
   const CELL = 0.35;
@@ -183,7 +186,7 @@ export function buildCellMeshStrips(
       let x2 = xy[j * 2], y2 = xy[j * 2 + 1];
       // 极区 frame 闭合边用 unwrap 版坐标（与 cellPolyPath2D 同口径）
       if (polarOutlines.has(id) && i === n - 1) {
-        x2 += unwrapDelta(x1, x2, period);
+        x2 += unwrapDelta(x1, x2, per(period, (y1 + y2) / 2));
       }
       const k1 = `${x1},${y1}`;
       const k2 = `${x2},${y2}`;

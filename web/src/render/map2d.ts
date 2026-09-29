@@ -1,8 +1,8 @@
 import type { World } from '../core/types';
 import {
   defaultProjParams,
-  projectionWorldPeriod,
   type ProjectionId,
+  type ProjSpec,
   type ProjectionParams,
 } from '../core/project/projections';
 import { styleById } from '../core/styles';
@@ -170,7 +170,7 @@ export function drawWorld(
   opts?: {
     focusLayer?: string;
     highlightRegionId?: string | null;
-    projection?: ProjectionId;
+    projection?: ProjSpec;
     projParams?: ProjectionParams;
     reliefSmooth?: number;
     styleId?: string;

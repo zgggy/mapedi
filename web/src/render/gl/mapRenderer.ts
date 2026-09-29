@@ -30,13 +30,14 @@ import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geom
 import { triangulateRings, trianglesMatchRings } from './triangulate';
 import { frameOutline } from '../space';
 import {
+  isBlend,
   project,
-  projectionWorldPeriod,
+  projectionPeriodAt,
   projectionWraps,
   projectionXScale,
   ROB_PLEN,
   ROB_PDFE,
-  type ProjectionId,
+  type ProjSpec,
 } from '../../core/project/projections';
 
 interface BBox {
@@ -77,19 +78,24 @@ interface GpuBuf {
  */
 const SCALE_FN = `
 uniform float uPan;
-uniform float uRobMode;
-uniform float uScaleC;
+uniform float uARob;
+uniform float uScaleA;
+uniform float uBRob;
+uniform float uScaleB;
+uniform float uBlendT;
 uniform float uPdf[19];
 uniform float uPl[19];
-float scaleAt(float y) {
-  if (uRobMode < 0.5) return uScaleC;
+float robScale(float y) {
   float a = min(1.0, abs(y) / 1.3523);
   int i = 0;
   for (int j = 0; j < 18; j++) { if (uPdf[j + 1] < a) i = j + 1; }
   float span = uPdf[i + 1] - uPdf[i];
   float t = span > 1e-9 ? clamp((a - uPdf[i]) / span, 0.0, 1.0) : 0.0;
   return 0.8487 * (uPl[i] + (uPl[i + 1] - uPl[i]) * t);
-}`;
+}
+// 水平结构双通道：静态时两端同投影（=原行为）；动画 = 两端 scale 的值插值（精确公式）
+float chScale(float y, float robMode, float cst) { return robMode > 0.5 ? robScale(y) : cst; }
+float scaleAt(float y) { return mix(chScale(y, uARob, uScaleA), chScale(y, uBRob, uScaleB), uBlendT); }`;
 
 const VERT_FAN = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -163,8 +169,11 @@ interface Program {
   uHalfW: WebGLUniformLocation | null;
   uRect: WebGLUniformLocation | null;
   uPan: WebGLUniformLocation | null;
-  uRobMode: WebGLUniformLocation | null;
-  uScaleC: WebGLUniformLocation | null;
+  uARob: WebGLUniformLocation | null;
+  uScaleA: WebGLUniformLocation | null;
+  uBRob: WebGLUniformLocation | null;
+  uScaleB: WebGLUniformLocation | null;
+  uBlendT: WebGLUniformLocation | null;
   uPdf: WebGLUniformLocation | null;
   uPl: WebGLUniformLocation | null;
 }
@@ -221,8 +230,11 @@ function toProgram(gl: WebGL2RenderingContext, prog: WebGLProgram): Program {
     uHalfW: gl.getUniformLocation(prog, 'uHalfW'),
     uRect: gl.getUniformLocation(prog, 'uRect'),
     uPan: gl.getUniformLocation(prog, 'uPan'),
-    uRobMode: gl.getUniformLocation(prog, 'uRobMode'),
-    uScaleC: gl.getUniformLocation(prog, 'uScaleC'),
+    uARob: gl.getUniformLocation(prog, 'uARob'),
+    uScaleA: gl.getUniformLocation(prog, 'uScaleA'),
+    uBRob: gl.getUniformLocation(prog, 'uBRob'),
+    uScaleB: gl.getUniformLocation(prog, 'uScaleB'),
+    uBlendT: gl.getUniformLocation(prog, 'uBlendT'),
     uPdf: gl.getUniformLocation(prog, 'uPdf'),
     uPl: gl.getUniformLocation(prog, 'uPl'),
   };
@@ -412,10 +424,17 @@ export class MapGlRenderer {
     if (pr.uCam) gl.uniform2f(pr.uCam, env.cam.x, env.cam.y);
     if (pr.uScale) gl.uniform1f(pr.uScale, env.cam.scale);
     if (pr.uSize) gl.uniform2f(pr.uSize, env.w, env.h);
-    // 水平结构（scale(y)·λ）：uPan=Δλ；圆柱族 scale 常数；罗宾森走表（与 CPU 同源）
+    // 水平结构（scale(y)·λ）：uPan=Δλ；scale 走双通道（静态=两端同投影；动画=值插值）
     if (pr.uPan) gl.uniform1f(pr.uPan, env.contentOffsetX ?? 0);
-    if (pr.uScaleC) gl.uniform1f(pr.uScaleC, projectionXScale(env.proj, 0) ?? 1);
-    if (pr.uRobMode) gl.uniform1f(pr.uRobMode, env.proj === 'robinson' ? 1 : 0);
+    const spec = env.proj;
+    const A = isBlend(spec) ? spec.a : spec;
+    const B = isBlend(spec) ? spec.b : spec;
+    const rob = (id: ProjSpec) => (id === 'robinson' ? 1 : 0);
+    if (pr.uARob) gl.uniform1f(pr.uARob, rob(A));
+    if (pr.uScaleA) gl.uniform1f(pr.uScaleA, projectionXScale(A, 0) ?? 1);
+    if (pr.uBRob) gl.uniform1f(pr.uBRob, rob(B));
+    if (pr.uScaleB) gl.uniform1f(pr.uScaleB, projectionXScale(B, 0) ?? 1);
+    if (pr.uBlendT) gl.uniform1f(pr.uBlendT, isBlend(spec) ? spec.t : 0);
     if (pr.uPdf) gl.uniform1fv(pr.uPdf, ROB_PDFE);
     if (pr.uPl) gl.uniform1fv(pr.uPl, ROB_PLEN);
   }
@@ -480,7 +499,7 @@ export class MapGlRenderer {
   }
 
   /** scale(y) 在 piece y 范围上的极值（副本位移区间 / 可见性判定用；三点含 0 采样） */
-  private scaleRange(proj: ProjectionId, yMin: number, yMax: number): [number, number] {
+  private scaleRange(proj: ProjSpec, yMin: number, yMax: number): [number, number] {
     let lo = Infinity;
     let hi = -Infinity;
     for (const y of [yMin, yMax, yMin <= 0 && yMax >= 0 ? 0 : (yMin + yMax) / 2]) {
@@ -864,7 +883,7 @@ export class MapGlRenderer {
     let entry = this.meshCache.get(env.pcache as unknown as object);
     if (!entry) {
       // 极区闭合边 unwrap 只在圆柱族 polarOutlines 路径执行（罗宾森无 polarOutlines）
-      const period = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
+      const period = (y: number) => projectionPeriodAt(env.proj, y) ?? Math.PI * 2;
       const geo = buildCellMeshStrips(env.pcache.polys, env.pcache.polarOutlines, period);
       entry = { geo, buf: geo.data.length ? this.bufFor(geo.data, 'strip') : null };
       this.meshCache.set(env.pcache as unknown as object, entry);

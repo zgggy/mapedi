@@ -20,7 +20,8 @@ import {
   projectionPeriodAt,
   projectionWraps,
   projectionXScale,
-  type ProjectionId,
+  projSpecKey,
+  type ProjSpec,
 } from '../core/project/projections';
 import {
   buildIncidentEdges,
@@ -52,7 +53,7 @@ let baseRev = '';
 let cachedWorld: World | null = null;
 
 /** 件环条目是否已就绪（渐现：冷件先跳过，由空闲预热补） */
-export function hasPieceEntry(setKey: string, projKey: ProjectionId): boolean {
+export function hasPieceEntry(setKey: string, projKey: ProjSpec): boolean {
   return ringsCache.has(ringCacheKey(setKey, projKey));
 }
 
@@ -86,7 +87,7 @@ let incidentCache: IncidentEdges | null = null;
 export function patchPieceEntry(
   world: World,
   setKey: string,
-  projKey: ProjectionId,
+  projKey: ProjSpec,
   project: (ll: LonLat) => Pt,
   added: CellId[],
   removed: CellId[],
@@ -144,15 +145,15 @@ function ensureRev(world: World): string {
  * 不变量：`region.cells` 变化要么走 `invalidateBorderCache()`（全量），
  * 要么走 `patchPieceEntry()`（增量补丁）——二者互斥且必居其一。
  */
-function ringCacheKey(setKey: string, projKey: string): string {
-  return `${setKey}|${projKey}|${geomRev()}`;
+function ringCacheKey(setKey: string, projKey: ProjSpec): string {
+  return `${setKey}|${projSpecKey(projKey)}|${geomRev()}`;
 }
 
 export function getCellSetRingsCached(
   world: World,
   cellIds: CellId[],
   project: (ll: { lon: number; lat: number }) => Pt,
-  projKey: ProjectionId,
+  projKey: ProjSpec,
   setKey: string,
 ): Entry {
   ensureRev(world);
@@ -242,7 +243,7 @@ function computeFrameFlip(
   cellIds: CellId[],
   rings: Ring[],
   project: (ll: { lon: number; lat: number }) => Pt,
-  projKey: ProjectionId,
+  projKey: ProjSpec,
 ): boolean {
   const n = world.cells.length;
   if (!n) return false;
