@@ -3,9 +3,8 @@ import type { StyleSet } from '../core/styles';
 import type { Camera } from './map2d';
 import {
   project,
-  projSpecKey,
   projectionFrameLat,
-  type ProjSpec,
+  projectionWorldPeriod,
   type ProjectionId,
   type ProjectionParams,
 } from '../core/project/projections';
@@ -45,12 +44,8 @@ export interface RenderEnv {
   h: number;
   style: StyleSet;
   focus: string;
-  /** 几何档投影（动画**量化档**；缓存键来源）：环/三角化/paths 用它 */
-  proj: ProjSpec;
-  /** 连续投影（动画实时 t）：scale/轮廓/裁剪/命中等视图侧用它——平滑且不入键 */
-  viewSpec?: ProjSpec;
+  proj: ProjectionId;
   pp: ProjectionParams;
-  smooth: number;
   pcache: ProjCache;
   showLabels?: boolean;
   /**
@@ -73,6 +68,8 @@ export interface RenderEnv {
   /** 烘焙代理的裁剪补偿：viewport 模式内容位移折进了相机，裁剪需补内容偏移；
    *  period 模式是位置无关贴图（平铺即副本），必须为 0 */
   clipDxBias?: number;
+  /** 增量烘焙的脏区（内容空间包围盒）：元素层跳过不相交元素 */
+  dirtyBoxes?: { minX: number; maxX: number; minY: number; maxY: number }[];
   /** 选中 Region（边界加亮） */
   highlightRegionId?: string | null;
   /** 拖动中的路径 id：地图层不画它（避免与覆盖层幽灵曲线叠成双线） */
@@ -262,8 +259,6 @@ export interface PieceParams {
   smooth: number;
   selected: boolean;
   copies: number[];
-  /** 动画下一档的环（与本件 rings 同件同序）；GL 顶点 mix 到连续 t */
-  ringsNext?: DisplayRing[];
   /** px→用户单位换算 */
   camScale: number;
 }
@@ -321,6 +316,21 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
     // 1) 无环片（整框底色等）无包围盒语义，永不跳过；
     // 2) 有环片按**周期相交**判定——元素可经 k 个世界副本平移后落入窗口，
     //    取所有使 [b + k·per] 与脏区相交的 k（精确解，不设固定 ±2 上限）。
+    if (env.dirtyBoxes?.length && entry.rings.length) {
+      const b = entry.bbox;
+      const per = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
+      let hits = false;
+      for (const r of env.dirtyBoxes) {
+        if (b.maxY < r.minY || b.minY > r.maxY) continue;
+        const kMin = Math.ceil((r.minX - b.maxX) / per);
+        const kMax = Math.floor((r.maxX - b.minX) / per);
+        if (kMin <= kMax) {
+          hits = true;
+          break;
+        }
+      }
+      if (!hits) continue;
+    }
     const rings = entry.rings;
     // 湖泊/大陆都是普通元素，不特判中空
     if (!rings.length && entry.fullWorld && fillOn && !seenFill.has(dp.key)) {
@@ -432,13 +442,13 @@ function preparePieces(
 
 /** 投影空间路径折线缓存：points 签名 + 投影不变则跨帧复用（平移/缩放零重算） */
 const pathPolyCache = new Map<string, { sig: string; poly: Pt[] }>();
-function pathPointsSig(proj: ProjSpec, pp: unknown, points: { lon: number; lat: number }[]): string {
+function pathPointsSig(proj: string, pp: unknown, points: { lon: number; lat: number }[]): string {
   let h = 2166136261;
   for (const p of points) {
     h = Math.imul(h ^ Math.round(p.lon * 1e6), 16777619);
     h = Math.imul(h ^ Math.round(p.lat * 1e6), 16777619);
   }
-  return `${projSpecKey(proj)}|${JSON.stringify(pp ?? 0)}|${points.length}|${h >>> 0}`;
+  return `${proj}|${JSON.stringify(pp ?? 0)}|${points.length}|${h >>> 0}`;
 }
 
 /** 标签文字宽度缓存（同字体同名跨帧复用） */

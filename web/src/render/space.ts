@@ -16,7 +16,7 @@ import {
   projectionPeriodAt,
   projectionWraps,
   projectionXScale,
-  type ProjSpec,
+  type ProjectionId,
 } from '../core/project/projections';
 
 export type Pt = { x: number; y: number };
@@ -116,7 +116,7 @@ export function frameRect(
  */
 export function frameYEnv(
   project: (ll: LonLat) => Pt,
-  proj: ProjSpec,
+  proj: ProjectionId,
 ): {
   minY: number; maxY: number; minX: number; maxX: number;
   cylindrical: boolean; periodAt: (y: number) => number; scaleAt: (y: number) => number;
@@ -150,7 +150,7 @@ export interface CameraLike {
  * 内容在 y 处的投影域位移 = scale(y)·λ偏移（`x = scale(y)·λ` 的平移像）。
  * 圆柱族 scale 常数 → 退化为刚性平移（= 旧行为）；非回绕投影 λ偏移即投影域位移。
  */
-export function contentOffsetAt(proj: ProjSpec, y: number, lambdaOff: number): number {
+export function contentOffsetAt(proj: ProjectionId, y: number, lambdaOff: number): number {
   const s = projectionXScale(proj, y);
   return s === null ? lambdaOff : s * lambdaOff;
 }
@@ -166,7 +166,7 @@ export function worldCopyKs(
   panLambda: number,
   cam: CameraLike,
   viewWidth: number,
-  proj: ProjSpec,
+  proj: ProjectionId,
   contentBounds?: { minX: number; maxX: number; minY: number; maxY: number },
 ): number[] {
   if (!projectionWraps(proj)) return [0];
@@ -212,7 +212,7 @@ export function worldCopyKs(
  */
 export function frameOutline(
   project: (ll: LonLat) => Pt,
-  proj: ProjSpec,
+  proj: ProjectionId,
   lat = projectionFrameLat(proj),
 ): Pt[] {
   const N = proj === 'robinson' ? 48 : 1;
@@ -310,7 +310,7 @@ export function screenToContentLonLat(
   contentOffsetX: number,
   unproject: (x: number, y: number) => LonLat,
   project: (ll: LonLat) => Pt,
-  proj: ProjSpec = 'mercator',
+  proj: ProjectionId = 'mercator',
   lat = FRAME_LAT,
 ): LonLat {
   const ks = worldCopyKs(contentOffsetX, cam, cssW, proj);

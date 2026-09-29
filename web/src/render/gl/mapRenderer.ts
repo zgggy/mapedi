@@ -30,17 +30,13 @@ import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geom
 import { triangulateRings, trianglesMatchRings } from './triangulate';
 import { frameOutline } from '../space';
 import {
-  PROJ_ANIM_SEG,
-  blendProj,
-  isBlend,
   project,
-  quantizeBlend,
-  projectionPeriodAt,
+  projectionWorldPeriod,
   projectionWraps,
   projectionXScale,
   ROB_PLEN,
   ROB_PDFE,
-  type ProjSpec,
+  type ProjectionId,
 } from '../../core/project/projections';
 
 interface BBox {
@@ -81,24 +77,19 @@ interface GpuBuf {
  */
 const SCALE_FN = `
 uniform float uPan;
-uniform float uARob;
-uniform float uScaleA;
-uniform float uBRob;
-uniform float uScaleB;
-uniform float uBlendT;
+uniform float uRobMode;
+uniform float uScaleC;
 uniform float uPdf[19];
 uniform float uPl[19];
-float robScale(float y) {
+float scaleAt(float y) {
+  if (uRobMode < 0.5) return uScaleC;
   float a = min(1.0, abs(y) / 1.3523);
   int i = 0;
   for (int j = 0; j < 18; j++) { if (uPdf[j + 1] < a) i = j + 1; }
   float span = uPdf[i + 1] - uPdf[i];
   float t = span > 1e-9 ? clamp((a - uPdf[i]) / span, 0.0, 1.0) : 0.0;
   return 0.8487 * (uPl[i] + (uPl[i + 1] - uPl[i]) * t);
-}
-// 水平结构双通道：静态时两端同投影（=原行为）；动画 = 两端 scale 的值插值（精确公式）
-float chScale(float y, float robMode, float cst) { return robMode > 0.5 ? robScale(y) : cst; }
-float scaleAt(float y) { return mix(chScale(y, uARob, uScaleA), chScale(y, uBRob, uScaleB), uBlendT); }`;
+}`;
 
 const VERT_FAN = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -172,11 +163,8 @@ interface Program {
   uHalfW: WebGLUniformLocation | null;
   uRect: WebGLUniformLocation | null;
   uPan: WebGLUniformLocation | null;
-  uARob: WebGLUniformLocation | null;
-  uScaleA: WebGLUniformLocation | null;
-  uBRob: WebGLUniformLocation | null;
-  uScaleB: WebGLUniformLocation | null;
-  uBlendT: WebGLUniformLocation | null;
+  uRobMode: WebGLUniformLocation | null;
+  uScaleC: WebGLUniformLocation | null;
   uPdf: WebGLUniformLocation | null;
   uPl: WebGLUniformLocation | null;
 }
@@ -233,11 +221,8 @@ function toProgram(gl: WebGL2RenderingContext, prog: WebGLProgram): Program {
     uHalfW: gl.getUniformLocation(prog, 'uHalfW'),
     uRect: gl.getUniformLocation(prog, 'uRect'),
     uPan: gl.getUniformLocation(prog, 'uPan'),
-    uARob: gl.getUniformLocation(prog, 'uARob'),
-    uScaleA: gl.getUniformLocation(prog, 'uScaleA'),
-    uBRob: gl.getUniformLocation(prog, 'uBRob'),
-    uScaleB: gl.getUniformLocation(prog, 'uScaleB'),
-    uBlendT: gl.getUniformLocation(prog, 'uBlendT'),
+    uRobMode: gl.getUniformLocation(prog, 'uRobMode'),
+    uScaleC: gl.getUniformLocation(prog, 'uScaleC'),
     uPdf: gl.getUniformLocation(prog, 'uPdf'),
     uPl: gl.getUniformLocation(prog, 'uPl'),
   };
@@ -264,38 +249,6 @@ function mergeF(arrays: Float32Array[]): Float32Array | null {
     o += a.length;
   }
   return out;
-}
-
-/**
- * 动画档间顶点 mix：`project` 对 t 线性 → mix(档seg, 档seg+1, α) ≡ 连续 t 的严格投影
- * （唯一微差在 Hermite 采样段——两档各自样条上的采样点线性插值，端点严格）。
- * 拓扑不齐（三角数不同）→ 返回 null = 该帧降级本档（不猜、不补）。
- */
-function mixPieceGeo(a: PieceGeo, b: PieceGeo, alpha: number): PieceGeo | null {
-  const ok = (x: Float32Array | null, y: Float32Array | null): boolean =>
-    (!x && !y) || (!!x && !!y && x.length === y.length);
-  if (!ok(a.tri, b.tri) || !ok(a.xorTris, b.xorTris) || !ok(a.strip, b.strip)) return null;
-  const lf = (x: Float32Array | null, y: Float32Array | null): Float32Array | null => {
-    if (!x || !y) return x;
-    const o = new Float32Array(x.length);
-    for (let i = 0; i < x.length; i++) o[i] = x[i] + (y[i] - x[i]) * alpha;
-    return o;
-  };
-  const box = a.bbox && b.bbox
-    ? {
-        minX: a.bbox.minX + (b.bbox.minX - a.bbox.minX) * alpha,
-        maxX: a.bbox.maxX + (b.bbox.maxX - a.bbox.maxX) * alpha,
-        minY: a.bbox.minY + (b.bbox.minY - a.bbox.minY) * alpha,
-        maxY: a.bbox.maxY + (b.bbox.maxY - a.bbox.maxY) * alpha,
-      }
-    : a.bbox;
-  return {
-    tri: lf(a.tri, b.tri),
-    triOk: a.triOk && b.triOk,
-    xorTris: lf(a.xorTris, b.xorTris),
-    strip: lf(a.strip, b.strip),
-    bbox: box,
-  };
 }
 
 export class MapGlRenderer {
@@ -426,21 +379,7 @@ export class MapGlRenderer {
       this.setCam(env, this.progStrip);
 
       const tParams = performance.now();
-      let pieces = channels.elements ? buildPieceParams(env) : [];
-      // 动画：按下一档再组装一次（同 displayPieces 序 → zip 填 ringsNext，GL 顶点 mix 到连续 t）
-      if (pieces.length && env.viewSpec && isBlend(env.viewSpec)) {
-        const tt = env.viewSpec.t;
-        const nSeg = PROJ_ANIM_SEG;
-        const seg = Math.min(nSeg - 1, Math.floor(tt * nSeg + 1e-9));
-        if (tt * nSeg - seg > 1e-4 && seg < nSeg - 1) {
-          const nextSpec = quantizeBlend(blendProj(env.viewSpec.a, env.viewSpec.b, (seg + 1) / nSeg));
-          const piecesNext = buildPieceParams({ ...env, proj: nextSpec });
-          // zip 按 index（两 env 仅 proj 不同 → 同 displayPieces 序）；key 校验防串件
-          for (let i = 0; i < pieces.length && i < piecesNext.length; i++) {
-            if (pieces[i].key === piecesNext[i].key) pieces[i].ringsNext = piecesNext[i].rings;
-          }
-        }
-      }
+      const pieces = channels.elements ? buildPieceParams(env) : [];
       const tSubmit = performance.now();
       if (channels.cellsMesh && env.showCellMesh) this.drawCellMesh(env);
       for (const piece of pieces) this.drawPiece(env, piece, s);
@@ -473,18 +412,10 @@ export class MapGlRenderer {
     if (pr.uCam) gl.uniform2f(pr.uCam, env.cam.x, env.cam.y);
     if (pr.uScale) gl.uniform1f(pr.uScale, env.cam.scale);
     if (pr.uSize) gl.uniform2f(pr.uSize, env.w, env.h);
-    // 水平结构（scale(y)·λ）：uPan=Δλ；scale 走双通道（静态=两端同投影；动画=值插值）
+    // 水平结构（scale(y)·λ）：uPan=Δλ；圆柱族 scale 常数；罗宾森走表（与 CPU 同源）
     if (pr.uPan) gl.uniform1f(pr.uPan, env.contentOffsetX ?? 0);
-    // viewSpec = 连续 t（平移/副本 scale 必须与顶点 mix 同步 → uBlendT 用连续进度）
-    const spec = env.viewSpec ?? env.proj;
-    const A = isBlend(spec) ? spec.a : spec;
-    const B = isBlend(spec) ? spec.b : spec;
-    const rob = (id: ProjSpec) => (id === 'robinson' ? 1 : 0);
-    if (pr.uARob) gl.uniform1f(pr.uARob, rob(A));
-    if (pr.uScaleA) gl.uniform1f(pr.uScaleA, projectionXScale(A, 0) ?? 1);
-    if (pr.uBRob) gl.uniform1f(pr.uBRob, rob(B));
-    if (pr.uScaleB) gl.uniform1f(pr.uScaleB, projectionXScale(B, 0) ?? 1);
-    if (pr.uBlendT) gl.uniform1f(pr.uBlendT, isBlend(spec) ? spec.t : 0);
+    if (pr.uScaleC) gl.uniform1f(pr.uScaleC, projectionXScale(env.proj, 0) ?? 1);
+    if (pr.uRobMode) gl.uniform1f(pr.uRobMode, env.proj === 'robinson' ? 1 : 0);
     if (pr.uPdf) gl.uniform1fv(pr.uPdf, ROB_PDFE);
     if (pr.uPl) gl.uniform1fv(pr.uPl, ROB_PLEN);
   }
@@ -549,7 +480,7 @@ export class MapGlRenderer {
   }
 
   /** scale(y) 在 piece y 范围上的极值（副本位移区间 / 可见性判定用；三点含 0 采样） */
-  private scaleRange(proj: ProjSpec, yMin: number, yMax: number): [number, number] {
+  private scaleRange(proj: ProjectionId, yMin: number, yMax: number): [number, number] {
     let lo = Infinity;
     let hi = -Infinity;
     for (const y of [yMin, yMax, yMin <= 0 && yMax >= 0 ? 0 : (yMin + yMax) / 2]) {
@@ -720,16 +651,7 @@ export class MapGlRenderer {
       this.drawQuad(f.minX, f.minY, f.maxX - f.minX, f.maxY - f.minY, c[0], c[1], c[2], f.alpha * c[3]);
       return;
     }
-    let geo = this.pieceGeo(piece.rings, piece.smooth);
-    // 动画：下一档几何 mix 到连续 t（α 与 viewSpec.t 段内推导，档与 quantizeBlend 同式）
-    if (piece.ringsNext && env.viewSpec && isBlend(env.viewSpec)) {
-      const tt = env.viewSpec.t;
-      const alpha = tt * PROJ_ANIM_SEG - Math.floor(tt * PROJ_ANIM_SEG + 1e-9);
-      if (alpha > 1e-4 && geo) {
-        const geoB = this.pieceGeo(piece.ringsNext, piece.smooth);
-        if (geoB) geo = mixPieceGeo(geo, geoB, alpha) ?? geo;
-      }
-    }
+    const geo = this.pieceGeo(piece.rings, piece.smooth);
     const gbox = geo?.bbox;
     if (!geo || !gbox) return;
     const strokeOn = piece.strokeW > 0 && piece.stroke !== 'transparent';
@@ -942,7 +864,7 @@ export class MapGlRenderer {
     let entry = this.meshCache.get(env.pcache as unknown as object);
     if (!entry) {
       // 极区闭合边 unwrap 只在圆柱族 polarOutlines 路径执行（罗宾森无 polarOutlines）
-      const period = (y: number) => projectionPeriodAt(env.proj, y) ?? Math.PI * 2;
+      const period = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
       const geo = buildCellMeshStrips(env.pcache.polys, env.pcache.polarOutlines, period);
       entry = { geo, buf: geo.data.length ? this.bufFor(geo.data, 'strip') : null };
       this.meshCache.set(env.pcache as unknown as object, entry);

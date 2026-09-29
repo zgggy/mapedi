@@ -21,7 +21,6 @@
   let shell = $state<ShellState>(initialShell());
   let hover = $state<HoverInfo | null>(null);
   let styleId = $state('dark');
-  let reliefSmooth = $state(0.35);
   let projection = $state<import('./core/project/projections').ProjectionId>('mercator');
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
@@ -187,7 +186,6 @@
           roadSegments={editor.roadSegments()}
           projection={projection}
           {projParams}
-          {reliefSmooth}
           {styleId}
           bindCanvas={(c) => (exportCanvas = c)}
           onhover={(h) => (hover = h)}
@@ -260,7 +258,6 @@
     bind:open={panels.view}
     viewMode={shell.viewMode}
     {styleId}
-    {reliefSmooth}
     globeShowAxis={globeAxis}
     globeShowEcliptic={globeEcliptic}
     globeSpin={globeSpin}
@@ -270,7 +267,6 @@
     globeRotHours={editor.climateDraft.rotationHours}
     onSwitchView={switchView}
     onStyle={(s) => (styleId = s)}
-    onRelief={(v) => (reliefSmooth = v)}
     onGlobeShowAxis={(v) => (globeAxis = v)}
     onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
     onGlobeSpin={(v) => (globeSpin = v)}

@@ -20,8 +20,7 @@ import {
   projectionPeriodAt,
   projectionWraps,
   projectionXScale,
-  projSpecKey,
-  type ProjSpec,
+  type ProjectionId,
 } from '../core/project/projections';
 import {
   buildIncidentEdges,
@@ -53,7 +52,7 @@ let baseRev = '';
 let cachedWorld: World | null = null;
 
 /** 件环条目是否已就绪（渐现：冷件先跳过，由空闲预热补） */
-export function hasPieceEntry(setKey: string, projKey: ProjSpec): boolean {
+export function hasPieceEntry(setKey: string, projKey: ProjectionId): boolean {
   return ringsCache.has(ringCacheKey(setKey, projKey));
 }
 
@@ -61,13 +60,6 @@ export function hasPieceEntry(setKey: string, projKey: ProjSpec): boolean {
 export function invalidatePieceEntries(prefix: string): void {
   for (const k of ringsCache.keys()) {
     if (k.startsWith(prefix)) ringsCache.delete(k);
-  }
-}
-
-/** 清指定投影规格前缀的件环缓存（动画结束清中间档；键 = setKey|projSpecKey|geomRev） */
-export function invalidateSpecEntries(prefix: string): void {
-  for (const k of [...ringsCache.keys()]) {
-    if (k.includes(`|${prefix}`)) ringsCache.delete(k);
   }
 }
 
@@ -94,7 +86,7 @@ let incidentCache: IncidentEdges | null = null;
 export function patchPieceEntry(
   world: World,
   setKey: string,
-  projKey: ProjSpec,
+  projKey: ProjectionId,
   project: (ll: LonLat) => Pt,
   added: CellId[],
   removed: CellId[],
@@ -152,15 +144,15 @@ function ensureRev(world: World): string {
  * 不变量：`region.cells` 变化要么走 `invalidateBorderCache()`（全量），
  * 要么走 `patchPieceEntry()`（增量补丁）——二者互斥且必居其一。
  */
-function ringCacheKey(setKey: string, projKey: ProjSpec): string {
-  return `${setKey}|${projSpecKey(projKey)}|${geomRev()}`;
+function ringCacheKey(setKey: string, projKey: string): string {
+  return `${setKey}|${projKey}|${geomRev()}`;
 }
 
 export function getCellSetRingsCached(
   world: World,
   cellIds: CellId[],
   project: (ll: { lon: number; lat: number }) => Pt,
-  projKey: ProjSpec,
+  projKey: ProjectionId,
   setKey: string,
 ): Entry {
   ensureRev(world);
@@ -250,7 +242,7 @@ function computeFrameFlip(
   cellIds: CellId[],
   rings: Ring[],
   project: (ll: { lon: number; lat: number }) => Pt,
-  projKey: ProjSpec,
+  projKey: ProjectionId,
 ): boolean {
   const n = world.cells.length;
   if (!n) return false;

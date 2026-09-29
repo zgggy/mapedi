@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * 视图面板（独立）：视图模式 / 样式 / 浮雕平滑 / 球面参数（轴·黄道·自转·倾角·视野）。
+   * 视图面板（独立）：视图模式 / 样式 / 球面参数（轴·黄道·自转·倾角·视野）。
    * 项目面板只留「生成」与「项目」。
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
@@ -11,7 +11,6 @@
     open = $bindable(false),
     viewMode = 'view-2d',
     styleId = 'dark',
-    reliefSmooth = 0.35,
     globeShowAxis = true,
     globeShowEcliptic = true,
     globeSpin = true,
@@ -21,7 +20,6 @@
     onProjection,
     onSwitchView,
     onStyle,
-    onRelief,
     onGlobeShowAxis,
     onGlobeShowEcliptic,
     onGlobeSpin,
@@ -31,7 +29,6 @@
     open?: boolean;
     viewMode?: ViewMode;
     styleId?: string;
-    reliefSmooth?: number;
     globeShowAxis?: boolean;
     globeShowEcliptic?: boolean;
     globeSpin?: boolean;
@@ -41,7 +38,6 @@
     onProjection?: (p: string) => void;
     onSwitchView: (m: ViewMode) => void;
     onStyle: (s: string) => void;
-    onRelief: (v: number) => void;
     onGlobeShowAxis?: (v: boolean) => void;
     onGlobeShowEcliptic?: (v: boolean) => void;
     onGlobeSpin?: (v: boolean) => void;
@@ -71,9 +67,6 @@
             <option value="robinson">罗宾森（两极内收）</option>
           </select>
         {/if}
-      </div>
-      <div class="row">
-        <label class="sm">平滑 <CapsuleSlider min={0} max={1} step={0.05} value={reliefSmooth} label="浮雕平滑" width={130} onInput={(v) => onRelief(v)} /></label>
       </div>
     </section>
     {#if viewMode === 'view-globe'}

@@ -18,14 +18,14 @@ import { prepareDisplayRings } from '../src/core/ring/normalize';
 import { sampleMidRing } from '../src/core/ring/hermite';
 import { triangulateRings, trianglesMatchRings } from '../src/render/gl/triangulate';
 import { frameRect } from '../src/render/space';
-import { project, defaultProjParams, projectionPeriodAt } from '../src/core/project/projections';
+import { project, defaultProjParams, projectionWorldPeriod } from '../src/core/project/projections';
 import { createWorld, rebuildSharedEdgesFromCells } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
 import type { LonLat, World } from '../src/core/types';
 
 const pp = defaultProjParams();
 const proj = (ll: LonLat) => project(ll, 'mercator', pp);
-const PERIOD = projectionPeriodAt('mercator', 0)!;
+const PERIOD = projectionWorldPeriod('mercator')!;
 
 /** 定向夹具：cell 0 中心在 (0, 2)，边 (0,1)→(1,1) 北侧 */
 const worldOrient = {

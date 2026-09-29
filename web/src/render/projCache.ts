@@ -2,14 +2,13 @@ import type { LonLat, World } from '../core/types';
 import {
   project,
   projectionPeriodAt,
-  projectionFrameLat,
-  projSpecKey,
-  type ProjSpec,
+  projectionWorldPeriod,
+  type ProjectionId,
   type ProjectionParams,
 } from '../core/project/projections';
 import { FRAME_LAT, unwrapXAgainst, wrapPeriod } from './space';
-import { polarCellIds } from '../core/voronoi';
 import { getViewIndex, type ViewIndex, type Rect } from './viewIndex';
+import { polarCellIds } from '../core/voronoi';
 
 export interface ProjCache {
   key: string;
@@ -22,13 +21,10 @@ export interface ProjCache {
   view: ViewIndex;
 }
 
-// 多槽 LRU（键控）：动画档切换不得互相驱逐（单槽会让预建失效、每档全量重建）。
-const cacheSlots = new Map<string, ProjCache>();
-const CACHE_SLOTS = 8;
+let cache: ProjCache | null = null;
 
-function cacheKey(world: World, proj: ProjSpec, pp: ProjectionParams): string {
-  // projSpecKey：blend 对象必须 key 化（直接拼串变 [object Object] 撞键）
-  return `${world.meta.seed}:${world.meta.cellCount}:${world.cells.length}:${projSpecKey(proj)}:${pp.centralMeridian}:${pp.aeqdCenter.lon}:${pp.aeqdCenter.lat}`;
+function cacheKey(world: World, proj: ProjectionId, pp: ProjectionParams): string {
+  return `${world.meta.seed}:${world.meta.cellCount}:${world.cells.length}:${proj}:${pp.centralMeridian}:${pp.aeqdCenter.lon}:${pp.aeqdCenter.lat}`;
 }
 
 /** 显示用顶点键：0.01° 网格 + ±180 缝（合并浮点微差，角点必须同一 id） */
@@ -70,44 +66,27 @@ function buildSharedProjectedVerts(
 
 export function getProjCache(
   world: World,
-  proj: ProjSpec,
+  proj: ProjectionId,
   pp: ProjectionParams,
 ): ProjCache {
   const key = cacheKey(world, proj, pp);
-  // 只按 key 失效：key 含 seed/cellCount/spec/pp，覆盖几何与投影变化。
+  // 只按 key 失效：key 含 seed/cellCount/proj/pp，覆盖几何与投影变化。
   // 不按 world 引用失效——store 浅拷贝 {…world} 会换引用但几何没变，全量重建 O(N) 太贵。
-  const hit = cacheSlots.get(key);
-  if (hit) return hit;
-  const built = buildProjCache(world, proj, pp);
-  cacheSlots.set(key, built);
-  if (cacheSlots.size > CACHE_SLOTS) {
-    const first = cacheSlots.keys().next().value;
-    if (first !== undefined) cacheSlots.delete(first);
-  }
-  return built;
+  if (cache && cache.key === key) return cache;
+  cache = buildProjCache(world, proj, pp);
+  return cache;
 }
 
 /** Worker 预建结果落盘（同 key 才接受；转移对象免主线程 O(N) 首建） */
 export function installProjCache(next: ProjCache): void {
-  if (cacheSlots.get(next.key)) return;
-  cacheSlots.set(next.key, next);
-  if (cacheSlots.size > CACHE_SLOTS) {
-    const first = cacheSlots.keys().next().value;
-    if (first !== undefined) cacheSlots.delete(first);
-  }
-}
-
-/** 清指定投影规格的槽（动画结束清中间档缓存） */
-export function invalidateProjSpec(specKey: string): void {
-  for (const k of [...cacheSlots.keys()]) {
-    if (k.includes(`:${specKey}:`)) cacheSlots.delete(k);
-  }
+  if (cache && cache.key === next.key) return;
+  cache = next;
 }
 
 /** 纯构建（生成/加载 Worker 与同步回退共用同一实现） */
 export function buildProjCache(
   world: World,
-  proj: ProjSpec,
+  proj: ProjectionId,
   pp: ProjectionParams,
 ): ProjCache {
   const key = cacheKey(world, proj, pp);
@@ -124,8 +103,8 @@ export function buildProjCache(
   // 局部周期（伪圆柱 scale(y)·2π）：跨缝顶点在 y 处按真实周期 unwrap——
   // 常数 2π 对罗宾森会把缝点错移 +0.95（cell 多边形撕裂、填充乱的根因）。
   const periodAt = (y: number) => projectionPeriodAt(proj, y) ?? Math.PI * 2;
-  const poles = polarCellIds(world.cells);
   const table = buildSharedProjectedVerts(world, projectFn);
+  const poles = polarCellIds(world.cells);
 
   for (const cell of world.cells) {
     const c = projectFn(cell.center);
@@ -159,16 +138,8 @@ export function buildProjCache(
       for (let i = 0; i < xs.length; i++) xs[i] += -kShift * periodAt(ys[i]);
     }
 
-    // **含极点 && 极点超框的 cell 沿近侧框线闭合**：
-    // 「含极点」是数据域条件（高纬不含极点的 cell 不该被 flatten——顶点可以低于
-    // 框线 2.77，但极点在 cell 内 → 必须封到框线，projections.test 有断言）；
-    // 「极点超框」：墨卡托极点 y≈7.6 > 框 3.13 封、罗宾森极点=框顶不封（原行为），
-    // blend 动画中极点 y 连续 → t<1 恒封、t=1 自然退出，判定无跳变。
-    const frameLat = projectionFrameLat(proj);
-    const frameY = projectFn({ lon: 0, lat: frameLat }).y;
-    const poleY = Math.abs(projectFn({ lon: 0, lat: 90 }).y);
-    const poleOut = poleY > frameY + 1e-9;
-    const polar = poleOut && (cell.id === poles.north || cell.id === poles.south);
+    const polar = projectionWorldPeriod(proj) !== null &&
+      (cell.id === poles.north || cell.id === poles.south);
     let minX = Math.min(...xs);
     let maxX = Math.max(...xs);
     let minY = Math.min(...ys);
@@ -182,7 +153,7 @@ export function buildProjCache(
       for (let i = 0; i < xs.length; i++) outline.push(xs[i], ys[i]);
       polarOutlines.set(cell.id, Float64Array.from(outline));
       const north = cell.id === poles.north;
-      const edgeLat = north ? frameLat : -frameLat;
+      const edgeLat = north ? FRAME_LAT : -FRAME_LAT;
       const edgeY = projectFn({ lon: 0, lat: edgeLat }).y;
       const seamX = unwrapXAgainst(xs[xs.length - 1], xs[0], periodAt(ys[0]));
       for (let i = 0; i < xs.length; i++) out.push(xs[i], ys[i]);
@@ -230,5 +201,5 @@ export function buildProjCache(
 }
 
 export function invalidateProjCache(): void {
-  cacheSlots.clear();
+  cache = null;
 }
