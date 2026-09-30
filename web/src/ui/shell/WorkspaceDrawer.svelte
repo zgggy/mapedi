@@ -16,7 +16,6 @@
   import { defaultLayerVisible } from '../../core/displayCompose';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
-  import FoldHandle from './FoldHandle.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import CreateBox from './CreateBox.svelte';
@@ -31,14 +30,13 @@
     drawActive = false,
     brushRadius = 1.5,
     newName = '',
+    taskMode = 'check',
+    globeLocked = false,
     onSelect,
     onDelete,
-    onDraw,
     onPaintValue,
     onRadius,
-    drawTool = 'brush',
-    onTool,
-    onDrawMode,
+    onTaskMode,
     onCreate,
     onCreateChild,
     onRandomName,
@@ -49,8 +47,8 @@
     onToggleHidden,
     onUndo,
     onRedo,
-    onOpenPanel,
-    lowFreq,
+    layerPanel,
+    elementPanel,
     mode = 'plane',
   }: {
     world: World | null;
@@ -60,15 +58,16 @@
     drawActive?: boolean;
     brushRadius?: number;
     newName?: string;
+    /** 工作区三模式（2026-09-30 拍板：检查 / 生成 / 绘制） */
+    taskMode?: 'check' | 'gen' | 'draw';
+    /** 球面视图锁定检查模式 */
+    globeLocked?: boolean;
     onSelect: (id: string | null) => void;
     onDelete: (id: string) => void;
-    onDraw: (id: string) => void;
-    /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字 */
+    /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字（仅绘制模式行内显示） */
     onPaintValue?: (id: string, value: number) => void;
     onRadius?: (v: number) => void;
-    drawTool?: import('../../core/draw/brush').DrawTool;
-    onTool?: (t: import('../../core/draw/brush').DrawTool) => void;
-    onDrawMode?: () => void;
+    onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
     onCreate?: () => void;
     onCreateChild?: (parentId: string) => void;
     onRandomName?: () => void;
@@ -83,20 +82,15 @@
     /** 工具带 undo/redo（D1′：接现有 editor.undo/redo，不造新能力） */
     onUndo?: () => void;
     onRedo?: () => void;
-    /** 右键菜单 → 信息/参数卡片（需求 4；锚在菜单点击处） */
-    onOpenPanel?: (
-      kind: 'style' | 'layerInfo' | 'elementInfo',
-      id: string,
-      x: number,
-      y: number,
-    ) => void;
-    /** 段4 低频折叠区（C8：生成把手 / 显示把手），内容由调用方提供 */
-    lowFreq?: import('svelte').Snippet;
-    /** globe = 球面纯展示：隐藏绘制把手与创建行（图层显隐/列表/显示仍可用） */
+    /** 图层树聚焦行下方的模式展开内容（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
+    layerPanel?: import('svelte').Snippet;
+    /** 元素树选中行下方的模式展开内容（检查=InspectSection / 生成=元素级生成占位；绘制=本地绘制参数区） */
+    elementPanel?: import('svelte').Snippet;
+    /** globe = 球面纯展示：隐藏创建行（列表/搜索/面板仍可用） */
     mode?: 'plane' | 'globe';
   } = $props();
 
-  /** 元素名过滤（C4）：默认收起为 🔍 按钮，点击展开搜索框（2026-09-30 需求） */
+  /** 元素名搜索（C4/2026-09-30：默认收起为 🔍 按钮，点击展开搜索框） */
   let filter = $state('');
   let searchOpen = $state(false);
   let searchEl: HTMLInputElement | undefined = $state();
@@ -105,8 +99,6 @@
     if (searchOpen) queueMicrotask(() => searchEl?.focus());
     else filter = '';
   }
-  /** 绘制把手（2026-09-30 四把手重排）：工具带收进把手，默认展开 */
-  let drawOpen = $state(true);
 
   const meta = $derived(LAYER_META[focusLayer]);
   const isHeight = $derived(focusLayer === 'height');
@@ -195,11 +187,14 @@
     visibleFlat.map((v) => ({ id: v.node.region.id, parentId: v.node.parentId }) as FlatRow),
   );
 
-  /** 单列网格的全部格：行（ItemButton）+ 展开时的建子行（CreateBox） */
+  /** 单列网格的全部格：行（ItemButton）+ 展开时的建子行（CreateBox）+ 选中行后的模式展开区（panel） */
   const cells = $derived.by(() => {
-    const acc: { kind: 'row' | 'create'; node: Node }[] = [];
+    const acc: { kind: 'row' | 'create' | 'panel'; node: Node }[] = [];
     for (const v of visibleFlat) {
       acc.push({ kind: 'row', node: v.node });
+      if (selectedRegionId && v.node.region.id === selectedRegionId) {
+        acc.push({ kind: 'panel', node: v.node });
+      }
       if (v.open && v.node.expandable) acc.push({ kind: 'create', node: v.node });
     }
     return acc;
@@ -275,26 +270,22 @@
   }
 
   /**
-   * C1（2026-09-30 拍板，修订第三十三次「选中即绘制」）：
-   * 单击 = 只选中（不武装笔刷）；双击 = 进入绘制会话。
+   * 选中与展开（C1 改写，2026-09-30 拍板）：单击 = 选中并展开（单开：再点一次收起）；
+   * 绘制模式下选中即被绘制（App 侧推导 startDraw）；检查/生成模式只查看/看参数。
+   * 双击不再有独立语义（原「双击进绘制」退役——绘制入口 = 绘制模式）。
    */
   function handleSelect(id: string) {
-    onSelect(id);
+    if (selectedRegionId === id) onSelect(null); // 再点收起 = 单开互斥
+    else onSelect(id);
     const r = world?.regions.find((x) => x.id === id);
-    if (r && canExpand(r)) toggleExpand(id);
+    if (r && selectedRegionId !== id && canExpand(r)) toggleExpand(id);
   }
 
-  function handleDraw(id: string) {
-    onSelect(id);
-    onDraw(id);
-  }
-
-  /** 点击面板空白处 = 无选中元素 = 退出绘制（与完成/Esc 同效） */
+  /** 点击面板空白处 = 无选中元素 = 收起（绘制退出由 App 推导） */
   function onBlankClick(e: MouseEvent) {
     const t = e.target as HTMLElement;
     if (t.closest('button') || t.closest('input') || t.closest('.ibtn')) return;
-    onSelect(null as unknown as string);
-    if (drawActive) onDrawMode?.();
+    if (selectedRegionId) onSelect(null as unknown as string);
   }
 
   function activeHeader() {
@@ -326,26 +317,11 @@
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   function openMenu(e: MouseEvent, id: string) {
-    const seq = isFreeLayer
-      ? pathItems.map((p) => p.id)
-      : visibleFlat.map((v) => v.node.region.id);
-    const si = seq.indexOf(id);
-    // 区间元素是派生数据（重建会冲掉复制/删除），只留显隐与排序
+    // 右键菜单简化（2026-09-30 拍板 3）：信息/显示参数 → 检查模式展开区；
+    // 显隐 → 行内 eye；上移/下移 → 长按拖动。只留无其他入口的复制/删除。
     const reg = world?.regions.find((x) => x.id === id);
     const derived = !!reg && !!intervalAttrs(reg);
     const items: MenuItem[] = [
-      { id: 'vis', label: '显示 / 隐藏', action: () => onToggleHidden?.(id) },
-      // 信息/参数入右键菜单（需求 4）
-      { id: 'info', label: '元素信息…', action: () => onOpenPanel?.('elementInfo', id, e.clientX, e.clientY) },
-      { id: 'style', label: '显示参数…', action: () => onOpenPanel?.('style', id, e.clientX, e.clientY) },
-      // 列表为叠放反序（上 = 高）：列表上移 = 数组后移（dir=+1）
-      { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveItem?.(id, 1) },
-      {
-        id: 'down',
-        label: '下移一层',
-        disabled: si < 0 || si >= seq.length - 1,
-        action: () => onMoveItem?.(id, -1),
-      },
       {
         id: 'copy',
         label: derived ? '复制一个（派生项不可复制）' : '复制一个',
@@ -474,69 +450,32 @@
   </div>
 {:else}
   {@const hd = activeHeader()}
-  <!-- 工作区段（左轨 §3.3）：header 常驻无按钮；四段次序 = 工具带 → 新增+搜索 → 列表 → 低频折叠区 -->
+  <!-- 工作区（2026-09-30 三模式重构）：头部(标题+undo/redo) → 模式 tab → 树区（创建/搜索 + 列表） -->
   <div class="sec-root">
     <header class="hd">
       <span class="ico">{hd.icon}</span>
       <span class="nm">工作区 · {hd.title}</span>
+      <button type="button" class="ur" title="撤销 (Ctrl+Z)" onclick={() => onUndo?.()}>↶</button>
+      <button type="button" class="ur" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
     </header>
-    <div class="ws" onclick={onBlankClick}>
-      <!-- 段1 绘制把手（2026-09-30 四把手重排；样式 = FoldHandle 单源）：工具带收进把手，默认展开 -->
-      {#if mode === 'plane'}
-        <FoldHandle
-          icon="✏️"
-          label="绘制"
-          open={drawOpen}
-          onToggle={(v) => (drawOpen = v)}
-          title={drawActive ? 'Esc 退出绘制会话' : '选择 / 笔刷工具与笔刷尺寸'}
-        />
-        {#if drawOpen}
-          <div class="tools">
-            <div class="tool-row">
-              <button
-                type="button"
-                class="tool"
-                class:on={!drawActive}
-                onclick={() => {
-                  if (drawActive) onDrawMode?.();
-                }}>选择</button
-              >
-              <button
-                type="button"
-                class="tool"
-                class:on={drawActive}
-                onclick={() => {
-                  if (!drawActive) onDrawMode?.();
-                }}>绘制 B</button
-              >
-              {#if drawTool === 'road'}
-                <span class="chip" title="道路工具（路/航河层专用）">道路</span>
-              {/if}
-              <button type="button" class="tool icon" title="撤销 (Ctrl+Z)" onclick={() => onUndo?.()}>↶</button>
-              <button type="button" class="tool icon" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
-            </div>
-            <div class="tool-row">
-              <label class="field inline">
-                <span>笔刷</span>
-                <CapsuleSlider
-                  min={0.3}
-                  max={8}
-                  step={0.1}
-                  value={brushRadius}
-                  label="笔刷宽度"
-                  width={140}
-                  onInput={(v) => onRadius?.(v)}
-                />
-                <span class="dim">{brushRadius.toFixed(1)}°</span>
-              </label>
-            </div>
-            {#if drawActive}
-              <p class="dim hint">{isHeight ? '左键刷选定值 · 右键擦除 · 空白点击 / Esc 退出' : '左键加地块 · Shift 移除 · Esc 退出'}</p>
-            {/if}
-          </div>
-        {/if}
-      {/if}
 
+    <!-- 三模式 tab（检查 / 生成 / 绘制）；球面锁定检查 -->
+    <div class="mtabs" role="tablist" aria-label="工作区模式">
+      {#each [{ k: 'check', l: '🔍 检查' }, { k: 'gen', l: '🎲 生成' }, { k: 'draw', l: '✏️ 绘制' }] as t (t.k)}
+        <button
+          type="button"
+          role="tab"
+          class="mtab"
+          class:on={taskMode === t.k}
+          aria-selected={taskMode === t.k}
+          disabled={globeLocked && t.k !== 'check'}
+          title={globeLocked && t.k !== 'check' ? '球面为纯展示，仅检查模式可用' : undefined}
+          onclick={() => onTaskMode?.(t.k as 'check' | 'gen' | 'draw')}>{t.l}</button
+        >
+      {/each}
+    </div>
+
+    <div class="ws" onclick={onBlankClick}>
       <!-- 段2 新增元素（仅平面编辑模式） + 搜索按钮（默认收起，点击展开输入框） -->
       {#if mode === 'plane' && !isHeight}
         <div class="create">
@@ -579,6 +518,7 @@
       )}
         <ItemButton
           visible={!hidden && layerVisibleOf(focusLayer)}
+          onEye={() => onToggleHidden?.(id)}
           logoColor={color}
           name={name}
           badge={badge}
@@ -586,16 +526,15 @@
           dragging={dragId === id}
           onClick={() => {
             handleSelect(id);
-            if (ia) onPaintValue?.(id, paintValueOf(id, ia));
+            if (ia && taskMode === 'draw') onPaintValue?.(id, paintValueOf(id, ia));
           }}
-          onDblclick={() => handleDraw(id)}
           onMenu={(e) => openMenu(e, id)}
           onHold={(s) => onRowHold(id, s)}
           onDragMove={onRowMove}
           onDragEnd={onRowEnd}
         >
           {#snippet control()}
-            {#if ia}
+            {#if ia && taskMode === 'draw'}
               <CapsuleSlider
                 min={ia.lo}
                 max={ia.hi}
@@ -610,14 +549,15 @@
         </ItemButton>
       {/snippet}
 
-      {#snippet cellNode(c: { kind: 'row' | 'create'; node: Node }, i: number)}
+      {#snippet cellNode(c: { kind: 'row' | 'create' | 'panel'; node: Node }, i: number)}
         {@const n = c.node}
         {@const id = n.region.id}
         <li
           class="cell"
           class:create={c.kind === 'create'}
+          class:panel={c.kind === 'panel'}
           data-row-id={c.kind === 'row' ? id : undefined}
-          data-kind={c.kind === 'row' ? 'region' : 'create'}
+          data-kind={c.kind === 'row' ? 'region' : c.kind}
           style="transform:translateY({offsetOf(i)}px);padding-left:{n.depth * 14}px"
         >
           {#if c.kind === 'row'}
@@ -629,6 +569,36 @@
               !!n.region.hidden,
               intervalAttrs(n.region),
             )}
+          {:else if c.kind === 'panel'}
+            <!-- 模式展开区（单开 = 选中行下方）：绘制=本地绘制参数（值滑块在行内）；检查/生成=App 注入 -->
+            {#if taskMode === 'draw'}
+              <div class="mpanel">
+                {#if isFreeLayer}
+                  <p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p>
+                {:else}
+                  <label class="field inline">
+                    <span>笔刷</span>
+                    <CapsuleSlider
+                      min={0.3}
+                      max={8}
+                      step={0.1}
+                      value={brushRadius}
+                      label="笔刷宽度"
+                      width={130}
+                      onInput={(v) => onRadius?.(v)}
+                    />
+                    <span class="dim">{brushRadius.toFixed(1)}°</span>
+                  </label>
+                  <p class="dim hint">
+                    {intervalAttrs(n.region)
+                      ? '左键刷选定值 · 空白点击 / Esc 收起退出'
+                      : '左键加地块 · Shift 移除 · 空白点击 / Esc 收起退出'}
+                  </p>
+                {/if}
+              </div>
+            {:else if elementPanel}
+              {@render elementPanel()}
+            {/if}
           {:else}
             <div class="create-slot" class:pulse={createPulseParent === id}>
               <CreateBox
@@ -708,11 +678,6 @@
       <!-- 过滤无结果（C4）：一句话提示而非空白 -->
       {#if filter.trim() && (isFreeLayer ? !pathItems.length : !cells.length)}
         <p class="dim-pad">没有匹配「{filter.trim()}」的元素</p>
-      {/if}
-
-      <!-- 段4 低频折叠区（C8：生成与渲染样式优先级低于绘制工具） -->
-      {#if lowFreq}
-        <div class="lowfreq">{@render lowFreq()}</div>
       {/if}
     </div>
 
@@ -816,28 +781,60 @@
     text-align: center;
     padding: 3px 7px;
   }
-  /* 工具带的只读状态徽标（如道路层的「道路」工具） */
-  .chip {
+  /* —— 模式 tab 行（检查/生成/绘制；2026-09-30 三模式） —— */
+  .mtabs {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px 0;
     flex: 0 0 auto;
-    padding: 3px 8px;
-    border-radius: 7px;
+  }
+  .mtab {
+    flex: 1;
     border: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.05);
     color: var(--text-dim);
+    border-radius: 999px;
+    padding: 4px 6px;
     font-size: 11px;
-    line-height: 1;
+    line-height: 1.2;
+    cursor: pointer;
   }
-  .tool.icon {
-    padding: 3px 7px;
+  .mtab.on {
+    background: rgba(240, 195, 106, 0.22);
+    border-color: rgba(240, 195, 106, 0.65);
+    color: var(--text, #ddd);
+  }
+  .mtab:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  /* 头部右端 undo/redo 小钮 */
+  .ur {
+    flex: 0 0 auto;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-dim);
+    border-radius: 6px;
+    padding: 2px 7px;
     font-size: 12px;
     line-height: 1;
+    cursor: pointer;
   }
-  .tools {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
+  .ur:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text);
+  }
+  /* 模式展开区（panel 节点，可变高） */
+  .cell.panel {
+    height: auto;
+    padding-top: 2px;
+    padding-bottom: 4px;
+  }
+  .mpanel {
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 8px;
   }
   .field.inline {
     display: flex;
@@ -931,25 +928,6 @@
     transition: transform 0.08s linear;
   }
 
-  .tool-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .tool {
-    background: rgba(255, 255, 255, 0.08);
-    color: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 999px;
-    padding: 3px 10px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .tool.on {
-    background: rgba(240, 195, 106, 0.25);
-    border-color: rgba(240, 195, 106, 0.6);
-  }
   .hint {
     margin: 4px 0 0;
   }

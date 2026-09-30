@@ -26,7 +26,6 @@
     onSelect,
     onToggleVisible,
     onDrawLayer,
-    onStyleLayer,
     onDragLayer,
     onAddLayer,
     onNewName,
@@ -36,7 +35,7 @@
     onMoveLayer,
     onCopyLayer,
     onDeleteLayer,
-    onOpenPanel,
+    expandPanel,
   }: {
     world: World | null;
     /** 图层子面板展开态（收起时只渲染 header 一行，§3.1） */
@@ -49,12 +48,10 @@
     onToggleVisible?: (id: string) => void;
     /** 选中（C1：单击只聚焦，不进绘制） */
     onDrawLayer?: (id: string) => void;
-    /** 双击：打开该图层显示参数面板 */
-    onStyleLayer?: (id: string) => void;
     onDragLayer?: (
       fromId: string,
       hint:
-        | { kind: 'nest'; targetId: string; nestFirst?: boolean }
+        | { kind: 'nest'; nestFirst?: boolean }
         | { kind: 'gap'; afterId: string | null }
         | { kind: 'root' },
     ) => void;
@@ -65,19 +62,14 @@
     onCollapse?: () => void;
     /** header [展开/收起]：图层子面板开合 */
     onToggleExpand?: () => void;
-    /** 右键菜单 → 信息/参数卡片（需求 4；锚在菜单点击处） */
-    onOpenPanel?: (
-      kind: 'style' | 'layerInfo' | 'elementInfo',
-      id: string,
-      x: number,
-      y: number,
-    ) => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
     onCopyLayer?: (id: string) => void;
     /** 右键菜单：删除 */
     onDeleteLayer?: (id: string) => void;
+    /** 聚焦行下方的模式展开区（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
+    expandPanel?: import('svelte').Snippet;
   } = $props();
 
   type Meta = { emoji: string; name: string; kind: string; category: string; pending?: boolean };
@@ -142,24 +134,9 @@
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   function openMenu(e: MouseEvent, id: string) {
-    const idx = rows.findIndex((r) => r.id === id);
-    if (idx < 0) return;
-    const sibs = rows.filter((r) => r.parentId === rows[idx].parentId);
-    const si = sibs.findIndex((r) => r.id === id);
-    const items: MenuItem[] = [
-      { id: 'vis', label: rows[idx].visible ? '隐藏' : '显示', action: () => onToggleVisible?.(id) },
-      // 信息/参数入右键菜单（需求 4）：弹层锚在菜单处，由 App 渲染 body 级卡片
-      { id: 'style', label: '显示参数…', action: () => onOpenPanel?.('style', id, e.clientX, e.clientY) },
-      { id: 'info', label: '图层信息…', action: () => onOpenPanel?.('layerInfo', id, e.clientX, e.clientY) },
-      { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveLayer?.(id, -1) },
-      {
-        id: 'down',
-        label: '下移一层',
-        disabled: si < 0 || si >= sibs.length - 1,
-        action: () => onMoveLayer?.(id, 1),
-      },
-      { id: 'copy', label: '复制一个', action: () => onCopyLayer?.(id) },
-    ];
+    // 简化（2026-09-30 拍板 3）：显隐 → 行内 eye；信息/显示参数 → 检查模式展开区；
+    // 上移/下移 → 长按拖动。只留无其他入口的复制/删除。
+    const items: MenuItem[] = [{ id: 'copy', label: '复制一个', action: () => onCopyLayer?.(id) }];
     if (id.startsWith('custom-')) {
       items.push({ id: 'del', label: '删除', danger: true, action: () => onDeleteLayer?.(id) });
     } else {
@@ -292,13 +269,15 @@
           selected={focusLayer === row.id}
           dragging={dragId === row.id}
           onClick={() => handleSelect(row.id)}
-          onDblclick={() => onStyleLayer?.(row.id)}
           onMenu={(e) => openMenu(e, row.id)}
-          onHold={(s) => onRowHold(row.id, s)}
+          onHold={(s) => onRowHold(id, s)}
           onDragMove={onRowMove}
           onDragEnd={onRowEnd}
         />
       </li>
+      {#if focusLayer === row.id && expandPanel && expanded}
+        <li class="cell panel">{@render expandPanel()}</li>
+      {/if}
     {/each}
       </ul>
     </div>
@@ -382,6 +361,12 @@
     margin: 0;
     height: var(--ibtn-h, 40px);
     transition: transform 0.18s ease;
+  }
+  /* 模式展开区（panel 节点，可变高） */
+  .cell.panel {
+    height: auto;
+    margin-bottom: 4px;
+    padding-left: 0 !important;
   }
   .lift {
     position: fixed;

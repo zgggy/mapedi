@@ -18,7 +18,7 @@
 
   const ITEMS = [
     { id: 'view-globe' as const, icon: '🌐', label: '球面展示' },
-    { id: 'view-2d' as const, icon: '✏️', label: '平面绘制' },
+    { id: 'view-2d' as const, icon: '✏️', label: '平面编辑' },
   ];
   const activeIndex = $derived(value === 'view-2d' ? 1 : 0);
 
@@ -36,7 +36,7 @@
 <div
   class="capsule"
   role="radiogroup"
-  aria-label="地图模式"
+  aria-label="视图模式（球面 / 平面）"
   tabindex="0"
   onkeydown={onKey}
 >

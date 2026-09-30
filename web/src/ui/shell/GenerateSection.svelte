@@ -1,18 +1,16 @@
 <script lang="ts">
   /**
-   * 段4 低频折叠区（C8 / 2026-09-30 重排）：`[生成 ▾]` + `[显示 ▾]` 两条把手（FoldHandle 单源样式）。
+   * 生成模式的图层展开内容（2026-09-30 三模式重构：把手架构退役，本组件 = 纯面板体）。
+   * 由工作区「生成」模式在图层树焦点行下方渲染。
    *
-   * **生成 = 针对焦点层的三层语义（2026-09-30 需求）**：
+   * **生成 = 针对焦点层的三层语义**：
    * - cells 地块层 → 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
    * - height 高度层 → 「生成高度图」：只重跑地形 + 海陆删旧建新（onRegen('height')）
    * - 其他有 profile 的层 → 单层再生成（onRegen(layerId)；count 等 params 类型化控件）
-   * - 路径类/无 profile → 把手禁用（生成方法待设计）
-   * **显示把手** = 与行右键菜单「显示参数…」同一卡片（§4 单源，锚在把手处）。
-   *
-   * 把手 = FoldHandle（D5 长按语义：单击开合 · 长按 900ms 满格直接触发 · 未满松手=开合）。
+   * - 路径类/无 profile → 面板禁用提示（生成方法待设计）
+   * 防误触由「须先切生成模式」承担（原 D5 长按把手随把手架构退役）。
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
-  import FoldHandle from './FoldHandle.svelte';
   import type { WorldShape } from '../../core/layer/genTypes';
   import { HARD_MAX_DENSITY } from '../../core/world';
 
@@ -30,9 +28,6 @@
     onShape,
     onRegen,
     onParam,
-    onOpenStyle,
-    styleOpen = false,
-    mode = 'plane',
   }: {
     generating?: boolean;
     genProgress?: number;
@@ -52,18 +47,12 @@
     onRegen?: (layerId: string) => void;
     /** 单层参数写回（store.setProfileParam，已含草稿防抖持久化） */
     onParam?: (key: string, value: number | string | boolean) => void;
-    /** 显示把手 → 与行右键菜单「显示参数…」同一个卡片（§4 单源） */
-    onOpenStyle?: (x: number, y: number) => void;
-    styleOpen?: boolean;
-    /** globe = 球面纯展示：隐藏生成把手（只留显示把手） */
-    mode?: 'plane' | 'globe';
   } = $props();
 
-  const HOLD_MS = 900;
   const isCells = $derived(layerId === 'cells');
   const isHeight = $derived(layerId === 'height');
   const isPath = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
-  /** 生成把手可用性：cells/height 恒可用；其他层需有 profile params（路径类待设计=禁用） */
+  /** 生成可用性：cells/height 恒可用；其他层需有 profile params（路径类待设计=禁用） */
   const canGen = $derived(isCells || isHeight || (layerParams !== null && Object.keys(layerParams).length > 0));
   const genLabel = $derived(
     isCells ? '重新撒点' : isHeight ? '生成高度图' : isPath ? '生成（待设计）' : `生成「${layerName}」`,
@@ -85,47 +74,15 @@
     fromLayerCount: { min: 1, max: 20 },
   };
 
-  let genOpen = $state(false);
-
   function fire() {
-    if (generating || !canGen || mode !== 'plane') return;
+    if (generating || !canGen) return;
     if (isCells) onGenerate(Number(seedInput) || 1, densityInput);
     else onRegen?.(layerId);
   }
 </script>
 
 <div class="wrap">
-  <div class="handles">
-    {#if mode === 'plane'}
-      <FoldHandle
-        icon="🎲"
-        label={genLabel}
-        title={canGen
-          ? isCells
-            ? '单击展开参数 · 长按重新撒点（重建整个世界）'
-            : isHeight
-              ? '单击展开参数 · 长按重跑地形（海陆删旧建新）'
-              : `单击展开参数 · 长按重新生成「${layerName}」（替换该层现有元素）`
-          : isPath
-            ? '该层生成方法待设计（不以 cell 为单元）'
-            : '该层无生成配置'}
-        open={genOpen}
-        onToggle={(v) => (genOpen = v)}
-        disabled={!canGen}
-        holdMs={HOLD_MS}
-        onFire={fire}
-      />
-    {/if}
-    <FoldHandle
-      icon="🎨"
-      label="显示"
-      title="该层显示参数（与行右键菜单同一卡片）"
-      open={styleOpen}
-      onToggle={(_v, e) => onOpenStyle?.(e.clientX, e.clientY)}
-    />
-  </div>
-
-  {#if genOpen && canGen}
+  {#if canGen}
     <div class="panel">
       {#if isCells}
         <!-- 地块层 = 重新撒点（原「总生成」语义归位到地块层） -->

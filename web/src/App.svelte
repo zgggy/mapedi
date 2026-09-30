@@ -5,20 +5,17 @@
   import { DEFAULT_DENSITY } from './core/world';
   import type { HoverInfo } from './render/map2d';
   import { editor } from './app/store.svelte';
-  import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
+  import { initialShell, type ShellState, type ViewMode, persistWsMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
   import GenerateSection from './ui/shell/GenerateSection.svelte';
+  import InspectSection from './ui/shell/InspectSection.svelte';
   import LeftRail from './ui/shell/LeftRail.svelte';
   import { persistRailOpen } from './ui/shell/shell';
   import { clearViewMemory } from './ui/viewMemory';
   import { isLayerShown } from './core/displayCompose';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
-  import LayerInfoPanel from './ui/shell/LayerInfoPanel.svelte';
-  import ElementInfoPanel from './ui/shell/ElementInfoPanel.svelte';
   import StatusBar from './ui/shell/StatusBar.svelte';
-  import DisplayStylePanel from './ui/shell/DisplayStylePanel.svelte';
-  import { setSuzerain, toggleEnemy, toggleAlly } from './core/diplomacy';
 
   let shell = $state<ShellState>(initialShell());
   let hover = $state<HoverInfo | null>(null);
@@ -35,17 +32,9 @@
   let viewFade = $state(1);
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
-  let styleLayerId = $state<string | null>(null);
-  /** 图层信息卡片的目标层（菜单可从任意层/元素发起，不再绑定 focusLayer） */
-  let infoLayerId = $state<string | null>(null);
-  /** 信息/参数卡片锚点（右键菜单处打开，越界 clamp，§4） */
-  let infoAnchor = $state({ x: 250, y: 56 });
-  /** panels.layers = 图层子面板展开；其余三张信息卡片（同刻最多一张，入口 = 行右键菜单） */
+  /** panels.layers = 图层子面板展开（三张信息 popover 已退役：展开区为唯一信息入口，2026-09-30） */
   let panels = $state({
     layers: true,
-    layerInfo: false,
-    style: false,
-    elementInfo: false,
   });
 
   let exportCanvas: HTMLCanvasElement | null = null;
@@ -57,7 +46,6 @@
   const selectedRegionId = $derived(editor.selectedRegionId);
   const newName = $derived(editor.newName);
   const status = $derived(editor.status);
-  const styleLayer = $derived(styleLayerId ?? focusLayer);
 
   /**
    * C1 配套守卫：会话内目标图层不可见 → 状态栏常驻红字警示。
@@ -117,50 +105,54 @@
   }
 
   /**
-   * 右键菜单 → 信息/参数卡片（需求 4）：锚在菜单点击处、越界 clamp、同刻只开一张。
-   * id = 图层行给 layerId、元素行给 regionId —— 两者都能解出 layerId。
+   * 工作区三模式（2026-09-30 拍板）：检查 / 生成 / 绘制。
+   * 切换即持久化；球面视图锁定检查（纯展示契约）。
    */
-  function openInfoPanel(
-    kind: 'style' | 'layerInfo' | 'elementInfo',
-    id: string,
-    x: number,
-    y: number,
-  ) {
-    const reg = world?.regions.find((r) => r.id === id);
-    const layerId = reg ? reg.layerId : id;
-    const W = kind === 'style' ? 230 : 280;
-    infoAnchor = {
-      x: Math.max(8, Math.min(x, window.innerWidth - W - 8)),
-      y: Math.max(44, Math.min(y, window.innerHeight - 260)),
-    };
-    panels.style = kind === 'style';
-    panels.layerInfo = kind === 'layerInfo';
-    panels.elementInfo = kind === 'elementInfo';
-    if (kind === 'style') styleLayerId = layerId;
-    if (kind === 'layerInfo') infoLayerId = layerId;
-    if (kind === 'elementInfo') {
-      editor.selectedRegionId = id;
-      editor.notify();
-    }
+  function setWsMode(m: 'check' | 'gen' | 'draw') {
+    if (shell.wsMode === m) return;
+    shell.wsMode = m;
+    persistWsMode(m);
+    editor.notify();
   }
 
-  /** 信息/参数卡片：点外 / Esc 关闭（§4）；卡片是 App 顶层唯一的 PanelShell（.ps）浮面 */
-  function closeInfoPanels() {
-    if (panels.style || panels.layerInfo || panels.elementInfo) {
-      panels.style = false;
-      panels.layerInfo = false;
-      panels.elementInfo = false;
+  // 球面锁：离开平面 → 强制检查模式
+  $effect(() => {
+    if (shell.viewMode === 'view-globe' && shell.wsMode !== 'check') {
+      shell.wsMode = 'check';
+      persistWsMode('check');
     }
-  }
-  function onInfoDocPointer(e: PointerEvent) {
-    if (!(panels.style || panels.layerInfo || panels.elementInfo)) return;
-    const t = e.target as HTMLElement | null;
-    if (t?.closest?.('.ps')) return;
-    closeInfoPanels();
-  }
-  function onInfoDocKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') closeInfoPanels();
-  }
+  });
+
+  /**
+   * 绘制推导（C1 改写，2026-09-30 拍板）：绘制会话 = 绘制模式 × 选中元素 的纯推导——
+   * 有选中即被绘制；无选中（收起）即无绘制能力。路径元素进曲线编辑，其余走 startDraw
+   * （内部对 interval 元素路由到高度值涂改）。
+   */
+  $effect(() => {
+    const eligible =
+      shell.viewMode === 'view-2d' && shell.wsMode === 'draw' && !!selectedRegionId && !!world;
+    if (!eligible) {
+      if (editor.draw.active) editor.endDraw();
+      return;
+    }
+    const id = selectedRegionId!;
+    if (editor.draw.active && editor.draw.targetRegionId === id) return;
+    if (editor.draw.active) editor.endDraw();
+    const path = world!.paths?.find((p) => p.id === id);
+    if (path) {
+      editor.draw = {
+        ...editor.draw,
+        active: true,
+        targetRegionId: id,
+        tool: 'brush',
+        addMode: true,
+      };
+      editor.status = `编辑「${path.name}」：拖控制点 / 点曲线加点 / Esc 退出`;
+      editor.notify();
+      return;
+    }
+    editor.startDraw(id);
+  });
 
   function switchView(m: ViewMode) {
     if (m === shell.viewMode) return;
@@ -216,7 +208,13 @@
         e.preventDefault();
         editor.redo();
       }
-      if (e.key === 'Escape') editor.endDraw();
+      if (e.key === 'Escape') {
+        // Esc = 收起选中（单开规则：展开的元素收起 → 绘制由推导退出）；搜索框/菜单内 Esc 已各自 stopPropagation
+        if (editor.selectedRegionId) {
+          editor.selectedRegionId = null;
+          editor.notify();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
 
@@ -258,8 +256,6 @@
     editor.scheduleAutosave();
   });
 </script>
-
-<svelte:document onpointerdown={onInfoDocPointer} onkeydown={onInfoDocKey} />
 
 <main>
   {#if bootError}
@@ -371,6 +367,47 @@
     }}
   />
 
+  {#snippet layerExpand()}
+    <!-- 图层树聚焦行下方（绘制模式 = 空；球面锁检查） -->
+    {#if shell.wsMode === 'check'}
+      <InspectSection {world} kind="layer" id={focusLayer} />
+    {:else if shell.wsMode === 'gen'}
+      <GenerateSection
+        generating={editor.generating}
+        genProgress={editor.genProgress}
+        genStep={editor.genStep}
+        seedInput={editor.seedInput}
+        densityInput={editor.densityInput}
+        shape={editor.worldShape}
+        layerId={focusLayer}
+        layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
+        layerParams={focusLayer === 'height' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
+        onShape={(k, v) => editor.setProfileParam('height', k, v)}
+        onRegen={(id) => editor.regenLayer(id)}
+        onParam={(k, v) => editor.setProfileParam(focusLayer, k, v)}
+        onGenerate={(s, n) => {
+          bootError = '';
+          // 重新生成完成 → 进入球面展示（用户定）
+          return editor.generate(s, n).then((r) => {
+            switchView('view-globe');
+            return r;
+          });
+        }}
+      />
+    {/if}
+  {/snippet}
+  {#snippet elementExpand()}
+    <!-- 元素树选中行下方（绘制模式 = WorkspaceDrawer 本地绘制参数区） -->
+    {#if shell.wsMode === 'check'}
+      <InspectSection {world} kind="element" id={selectedRegionId} />
+    {:else if shell.wsMode === 'gen'}
+      <!-- 元素级生成（在元素范围内重生成子元素）依赖生成引擎包：GEN_UNIFIED_DESIGN §6 -->
+      {#if selectedRegionId && world?.regions.some((r) => r.parentId === selectedRegionId)}
+        <div class="gen-pending">元素级生成（重生成其子元素）待生成引擎包落地</div>
+      {/if}
+    {/if}
+  {/snippet}
+
   {#snippet layersSn()}
 
   <LayersPanel
@@ -390,11 +427,6 @@
       // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐只由眼睛开关（用户定）
       editor.focusLayerForDraw(id);
     }}
-    onStyleLayer={(id) => {
-      styleLayerId = id;
-      editor.focusLayer = id;
-      panels.style = true;
-    }}
     onDragLayer={handleLayerDrag}
     onAddLayer={() => editor.addLayer()}
     onNewName={(v) => (editor.newName = v)}
@@ -404,7 +436,7 @@
       persistRailOpen(false);
     }}
     onToggleExpand={() => (panels.layers = !panels.layers)}
-    onOpenPanel={openInfoPanel}
+    expandPanel={layerExpand}
     onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyLayer={(id) => editor.copyItem(id)}
     onDeleteLayer={(id) => editor.deleteItem(id)}
@@ -412,65 +444,25 @@
   {/snippet}
 
   {#snippet wsSn()}
-  <!-- 2026-09-30：星球参数回迁顶栏 ⚙ 面板（3d/2d 按模式互斥显示）——
-       工作区不再分叉：球面 = 图层+列表+显示（隐藏绘制/创建），平面 = 四把手全量 -->
-    {#snippet generate()}
-      <!-- 段4 低频折叠区：生成把手（D5 长按进度）+ 显示把手（§4 单源卡片） -->
-      <GenerateSection
-        generating={editor.generating}
-        genProgress={editor.genProgress}
-        genStep={editor.genStep}
-        seedInput={editor.seedInput}
-        densityInput={editor.densityInput}
-        shape={editor.worldShape}
-        layerId={focusLayer}
-        layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
-        layerParams={focusLayer === 'height' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
-        mode={shell.viewMode === 'view-globe' ? 'globe' : 'plane'}
-        onShape={(k, v) => editor.setProfileParam('height', k, v)}
-        onRegen={(id) => editor.regenLayer(id)}
-        onParam={(k, v) => editor.setProfileParam(focusLayer, k, v)}
-        onGenerate={(s, n) => {
-          bootError = '';
-          // 重新生成完成 → 进入球面展示（用户定）
-          return editor.generate(s, n).then((r) => {
-            switchView('view-globe');
-            return r;
-          });
-        }}
-        onOpenStyle={(x, y) => openInfoPanel('style', focusLayer, x, y)}
-      />
-    {/snippet}
+  <!-- 2026-09-30 三模式重构：双树行级展开区（layerExpand/elementExpand 声明在顶层平级，
+       snippet 作用域坑：嵌套声明对兄弟不可见，见 HANDOFF 教训） -->
   <WorkspaceDrawer
     {world}
     {focusLayer}
     {selectedRegionId}
     {newName}
     mode={shell.viewMode === 'view-globe' ? 'globe' : 'plane'}
+    taskMode={shell.wsMode}
+    globeLocked={shell.viewMode === 'view-globe'}
+    onTaskMode={setWsMode}
+    layerPanel={layerExpand}
+    elementPanel={elementExpand}
     bind:expandedIds
     drawActive={draw.active}
     brushRadius={draw.radiusDeg}
     onSelect={selectElement}
-    onDraw={(id) => {
-      // C1：双击 = 进入绘制会话；路径元素 = 进入该条曲线的编辑（控件/加点）
-      const path = world?.paths?.find((p) => p.id === id);
-      if (path) {
-        editor.draw = {
-          ...editor.draw,
-          active: true,
-          targetRegionId: id,
-          tool: 'brush',
-          addMode: true,
-        };
-        editor.status = `编辑「${path.name}」：拖控制点 / 点曲线加点 / Esc 退出`;
-        editor.notify();
-        return;
-      }
-      editor.startDraw(id);
-    }}
     onUndo={() => editor.undo()}
     onRedo={() => editor.redo()}
-    onOpenPanel={openInfoPanel}
     onDelete={(id) => {
       editor.selectedRegionId = id;
       editor.deleteSelected();
@@ -478,14 +470,6 @@
     onPaintValue={(id, v) => editor.setHeightPaint(id, v)}
     onRadius={(v) => {
       editor.draw = { ...editor.draw, radiusDeg: v };
-    }}
-    drawTool={draw.tool}
-    onTool={(t) => editor.setDrawTool(t)}
-    onDrawMode={() => {
-      if (editor.draw.active) editor.endDraw();
-      else if (focusLayer === 'height') editor.startHeightDraw();
-      else if (editor.selectedRegionId) editor.startDraw(editor.selectedRegionId);
-      else editor.status = '请先选中元素';
     }}
     onCreate={() => {
       editor.createRegion(editor.focusLayer);
@@ -511,7 +495,6 @@
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
     onToggleHidden={(id) => editor.toggleItemHidden(id)}
-    lowFreq={generate}
   />
   {/snippet}
 
@@ -530,63 +513,6 @@
     >🗂</button>
   {/if}
 
-  <LayerInfoPanel
-    {world}
-    layerId={infoLayerId ?? focusLayer}
-    open={panels.layerInfo}
-    x={infoAnchor.x}
-    y={infoAnchor.y}
-    onCollapse={() => (panels.layerInfo = false)}
-    onNotice={(msg) => {
-      editor.status = msg;
-      editor.notify();
-    }}
-  />
-
-  <ElementInfoPanel
-    {world}
-    regionId={selectedRegionId}
-    open={panels.elementInfo}
-    onCollapse={() => (panels.elementInfo = false)}
-    x={infoAnchor.x}
-    y={infoAnchor.y}
-    onSaveInfo={(id, patch) => {
-      if (!world) return;
-      const r = world.regions.find((x) => x.id === id);
-      if (!r) return;
-      if (patch.name) r.name = patch.name;
-      if (patch.color && !r.parentId) r.color = patch.color;
-      if (patch.exclusiveColor !== undefined) {
-        r.exclusiveColor = patch.exclusiveColor || undefined;
-      }
-      if (patch.description !== undefined)
-        r.attributes = { ...r.attributes, description: patch.description };
-      editor.touchRegions();
-      editor.status = '已保存';
-    }}
-    onSetSuzerain={(vid, sid) => {
-      if (!world) return;
-      if (!setSuzerain(world, vid, sid)) {
-        editor.status = '无法建立附庸（同层 / 禁止成环）';
-        return;
-      }
-      editor.touchRegions();
-      editor.status = sid ? '已设附庸' : '已解除附庸';
-    }}
-    onToggleEnemy={(a, b) => {
-      if (!world) return;
-      toggleEnemy(world, a, b);
-      editor.touchRegions();
-      editor.status = '已更新敌对关系';
-    }}
-    onToggleAlly={(a, b) => {
-      if (!world) return;
-      toggleAlly(world, a, b);
-      editor.touchRegions();
-      editor.status = '已更新同盟关系';
-    }}
-  />
-
   <StatusBar
     {hover}
     {status}
@@ -599,20 +525,8 @@
     onPickElement={(id) => selectElement(id)}
   />
 
-  <DisplayStylePanel
-    open={panels.style}
-    layerId={styleLayer}
-    layerName={world?.layers.find((l) => l.id === styleLayer)?.name ?? styleLayer}
-    cfg={editor.layerStyleConfig(styleLayer)}
-    onChange={(patch) => {
-      editor.setLayerStyle(styleLayer, patch);
-    }}
-    x={infoAnchor.x}
-    y={infoAnchor.y}
-    onCollapse={() => (panels.style = false)}
-  />
-
-  <!-- ValidatorPanel 已按 D4=B 归档；PanelDock 已随面板退役删除（需求 6：常驻浮窗 = 0） -->
+  <!-- 三张信息 popover（图层信息/元素信息/显示参数）已退役（2026-09-30 拍板 3）：
+       检查模式展开区（InspectSection）为唯一信息入口 -->
 </main>
 
 <style>
@@ -621,6 +535,13 @@
     width: 100%;
     height: 100%;
     background: #0b1018;
+  }
+  /* 生成模式：元素级生成占位（引擎包待落地，GEN_UNIFIED_DESIGN §6） */
+  .gen-pending {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 6px 8px;
+    border-top: 1px dashed var(--panel-border);
   }
   .view {
     position: absolute;

@@ -17,6 +17,7 @@
     onCollapse,
     x = 250,
     y = 56,
+    embedded = false,
   }: {
     open?: boolean;
     layerId?: string;
@@ -27,6 +28,8 @@
     /** 卡片锚点（右键菜单处打开，越界由调用方 clamp） */
     x?: number;
     y?: number;
+    /** true = 嵌入检查模式展开区（无壳无锚点，2026-09-30 三模式重构） */
+    embedded?: boolean;
   } = $props();
 
   const isFreeform = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
@@ -55,7 +58,7 @@
   }
 </script>
 
-<PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} {x} {y} onCollapse={onCollapse}>
+{#snippet inner()}
     <div class="body">
       {#if isFreeform}
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素样式。</p>
@@ -108,7 +111,14 @@
       </div>
       {/if}
     </div>
-</PanelShell>
+{/snippet}
+{#if embedded}
+  {@render inner()}
+{:else}
+  <PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} {x} {y} onCollapse={onCollapse}>
+    {@render inner()}
+  </PanelShell>
+{/if}
 
 <style>
   .row {
