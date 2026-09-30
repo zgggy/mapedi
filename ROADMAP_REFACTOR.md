@@ -11,11 +11,10 @@
 
 依据：评审 §6。原则 = AGENTS §6 整包交付；**步骤 1 是后续一切（含未来叙事编辑器第 0 包）的地基**。
 
-### ◐ 1. 变更纪律闭环（P0，最高优先）——1-a 已完成（`3b43698`，2026-09-30）
+### ◐ 1. 变更纪律闭环（P0）——1-a ✓（`3b43698`）、1-b 部分 ✓（`4492ba4`），2026-09-30
 
-- **内容**：① 修 undo 腐蚀——**✓ 1-a 已修**：笔画快照-diff 多元素补丁（`beginStrokeSnap`/`commitStrokeDiff` + `MultiRegionCommand`，replace/steal/split/自动建副作用一并入栈；每被改 Region 逐件件补丁）；② 高频直改路径命令化（路径编辑、图层树、显隐、改名、样式、外交）——**☐ 1-b 未动**；③ 命令纯数据化（去 `capture/restore` 闭包与 `afterApply` 回调 → 判别联合 + 外置应用器）——**☐ 1-c 未动**。
-- **验收**：每类编辑撤销后 world 与改前**逐位一致**（可复用"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a 已验：浏览器全链（撤笔画→点归属还原/撤创建→元素消失/重做×2→全回，零错误）；**注意**：replace/split/flood 四条腐蚀路径当前 UI 不可达（能力保留、机制已验，开放时须回归）。
-- **为什么先做**：历史面板/持久时间线的唯一前置；1-a 消除了唯一正在腐蚀数据的路径。
+- **内容**：① 修 undo 腐蚀——**✓ 1-a**：笔画快照-diff 多元素补丁（`MultiRegionCommand`）；② 高频直改命令化——**◐ 1-b 已覆盖**：显隐（3 树连动整批）、样式、建层、保存信息（改名/描述/颜色）、外交三操作（`RegionFields/LayersVisibility/LayerStyle/AddLayer` 四纯数据命令 + `patchRegions` 快照执行器）；**1-b 剩余**：路径编辑（Viewport 8 处直改 points）、图层树拖拽排序/复制/删除、climate/astro；③ 命令纯数据化——**☐ 1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在（历史面板的唯一前置）。
+- **验收**：每类编辑撤销后 world 与改前**逐位一致**（"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a/1-b 已验（浏览器干净复测：撤笔画还原/显隐三态/改名列表回滚/建层消失，零错误）。
 
 ### ☐ 2. GL 恢复路径（P0，单点故障）
 

@@ -16,9 +16,10 @@
 
 ## 当前状态（2026-09-30，UI 重构 U1-U3 + 四把手重排完成后填写）
 
-- **在途未提交改动**：无（工作区干净）。最近提交：`3b43698`（**还债步骤 1-① undo 腐蚀修复**）、`e2ba164`（第六轮左栏终稿）、`fc827ce`（三模式双树）。
-- **2026-09-30 还债 1-①（undo 腐蚀，`3b43698`）**：笔画**快照-diff 多元素补丁**——`beginStrokeSnap`（resolve 前拍全量 cells 引用）+ `commitStrokeDiff`（引用比对得副作用集）→ 新命令 `MultiRegionCommand`（每元素增减+新建终态）；paint/flood 接入；每被改 Region 逐件 pendingPieceInvalidations。浏览器全链验收（撤笔画→点还原 / 撤创建→元素消失 / 重做×2→全回）零错误。**诚实边界**：replace/split/flood/自动建四条腐蚀路径当前 UI 不可达（addMode 恒 true 等）——机制已验，能力开放时回归。**还债步骤 1 剩余**：1-b 高频操作命令化、1-c 命令纯数据化（历史面板的前置）。
-- **验证教训（本轮踩坑）**：① **CUA 组合键（Control+z）会整轮失灵**——改用页内 `window.dispatchEvent(KeyboardEvent)` 直发，可靠；② `.pill .zone` 才是状态文案区（`.st` 不存在）；③ 状态栏 error（隐藏层红字）会盖住 status——先开眼再验 undo 文案；④ `createRegion` 自动选中新建元素，随后点行=toggle 取消（单开互斥）——验证流程要探针式点到选中为止。
+- **在途未提交改动**：无（工作区干净）。最近提交：`4492ba4`（**1-b 字段类命令化**）、`e837f67`（**第七轮 ExpandPanel 单体**）、`3b43698`（1-a undo 腐蚀）。
+- **2026-09-30 第七轮 + 1-b**：① 左栏单体手风琴——`ExpandPanel`（收起=一行 button、展开=同容器长内容）四处复用传参（左栏图层/元素两面板 + 两侧行级展开区）；工作区改名「元素」、身份行删（首行=新元素）；rail=max-content → 面板右缘与 ↶↷ 圆钮精确对齐（实测 249=249），宽度 ResizeObserver 回传 C7；行级 header 点击收起（图层换聚焦重开/元素=清选中）。② **1-b**：纯数据命令四件（RegionFields/LayersVisibility/LayerStyle/AddLayer）+ `patchRegions` 快照执行器；显隐（含 3 树拒绝分支净变化）、样式、建层、保存信息、外交三操作全部入栈——「core 直改+touch」主路径关闭。浏览器干净复测（显隐三态/改名列表回滚/建层消失）全绿零错误。
+- **留下一批（1-b 剩余）**：路径编辑（Viewport 直改 points，8 处）、图层树拖拽排序/复制/删除、climate/astro、**1-c 整体**（PatchRegionsCommand/HeightStrokeCommand 闭包仍在——历史面板前置）。
+- **验证教训（累积）**：CUA 组合键会整轮失灵 → 页内 `window.dispatchEvent(KeyboardEvent)` 直发；状态栏 error 盖 status → 先开眼；`createRegion` 自动选中 → 再点行=toggle 取消；改名撤销判定要读**列表行文本**（EntityInfoBody 输入框是本地副本不随 undo 刷新，读它会误判）；眼睛悬停才可见 → evaluate 派发 click。
 - **2026-09-30 第六轮（左栏最终形态，`e2ba164`）**：三块统一框架——①顶行=工作区胶囊（与顶栏视图胶囊同高 y=10）+ undo/redo 圆钮；②图层面板 ③工作区面板：**同款把手+子面板**（FoldHandle 单源）、块间 8px、都展开各半（330/330 实测）、收起=27px 一行、内滚锁 pane 内、开合持久化（`mapedi.ui.panel.*`）；⊟/左上圆钮/railOpen 全链删除；railW/workspaceOpen 由 LeftRail onState 回传（railState）。验证全绿零错误。**六轮迭代收敛完毕**。
 - **2026-09-30 第五轮（左栏终稿，`371f8d2`）**：**模式胶囊上移至左栏顶**（原图层 header 位）——左栏定稿 = 「三档胶囊（检查/生成/绘制）+ 图层区（📚 轻区头）+ 元素区（工作区·层名 + undo/redo）」两区结构；ModeCapsule 通用化（顶栏两档/左栏三档同款，items/segMinW/disabledWhen）；FoldHandle 物理删除（把手架构彻底退役）、panels/onToggleExpand 开合链退役（两区恒在）。浏览器两批全绿零错误。
 - **2026-09-30 第四轮拍板（E1-E5，`fc827ce` 已实施）**：左面板 = **检查/生成/绘制三模式**（球面锁定检查；`shell.wsMode` 持久化）+ 双树行级展开区（图层=聚焦行 / 元素=选中行，snippet 注入；绘制=本地参数区）；**C1 二修**（AGENTS 已改写：绘制会话=模式×选中的推导，双击退役）；右键只剩复制/删除（三信息 popover 退役，InspectSection 为唯一信息入口）；顶栏更名「平面编辑」。**E2 单开/E3 收敛/E4/E5 分期均已落档**（设计稿 §9 第四轮表）。浏览器八项验证全绿零错误。
