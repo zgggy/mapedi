@@ -15,8 +15,16 @@
     preparing = false,
     mode = 'view-globe',
     autosaveAt = '',
+    onPickElement,
   }: {
-    hover?: { cellId: number; lon: number; lat: number; height: number; elementIds?: string[] } | null;
+    hover?: {
+      cellId: number;
+      lon: number;
+      lat: number;
+      height: number;
+      elementIds?: string[];
+      elementNames?: string[];
+    } | null;
     status?: string;
     /** 结构化错误（启动/导入失败等）：红色显示，优先于普通状态 */
     error?: string;
@@ -27,6 +35,8 @@
     preparing?: boolean;
     mode?: ViewMode;
     autosaveAt?: string;
+    /** 悬停归属元素点击跳选（C4 ①） */
+    onPickElement?: (id: string) => void;
   } = $props();
 
   const modeLabel = $derived(mode === 'view-2d' ? '✏️ 平面' : '🌐 球面');
@@ -44,7 +54,16 @@
       <span class="h">高度 {hover.height.toFixed(3)}</span>
       <span class="dim">{hover.height > 0 ? '陆地' : hover.height === 0 ? '海平面' : '海洋'}</span>
       {#if hover.elementIds?.length}
-        <span class="el" title={hover.elementIds.join(' ')}>🧩 {hover.elementIds.join(' ')}</span>
+        <span class="el">🧩
+          {#each hover.elementIds as id, i (id)}
+            <button
+              type="button"
+              class="chip"
+              title="跳选该元素"
+              onclick={() => onPickElement?.(id)}
+            >{hover.elementNames?.[i] ?? id}</button>
+          {/each}
+        </span>
       {/if}
     {/if}
   </span>
@@ -118,6 +137,28 @@
     white-space: nowrap;
     color: var(--accent, #7ec8ff);
     opacity: 0.9;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  /* 悬停归属元素：每个可点击跳选（C4 ①） */
+  .chip {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.07);
+    color: inherit;
+    border-radius: 8px;
+    padding: 1px 6px;
+    font-size: 10px;
+    line-height: 1.3;
+    cursor: pointer;
+    max-width: 14vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip:hover {
+    background: rgba(240, 195, 106, 0.25);
+    border-color: rgba(240, 195, 106, 0.6);
   }
   .be {
     opacity: 0.8;

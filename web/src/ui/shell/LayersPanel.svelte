@@ -1,7 +1,9 @@
 <script lang="ts">
   /**
-   * 图层面板：PanelShell 壳 + 单列网格 ItemButton 行。
-   * 行 = 眼睛（显隐）+ 图层 logo + 名称；单击选中并开工作区；双击打开显示面板。
+   * 图层段（左轨内的图层子面板，设计稿 §3.2）：
+   * - header 常驻：`[⊟ 收起整轨] 当前聚焦层（emoji·名·eye·元素数） [展开/收起]`
+   * - 展开：CreateRow + 单列网格 ItemButton 行（内滚由左轨段负责，§3.1 双滚动模型）
+   * 行 = 眼睛（显隐）+ 图层 logo + 名称；单击聚焦（C1：不进绘制）；双击打开显示参数。
    * 右键菜单：显示/隐藏、上移一层、下移一层、复制一个、删除。
    * 拖动 = 长按进度条解锁 → 整个按钮被拿起来（浮动件跟指针）→ 目标格与下方元素让一格
    *（transform + 过渡动画）→ 松手触发重排重算。
@@ -9,7 +11,6 @@
   import { tick } from 'svelte';
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
-  import PanelShell from './PanelShell.svelte';
   import ItemButton from './ItemButton.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
@@ -18,9 +19,8 @@
 
   let {
     world,
-    open = true,
+    expanded = true,
     focusLayer = 'cells',
-    leftW = 220,
     newName = '',
     onSelect,
     onToggleVisible,
@@ -31,20 +31,21 @@
     onNewName,
     onRandomName,
     onCollapse,
+    onToggleExpand,
     onMoveLayer,
     onCopyLayer,
     onDeleteLayer,
   }: {
     world: World | null;
-    open?: boolean;
+    /** 图层子面板展开态（收起时只渲染 header 一行，§3.1） */
+    expanded?: boolean;
     focusLayer?: string;
-    leftW?: number;
     newName?: string;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
     /** 眼睛图标：显隐 */
     onToggleVisible?: (id: string) => void;
-    /** 选中并打开工作区 */
+    /** 选中（C1：单击只聚焦，不进绘制） */
     onDrawLayer?: (id: string) => void;
     /** 双击：打开该图层显示参数面板 */
     onStyleLayer?: (id: string) => void;
@@ -58,7 +59,10 @@
     onAddLayer?: () => void;
     onNewName?: (v: string) => void;
     onRandomName?: () => void;
+    /** header ⊟：收起整条左轨 */
     onCollapse?: () => void;
+    /** header [展开/收起]：图层子面板开合 */
+    onToggleExpand?: () => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
@@ -117,6 +121,13 @@
   });
 
   const flatRows = $derived(rows.map((r) => ({ id: r.id, parentId: r.parentId }) as FlatRow));
+
+  /** header 展示的当前层（收起态显示聚焦层身份，展开态显示「图层」，§3.2） */
+  const focusRow = $derived(rows.find((r) => r.id === focusLayer));
+  /** 当前层元素数（收起态 header 的一个字段） */
+  const focusCount = $derived(
+    focusRow ? (world?.regions ?? []).filter((r) => r.layerId === focusLayer).length : 0,
+  );
 
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -226,8 +237,25 @@
 
 </script>
 
-<PanelShell title="图层" icon="📚" side="left" width={leftW} {open} onCollapse={onCollapse}>
-  <div class="create">
+<div class="sec-root">
+  <header class="hd">
+    <button type="button" class="collapse" title="收起面板" aria-label="收起面板" onclick={() => onCollapse?.()}>⊟</button>
+    {#if expanded}
+      <span class="ico">📚</span>
+      <span class="nm">图层</span>
+    {:else}
+      <span class="ico">{focusRow?.meta.emoji ?? '📚'}</span>
+      <span class="nm">{focusRow?.meta.name ?? '图层'}</span>
+      <span class="eye" title={focusRow?.visible ? '该层已显示' : '该层已隐藏'}>{focusRow?.visible ? '👁' : '🚫'}</span>
+      <span class="cnt">{focusCount}</span>
+    {/if}
+    <button type="button" class="exp" onclick={() => onToggleExpand?.()}>
+      {expanded ? '收起' : '展开'}
+    </button>
+  </header>
+  {#if expanded}
+    <div class="body">
+      <div class="create">
     <CreateRow
       placeholder="新图层"
       {newName}
@@ -256,7 +284,9 @@
         />
       </li>
     {/each}
-  </ul>
+      </ul>
+    </div>
+  {/if}
 
   {#if lift && dragId}
     <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
@@ -267,9 +297,82 @@
   {#if menu}
     <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
   {/if}
-</PanelShell>
+</div>
 
 <style>
+  .sec-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+  }
+  /* header = 设计稿 §3.1 的一行：[⊟] 当前层/图层 [展开|收起] */
+  .hd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--panel-border);
+    flex: 0 0 auto;
+  }
+  .collapse {
+    flex: 0 0 auto;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 7px;
+    padding: 3px 7px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .collapse:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .ico {
+    font-size: 12px;
+    line-height: 1;
+  }
+  .nm {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .eye {
+    font-size: 11px;
+    opacity: 0.85;
+  }
+  .cnt {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .exp {
+    flex: 0 0 auto;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-dim);
+    border-radius: 7px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+  }
+  .exp:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text);
+  }
+  /* 展开体：由左轨段负责滚动（§3.1 双滚动模型），这里只撑满 */
+  .body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+  }
   .create {
     flex: 0 0 auto;
     padding: 8px 8px 4px;

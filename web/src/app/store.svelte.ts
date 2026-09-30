@@ -83,7 +83,9 @@ import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
 import { generateRoads, generateRoutes } from '../core/generate/networks';
 import { generateRivers } from '../core/rivers';
 import { applyHeightmapFile } from '../core/heightmap';
-import { fixIssue, validateWorld, type ValidateIssue } from '../core/validate';
+// ValidatorPanel 已按 D4=B 归档删除（2026-09-29）：core/validate.ts 与
+// tests/validate.test.ts 保留为业务规则载体；还债步骤 1 后以「自动校验 + toast」
+// 形态回归（规则清单见设计稿附录 A）。
 import { defaultClimate, type ClimateParams, type LonLat, type World } from '../core/types';
 import { idbLoad, idbSave } from '../persist/storage';
 import { SOFT_MAX_DENSITY, HARD_MAX_DENSITY } from '../core/world';
@@ -114,8 +116,6 @@ const ui = $state({
   draw: emptyDrawSession() as DrawSession,
   climateDraft: defaultClimate() as ClimateParams,
   profiles: defaultProfiles() as GenerationProfile[],
-  issues: [] as ValidateIssue[],
-  showValidator: false,
   autosaveAt: '',
   searchQ: '',
   searchHits: [] as { id: string; name: string; layerId: string; cells: number }[],
@@ -224,10 +224,6 @@ export class EditorStore {
   }
   get profiles() { return ui.profiles; }
   set profiles(v: GenerationProfile[]) { ui.profiles = v; }
-  get issues() { return ui.issues; }
-  set issues(v: ValidateIssue[]) { ui.issues = v; }
-  get showValidator() { return ui.showValidator; }
-  set showValidator(v: boolean) { ui.showValidator = v; }
   get autosaveAt() { return ui.autosaveAt; }
   set autosaveAt(v: string) { ui.autosaveAt = v; }
   get searchQ() { return ui.searchQ; }
@@ -292,7 +288,6 @@ export class EditorStore {
     this.selectedRegionId = null;
     this.draw = emptyDrawSession();
     this.annexPick = false;
-    this.issues = [];
     this.searchHits = [];
     this.measuring = false;
     this.measureA = null;
@@ -1516,33 +1511,6 @@ export class EditorStore {
     this.regenPolitical();
     this.touchWorld();
     this.status = `高程图已应用：陆地 ${r.land} · 海洋 ${r.ocean} · 已重算河网`;
-  }
-
-  runValidator() {
-    if (!this.world) return;
-    this.issues = validateWorld(this.world);
-    this.showValidator = true;
-    this.status = `校验：${this.issues.length} 项问题`;
-  }
-
-  applyFix(issue: ValidateIssue) {
-    if (!this.world) return;
-    if (fixIssue(this.world, issue)) {
-      this.touchWorld();
-      this.issues = validateWorld(this.world);
-      this.status = '已修复一项';
-    } else this.status = '该项需手动处理';
-  }
-
-  jumpIssue(issue: ValidateIssue) {
-    if (issue.regionId) {
-      const r = this.world?.regions.find((x) => x.id === issue.regionId);
-      if (r) {
-        this.focusLayer = r.layerId;
-        this.selectedRegionId = r.id;
-      }
-    }
-    if (issue.cellId !== undefined) this.status = `定位 cell #${issue.cellId}`;
   }
 
   measureClick(lon: number, lat: number) {

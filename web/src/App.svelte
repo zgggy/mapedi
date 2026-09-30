@@ -8,7 +8,10 @@
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
   import ProjectPanel from './ui/shell/ProjectPanel.svelte';
+  import LeftRail from './ui/shell/LeftRail.svelte';
+  import { persistRailOpen } from './ui/shell/shell';
   import { clearViewMemory } from './ui/viewMemory';
+  import { isLayerShown } from './core/displayCompose';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
   import LayerInfoPanel from './ui/shell/LayerInfoPanel.svelte';
@@ -16,7 +19,6 @@
   import StatusBar from './ui/shell/StatusBar.svelte';
   import DisplayStylePanel from './ui/shell/DisplayStylePanel.svelte';
   import PanelDock from './ui/shell/PanelDock.svelte';
-  import ValidatorPanel from './ui/shell/ValidatorPanel.svelte';
   import { setSuzerain, toggleEnemy, toggleAlly } from './core/diplomacy';
 
   let shell = $state<ShellState>(initialShell());
@@ -39,7 +41,6 @@
   /** 同级面板：Dock 图标切换；黄框 = 打开。视图面板已退役入顶栏（U1） */
   let panels = $state({
     layers: true,
-    workspace: false,
     layerInfo: false,
     style: false,
     elementInfo: false,
@@ -49,7 +50,6 @@
     // 「项目」面板只剩生成（文件节已迁顶栏世界名菜单）——U2 迁入左轨后随 Dock 一并退役
     { id: 'project', icon: '🎲', title: '生成', open: shell.projectOpen },
     { id: 'layers', icon: '📚', title: '图层', open: panels.layers },
-    { id: 'workspace', icon: '🗂', title: '工作区', open: panels.workspace },
     { id: 'layerInfo', icon: 'ℹ', title: '图层信息', open: panels.layerInfo },
     { id: 'style', icon: '🎨', title: '显示参数', open: panels.style },
     { id: 'elementInfo', icon: '📝', title: '元素信息', open: panels.elementInfo },
@@ -74,9 +74,64 @@
   const selectedRegionId = $derived(editor.selectedRegionId);
   const newName = $derived(editor.newName);
   const status = $derived(editor.status);
-  const issues = $derived(editor.issues);
-  const showValidator = $derived(editor.showValidator);
   const styleLayer = $derived(styleLayerId ?? focusLayer);
+
+  /**
+   * C1 配套守卫：会话内目标图层不可见 → 状态栏常驻红字警示。
+   * 防「画在一个看不见的层上」——旧契约下这是选中即绘制催生的陷阱。
+   */
+  const drawGuard = $derived.by(() => {
+    if (!draw.active || !world) return '';
+    const t = draw.targetRegionId ?? '';
+    const layerId = t.startsWith('__height__')
+      ? 'height'
+      : (world.regions.find((r) => r.id === t)?.layerId ?? focusLayer);
+    const l = world.layers.find((x) => x.id === layerId);
+    if (!l) return '';
+    return isLayerShown(world, l.id, null)
+      ? ''
+      : `⚠ 正在绘制「${l.name}」但该图层已隐藏 —— 笔画画了看不见`;
+  });
+
+  /**
+   * 选中元素（C1）：**只选中，不武装笔刷**——列表单击与画布反选共用同一语义。
+   * id = null（列表空白点击）= 清空选中；画布点空白则不动作（onpick 自行短路）。
+   */
+  function selectElement(id: string | null) {
+    if (id === null) {
+      editor.selectedRegionId = null;
+      editor.notify();
+      return;
+    }
+    // 高度：选中区间 = 工作区间（与其它层同一列表）
+    if (focusLayer === 'height') {
+      editor.setHeightInterval(id);
+      editor.selectedRegionId = id;
+      editor.notify();
+      return;
+    }
+    editor.selectedRegionId = id;
+    const reg = world?.regions?.find((r) => r.id === id);
+    if (reg) {
+      editor.selectLayerTop(reg.layerId);
+      editor.selectedRegionId = id;
+      editor.status = `选中「${reg.name}」`;
+      editor.notify();
+      return;
+    }
+    editor.notify();
+  }
+
+  /** C1 画布反选：cell → 焦点层包含归属 → 与列表单击同语义 */
+  function pickElement(cellId: number | null) {
+    if (cellId === null || !world) return;
+    let hit: string | null = null;
+    for (const id of editor.regionIdsOfCell(cellId)) {
+      const r = world.regions.find((x) => x.id === id);
+      if (r?.layerId === focusLayer) hit = id; // 同层多归属时取列表末（与叠放一致）
+    }
+    if (hit) selectElement(hit);
+  }
 
   function switchView(m: ViewMode) {
     if (m === shell.viewMode) return;
@@ -126,6 +181,11 @@
         e.preventDefault();
         if (e.shiftKey) editor.redo();
         else editor.undo();
+      }
+      // Ctrl+Y = redo 等价键（D1：Ctrl+Shift+Z 保留）
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        editor.redo();
       }
       if (e.key === 'Escape') editor.endDraw();
     };
@@ -184,7 +244,7 @@
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
-          workspaceOpen={panels.workspace}
+          workspaceOpen={shell.railOpen}
           highlightRegionId={draw.active
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}
@@ -193,10 +253,23 @@
           {projParams}
           {styleId}
           bindCanvas={(c) => (exportCanvas = c)}
-          onhover={(h) =>
-            (hover = h ? { ...h, elementIds: editor.regionIdsOfCell(h.cellId) } : null)}
+          onhover={(h) => {
+            if (!h) {
+              hover = null;
+              return;
+            }
+            const ids = editor.regionIdsOfCell(h.cellId);
+            hover = {
+              ...h,
+              elementIds: ids,
+              elementNames: ids.map(
+                (id) => world?.regions.find((r) => r.id === id)?.name ?? id,
+              ),
+            };
+          }}
           onzoom={(z) => (zoomScale = z)}
           onwarm={(done) => (preparing = !done)}
+          onpick={pickElement}
           onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
           onradius={(v) => {
             editor.draw = { ...editor.draw, radiusDeg: v };
@@ -286,8 +359,11 @@
     }}
   />
 
+  {#if shell.railOpen}
+    <LeftRail width={shell.leftW}>
+      {#snippet layers()}
   <LayersPanel
-    open={panels.layers}
+    expanded={panels.layers}
     {world}
     {focusLayer}
     leftW={shell.leftW}
@@ -301,9 +377,8 @@
     }}
     onToggleVisible={(id) => editor.toggleLayerVisible(id)}
     onDrawLayer={(id) => {
-      // 行点击 = 聚焦 + 开工作区；显隐只由眼睛开关（用户定）
+      // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐只由眼睛开关（用户定）
       editor.focusLayerForDraw(id);
-      panels.workspace = true;
     }}
     onStyleLayer={(id) => {
       styleLayerId = id;
@@ -314,14 +389,18 @@
     onAddLayer={() => editor.addLayer()}
     onNewName={(v) => (editor.newName = v)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
-    onCollapse={() => (panels.layers = false)}
+    onCollapse={() => {
+      shell.railOpen = false;
+      persistRailOpen(false);
+    }}
+    onToggleExpand={() => (panels.layers = !panels.layers)}
     onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyLayer={(id) => editor.copyItem(id)}
     onDeleteLayer={(id) => editor.deleteItem(id)}
   />
-
+      {/snippet}
+      {#snippet workspace()}
   <WorkspaceDrawer
-    open={panels.workspace}
     {world}
     {focusLayer}
     {selectedRegionId}
@@ -329,22 +408,9 @@
     bind:expandedIds
     drawActive={draw.active}
     brushRadius={draw.radiusDeg}
-    onSelect={(id) => {
-      // 空白点击（id=null）= 无选中元素 = 退出绘制（与完成/Esc 同效）
-      if (id === null) {
-        editor.selectedRegionId = null;
-        editor.notify();
-        return;
-      }
-      // 高度：选中区间 = 工作区间（与其它层同一列表）
-      if (focusLayer === 'height') {
-        editor.setHeightInterval(id);
-        editor.selectedRegionId = id;
-        editor.notify();
-        return;
-      }
-      editor.selectedRegionId = id;
-      // 工作区选中路径元素 → 进入该条曲线的编辑（控件/加点）
+    onSelect={selectElement}
+    onDraw={(id) => {
+      // C1：双击 = 进入绘制会话；路径元素 = 进入该条曲线的编辑（控件/加点）
       const path = world?.paths?.find((p) => p.id === id);
       if (path) {
         editor.draw = {
@@ -358,22 +424,14 @@
         editor.notify();
         return;
       }
-      // 选中图层元素：边界高亮 + 该层置顶显示
-      const reg = world?.regions?.find((r) => r.id === id);
-      if (reg) {
-        editor.selectLayerTop(reg.layerId);
-        editor.selectedRegionId = id;
-        editor.status = `选中「${reg.name}」`;
-        editor.notify();
-        return;
-      }
-      editor.notify();
+      editor.startDraw(id);
     }}
+    onUndo={() => editor.undo()}
+    onRedo={() => editor.redo()}
     onDelete={(id) => {
       editor.selectedRegionId = id;
       editor.deleteSelected();
     }}
-    onDraw={(id) => editor.startDraw(id)}
     onPaintValue={(id, v) => editor.setHeightPaint(id, v)}
     onRadius={(v) => {
       editor.draw = { ...editor.draw, radiusDeg: v };
@@ -407,11 +465,24 @@
     }}
     onNewName={(n) => (editor.newName = n)}
     onRegionDrag={handleRegionDrag}
-    onCollapse={() => (panels.workspace = false)}
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
     onToggleHidden={(id) => editor.toggleItemHidden(id)}
   />
+      {/snippet}
+    </LeftRail>
+  {:else}
+    <!-- §3.5 收起整轨 → 左上角独立圆钮 -->
+    <button
+      type="button"
+      class="rail-open"
+      title="展开左轨"
+      onclick={() => {
+        shell.railOpen = true;
+        persistRailOpen(true);
+      }}
+    >🗂</button>
+  {/if}
 
   <LayerInfoPanel
     {world}
@@ -471,12 +542,13 @@
   <StatusBar
     {hover}
     {status}
-    error={bootError}
+    error={bootError || drawGuard}
     {fps}
     zoom={zoomScale}
     {preparing}
     mode={shell.viewMode}
     autosaveAt={editor.autosaveAt}
+    onPickElement={(id) => selectElement(id)}
   />
 
   <DisplayStylePanel
@@ -490,16 +562,7 @@
     onCollapse={() => (panels.style = false)}
   />
 
-  <ValidatorPanel
-    show={showValidator}
-    {issues}
-    onJump={(i) => editor.jumpIssue(i)}
-    onFix={(i) => editor.applyFix(i)}
-    onRerun={() => editor.runValidator()}
-    onClose={() => {
-      editor.showValidator = false;
-    }}
-  />
+  <!-- ValidatorPanel 已按 D4=B 归档（核心规则与测试保留，见设计稿附录 A） -->
 
   <PanelDock items={dockItems} onToggle={togglePanel} />
 </main>
@@ -528,5 +591,24 @@
   .err {
     color: #f0a0a0;
     z-index: 99;
+  }
+  /* 左轨收起后的左上角圆钮（设计稿 §3.5） */
+  .rail-open {
+    position: fixed;
+    left: 8px;
+    top: 10px;
+    z-index: 60;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 15px;
+    font-size: 14px;
+    line-height: 1;
+    background: rgba(16, 19, 26, 0.94);
+    border: 1px solid var(--panel-border);
+    cursor: pointer;
+  }
+  .rail-open:hover {
+    background: rgba(30, 34, 44, 0.98);
   }
 </style>

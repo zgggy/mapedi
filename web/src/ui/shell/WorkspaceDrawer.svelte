@@ -14,7 +14,6 @@
   import { childLayerIdOf } from '../../core/regionOps';
   import { diplomacyBadge } from '../../core/diplomacy';
   import { defaultLayerVisible } from '../../core/displayCompose';
-  import PanelShell from './PanelShell.svelte';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
@@ -25,7 +24,6 @@
 
   let {
     world,
-    open = true,
     focusLayer = 'cells',
     selectedRegionId = null,
     expandedIds = $bindable(new Set<string>()),
@@ -45,13 +43,13 @@
     onRandomName,
     onNewName,
     onRegionDrag,
-    onCollapse,
     onMoveItem,
     onCopyItem,
     onToggleHidden,
+    onUndo,
+    onRedo,
   }: {
     world: World | null;
-    open?: boolean;
     focusLayer?: string;
     selectedRegionId?: string | null;
     expandedIds?: Set<string>;
@@ -72,14 +70,19 @@
     onRandomName?: () => void;
     onNewName?: (v: string) => void;
     onRegionDrag?: (fromId: string, hint: import('../../core/regionOps').DropHint) => void;
-    onCollapse?: () => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveItem?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
     onCopyItem?: (id: string) => void;
     /** 右键菜单：显隐切换 */
     onToggleHidden?: (id: string) => void;
+    /** 工具带 undo/redo（D1′：接现有 editor.undo/redo，不造新能力） */
+    onUndo?: () => void;
+    onRedo?: () => void;
   } = $props();
+
+  /** 元素名过滤（C4：打字即过滤本层元素列表） */
+  let filter = $state('');
 
   const meta = $derived(LAYER_META[focusLayer]);
   const isHeight = $derived(focusLayer === 'height');
@@ -87,10 +90,12 @@
     focusLayer === 'road' || focusLayer === 'route' || focusLayer === 'river',
   );
 
-  /** 自由路径层：列出 paths（与 cell 无关） */
+  /** 自由路径层：列出 paths（与 cell 无关）；名称过滤（C4） */
   const pathItems = $derived(
     world && isFreeLayer
-      ? (world.paths ?? []).filter((p) => p.layerId === focusLayer)
+      ? (world.paths ?? []).filter(
+          (p) => p.layerId === focusLayer && p.name.toLowerCase().includes(filter.trim().toLowerCase()),
+        )
       : [],
   );
 
@@ -136,7 +141,16 @@
     };
     // 列表 = 叠放的**反序**（顶部 = 后画/最高）：绘制序 = 数组序（低者先画），
     // 工作区顶部 = 数组末 = 绘制最上层（与图层面板同一约定：上 = 高）
-    return tops.reverse().map((r) => build(r, 0, null));
+    const tree = tops.reverse().map((r) => build(r, 0, null));
+    // 名称过滤（C4）：本体命中保留整支；子命中保留祖先路径；两者皆无则摘除
+    const q = filter.trim().toLowerCase();
+    if (!q) return tree;
+    const keep = (n: Node): Node | null => {
+      if (n.region.name.toLowerCase().includes(q)) return n;
+      const kids = n.kids.map(keep).filter((x): x is Node => !!x);
+      return kids.length ? { ...n, kids } : null;
+    };
+    return tree.map(keep).filter((x): x is Node => !!x);
   });
 
   /** 展开路径上的可见行（单列网格渲染源） */
@@ -236,12 +250,19 @@
     expandedIds = next;
   }
 
-  /** 选中即进入绘制（无需再点绘制按钮） */
+  /**
+   * C1（2026-09-30 拍板，修订第三十三次「选中即绘制」）：
+   * 单击 = 只选中（不武装笔刷）；双击 = 进入绘制会话。
+   */
   function handleSelect(id: string) {
     onSelect(id);
-    onDraw?.(id);
     const r = world?.regions.find((x) => x.id === id);
     if (r && canExpand(r)) toggleExpand(id);
+  }
+
+  function handleDraw(id: string) {
+    onSelect(id);
+    onDraw(id);
   }
 
   /** 点击面板空白处 = 无选中元素 = 退出绘制（与完成/Esc 同效） */
@@ -420,20 +441,65 @@
 </script>
 
 {#if !world}
-  <PanelShell title="工作区" icon="🗂" side="right" width={320} {open} onCollapse={onCollapse}>
+  <div class="sec-root">
+    <header class="hd"><span class="ico">🗂</span><span class="nm">工作区</span></header>
     <p class="dim pad">世界尚未生成。</p>
-  </PanelShell>
+  </div>
 {:else}
   {@const hd = activeHeader()}
-  <PanelShell
-    title="工作区 · {hd.title}"
-    icon={hd.icon}
-    side="right"
-    width={320}
-    {open}
-    onCollapse={onCollapse}
-  >
+  <!-- 工作区段（左轨 §3.3）：header 常驻无按钮；四段次序 = 工具带 → 新增+搜索 → 列表 → 低频折叠区 -->
+  <div class="sec-root">
+    <header class="hd">
+      <span class="ico">{hd.icon}</span>
+      <span class="nm">工作区 · {hd.title}</span>
+    </header>
     <div class="ws" onclick={onBlankClick}>
+      <!-- 段1 工具带（C8 最高优先；C3 按「与实际功能相关」清算：weight 删、fill/center 死值删） -->
+      <div class="tools">
+        <div class="tool-row">
+          <button
+            type="button"
+            class="tool"
+            class:on={!drawActive}
+            onclick={() => {
+              if (drawActive) onDrawMode?.();
+            }}>选择</button
+          >
+          <button
+            type="button"
+            class="tool"
+            class:on={drawActive}
+            onclick={() => {
+              if (!drawActive) onDrawMode?.();
+            }}>绘制 B</button
+          >
+          {#if drawTool === 'road'}
+            <span class="chip" title="道路工具（路/航河层专用）">道路</span>
+          {/if}
+          <button type="button" class="tool icon" title="撤销 (Ctrl+Z)" onclick={() => onUndo?.()}>↶</button>
+          <button type="button" class="tool icon" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
+        </div>
+        <div class="tool-row">
+          <label class="field inline">
+            <span>笔刷</span>
+            <CapsuleSlider
+              min={0.3}
+              max={8}
+              step={0.1}
+              value={brushRadius}
+              label="笔刷宽度"
+              width={140}
+              onInput={(v) => onRadius?.(v)}
+            />
+            <span class="dim">{brushRadius.toFixed(1)}°</span>
+          </label>
+        </div>
+        {#if drawActive}
+          <p class="dim hint">{isHeight ? '左键刷选定值 · 右键擦除 · 空白点击 / Esc 退出' : '左键加地块 · Shift 移除 · Esc 退出'}</p>
+        {/if}
+      </div>
+
+      <!-- 段2 新增元素 + 过滤框（C4） -->
       {#if !isHeight}
         <div class="create">
           <CreateRow
@@ -445,32 +511,14 @@
           />
         </div>
       {/if}
-      {#if drawActive || isHeight}
-        <div class="tools">
-          <div class="tool-row">
-            <button type="button" class="tool" class:on={drawTool === 'brush'} onclick={() => onTool?.('brush')}>笔刷 B</button>
-            {#if !isHeight}
-              <button type="button" class="tool" class:on={drawTool === 'weight'} onclick={() => onTool?.('weight')}>权重 W</button>
-            {/if}
-            <label class="field inline">
-              <span>笔刷</span>
-              <CapsuleSlider
-                min={0.3}
-                max={8}
-                step={0.1}
-                value={brushRadius}
-                label="笔刷宽度"
-                width={140}
-                onInput={(v) => onRadius?.(v)}
-              />
-              <span class="dim">{brushRadius.toFixed(1)}°</span>
-            </label>
-          </div>
-          {#if isHeight}
-            <p class="dim hint">左键刷选定值 · 右键擦除 · 空白点击 / Esc 退出</p>
-          {/if}
-        </div>
-      {/if}
+      <div class="filter">
+        <input
+          type="search"
+          placeholder="🔍 过滤元素…"
+          value={filter}
+          oninput={(e) => (filter = e.currentTarget.value)}
+        />
+      </div>
 
       {#snippet itemBtn(
         id: string,
@@ -491,6 +539,7 @@
             handleSelect(id);
             if (ia) onPaintValue?.(id, paintValueOf(id, ia));
           }}
+          onDblclick={() => handleDraw(id)}
           onMenu={(e) => openMenu(e, id)}
           onHold={(s) => onRowHold(id, s)}
           onDragMove={onRowMove}
@@ -606,6 +655,11 @@
           {/each}
         </ul>
       {/if}
+
+      <!-- 过滤无结果（C4）：一句话提示而非空白 -->
+      {#if filter.trim() && (isFreeLayer ? !pathItems.length : !cells.length)}
+        <p class="dim-pad">没有匹配「{filter.trim()}」的元素</p>
+      {/if}
     </div>
 
     {#if lift && dragId}
@@ -617,10 +671,40 @@
     {#if menu}
       <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
     {/if}
-  </PanelShell>
+  </div>
 {/if}
 
 <style>
+  .sec-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+  }
+  /* 段 header（§3.1 示意的 `-工作区-` 行）：常驻，无按钮 */
+  .hd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--panel-border);
+    flex: 0 0 auto;
+  }
+  .ico {
+    font-size: 12px;
+    line-height: 1;
+  }
+  .nm {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
   .ws {
     font-size: 12px;
     user-select: none;
@@ -633,6 +717,41 @@
     flex: 0 0 auto;
     padding: 8px 8px 4px;
     border-bottom: 1px solid var(--panel-border);
+  }
+  /* 过滤框（C4）：打字即过滤本层元素 */
+  .filter {
+    flex: 0 0 auto;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .filter input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--text, #ddd);
+    border: 1px solid var(--panel-border);
+    border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  .filter input:focus {
+    outline: none;
+    border-color: rgba(240, 195, 106, 0.6);
+  }
+  /* 工具带的只读状态徽标（如道路层的「道路」工具） */
+  .chip {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1;
+  }
+  .tool.icon {
+    padding: 3px 7px;
+    font-size: 12px;
+    line-height: 1;
   }
   .tools {
     display: flex;
@@ -649,10 +768,12 @@
     font-size: 11px;
     margin: 0;
   }
-  /* 单列网格：一格 = 一个 ItemButton */
+  /* 单列网格：一格 = 一个 ItemButton；元素列表 = 工作区段的 flex-1 内滚区（§3.1） */
   .grid {
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
     list-style: none;
     margin: 0;
     padding: 8px;
@@ -661,9 +782,12 @@
     gap: 4px;
     align-content: start;
   }
+  .grid::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
   .grid.virtual {
     overflow: auto;
-    max-height: min(52vh, 520px);
     scrollbar-width: none;
   }
   .grid.virtual::-webkit-scrollbar {

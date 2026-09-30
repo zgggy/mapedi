@@ -67,6 +67,7 @@
     onhover,
     onzoom,
     onwarm,
+    onpick,
     onpaint,
     onradius,
     onstrokeend,
@@ -92,6 +93,11 @@
     onzoom?: (zoom: number) => void;
     /** 首启渐现/预热状态（true = 已完成）：状态栏据此显示「预热中…」而非误导性的低帧率 */
     onwarm?: (done: boolean) => void;
+    /**
+     * C1：会话外左键**单击** = 反选该处元素（抬起位移 <4px 才算单击，拖动是中/右键的事）。
+     * 传 null = 该处无 cell（点击空白处，语义交由调用方决定）。
+     */
+    onpick?: (cellId: number | null) => void;
     /** 渲染后端：gpu = GL 直绘（bg/cellsMesh/元素三通道，相机 uniform 逐帧直绘） */
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => number[] | null;
     onradius?: (v: number) => void;
@@ -126,6 +132,8 @@
   $effect(() => {
     viewMemory.plane = { cam, contentOffsetX };
   });
+  /** C1 反选：左键按下点（会话外），抬起位移 <4px 才触发 onpick */
+  let pickDown: { x: number; y: number } | null = null;
   /** 路/航/河：正在绘制的路径控制点 */
   let pathDraft = $state<LonLat[] | null>(null);
   /** 正在拖动的控制点索引 */
@@ -1058,6 +1066,9 @@
         }
         capturePointer(canvas, e.pointerId);
         paintAt(e);
+      } else if (e.button === 0 && !spaceDown) {
+        // C1：会话外左键 = 记下按下点；抬起时若几乎没动才算「单击」→ 反选
+        pickDown = { x: e.clientX, y: e.clientY };
       }
     }}
     onpointermove={(e) => {
@@ -1162,6 +1173,15 @@
         paintPreviewCommitted = true;
         requestOverlay();
       }
+      // C1：会话外左键单击（位移 <4px）= 反选该处元素；有位移 = 只是没按稳，不动作
+      if (pickDown && e.button === 0) {
+        const moved = Math.hypot(e.clientX - pickDown.x, e.clientY - pickDown.y);
+        pickDown = null;
+        if (moved < 4 && !drawActive && !pathEdit && !painting) {
+          const ll = llAt(e);
+          onpick?.(pickCell(world, ll.lon, ll.lat)?.id ?? null);
+        }
+      }
       panning = false;
       panningLive = false;
       panningMode = null;
@@ -1181,6 +1201,7 @@
       dragEndpoint = null;
       brushHover = false;
       hoverId = null;
+      pickDown = null;
       onhover?.(null);
       requestRender();
     }}

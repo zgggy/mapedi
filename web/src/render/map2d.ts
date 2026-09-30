@@ -29,8 +29,10 @@ export interface HoverInfo {
   lon: number;
   lat: number;
   height: number;
-  /** 鼠标所在格从属的元素 id（全部层，Region.cells 反查；调试缝隙定位用） */
+  /** 鼠标所在格从属的元素 id（全部层，Region.cells 反查；C4 悬停归属的稳定数据源） */
   elementIds?: string[];
+  /** 与 elementIds 一一对应的元素**名**（状态栏直接显示，点击可跳选） */
+  elementNames?: string[];
 }
 
 /**

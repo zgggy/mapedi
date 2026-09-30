@@ -7,28 +7,49 @@
  */
 export type ViewMode = 'view-2d' | 'view-globe';
 
+/** UI 偏好持久化命名空间（设计稿 §7：mapedi.ui.*） */
+const UI_NS = 'mapedi.ui';
+
+/** 左轨开合（§3.5 收起整轨 → 左上角圆钮；状态持久化） */
+const RAIL_KEY = `${UI_NS}.rail`;
+
+function readBool(key: string, dflt: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? dflt : v === '1';
+  } catch {
+    // 无 localStorage（隐私模式/沙箱）：用缺省值，不影响功能
+    return dflt;
+  }
+}
+
+function writeBool(key: string, v: boolean): void {
+  try {
+    localStorage.setItem(key, v ? '1' : '0');
+  } catch {
+    /* 同上：写不进就不持久化 */
+  }
+}
+
+export function persistRailOpen(v: boolean): void {
+  writeBool(RAIL_KEY, v);
+}
+
 export interface ShellState {
-  layersOpen: boolean;
-  workspaceOpen: boolean;
+  /** 左轨整体开合（§3.5，localStorage 持久化） */
+  railOpen: boolean;
   projectOpen: boolean;
   viewMode: ViewMode;
   leftW: number;
   rightW: number;
-  /** 顶栏世界名菜单（瞬态，body 级挂载避免被面板 overflow 截断） */
-  worldMenuOpen: boolean;
-  /** 顶栏 ⚙ 视图设置 popover（瞬态） */
-  viewSettingsOpen: boolean;
 }
 
 export function initialShell(): ShellState {
   return {
-    layersOpen: true,
-    workspaceOpen: false,
+    railOpen: readBool(RAIL_KEY, true),
     projectOpen: false,
     viewMode: 'view-globe',
-    leftW: 200,
+    leftW: 220,
     rightW: 320,
-    worldMenuOpen: false,
-    viewSettingsOpen: false,
   };
 }
