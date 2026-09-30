@@ -12,6 +12,7 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
   import ItemButton from './ItemButton.svelte';
+  import ExpandPanel from './ExpandPanel.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
@@ -112,6 +113,14 @@
   });
 
   const flatRows = $derived(rows.map((r) => ({ id: r.id, parentId: r.parentId }) as FlatRow));
+
+  /** 行级展开区收起态（第七轮：header 点击=收起；换聚焦层自动重开——逻辑与元素侧一致） */
+  let collapsedFor = $state<string | null>(null);
+  $effect(() => {
+    // 聚焦层变化即视为新的展开（收起只对当次聚焦有效）
+    void focusLayer;
+    collapsedFor = null;
+  });
 
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -241,7 +250,17 @@
         />
       </li>
       {#if focusLayer === row.id && expandPanel}
-        <li class="cell panel">{@render expandPanel()}</li>
+        <li class="cell panel">
+          <!-- 行级展开区 = 同一 ExpandPanel 单体（第七轮：只换传参；点击 header 收起） -->
+          <ExpandPanel
+            icon={row.meta.emoji}
+            label={row.meta.name}
+            open={collapsedFor !== row.id}
+            onToggle={(v) => (collapsedFor = v ? null : row.id)}
+            title="收起该图层的展开区"
+            content={expandPanel}
+          />
+        </li>
       {/if}
     {/each}
       </ul>

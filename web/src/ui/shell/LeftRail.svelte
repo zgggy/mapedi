@@ -1,18 +1,17 @@
 <script lang="ts">
   /**
-   * 左栏（2026-09-30 第六轮终稿）：三块统一框架、块间 8px 间隔——
-   * ① 顶行 = 工作区模式胶囊（与顶栏视图胶囊同一高度水平线）+ undo/redo 圆钮；
-   * ② 图层面板；③ 工作区面板——两者框架一模一样：**收起 = 一行把手，展开 = 自身成子面板**，
-   * 内容滚动只发生在各自 pane 内；都展开时各占一半（flex:1 平分），一开一收时展开者占满。
-   * ⊟ 整轨收起已删（2026-09-30 用户定）；开合状态本地持有并持久化。
+   * 左栏（2026-09-30 第七轮微调）：三块——
+   * ① 顶行 = 工作区模式胶囊 + undo/redo 圆钮（面板右缘与圆钮右缘对齐：rail 宽 = max-content
+   *    由顶行决定，两面板 stretch 同宽）；
+   * ② 图层面板 ③ 元素面板（原“工作区”改名）——均为 ExpandPanel 单体（把手自身展开，
+   *    不在下面另加面板）；块间 8px；开合本地 state + 持久化；宽度经 onState 回传（C7）。
    */
   import type { Snippet } from 'svelte';
   import ModeCapsule from './ModeCapsule.svelte';
-  import FoldHandle from './FoldHandle.svelte';
+  import ExpandPanel from './ExpandPanel.svelte';
   import { WS_MODE_ITEMS, persistPanelOpen, readPanelOpen } from './shell';
 
   let {
-    width = 220,
     layers,
     workspace,
     taskMode = 'check',
@@ -22,39 +21,46 @@
     onRedo,
     onState,
   }: {
-    width?: number;
-    /** 图层面板内容（列表 + 聚焦行展开区；滚动在其内部） */
+    /** 图层面板内容（列表 + 聚焦行展开区） */
     layers: Snippet<[]>;
-    /** 工作区面板内容（创建/搜索 + 列表 + 选中行展开区；滚动在其内部） */
+    /** 元素面板内容（创建/搜索 + 列表 + 选中行展开区） */
     workspace: Snippet<[]>;
     taskMode?: 'check' | 'gen' | 'draw';
-    /** 球面锁定：仅检查档可用 */
     globeLocked?: boolean;
     onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
     onUndo?: () => void;
     onRedo?: () => void;
-    /** 面板开合状态回传（App 用于 C7 遮挡宽与高度标注条件） */
-    onState?: (s: { layersOpen: boolean; wsOpen: boolean }) => void;
+    /** 面板开合 + 实测宽度回传（App 用于 C7 遮挡宽与高度标注条件） */
+    onState?: (s: { layersOpen: boolean; wsOpen: boolean; width: number }) => void;
   } = $props();
 
   let layersOpen = $state(readPanelOpen('layers', true));
   let wsOpen = $state(readPanelOpen('ws', true));
+  let railEl: HTMLElement | undefined = $state();
 
   function togglePane(which: 'layers' | 'ws', v: boolean) {
     if (which === 'layers') layersOpen = v;
     else wsOpen = v;
     persistPanelOpen(which, v);
-    onState?.({ layersOpen, wsOpen });
+    emit();
   }
 
-  // 初始同步（App 首帧即拿到真实开合态）
+  function emit() {
+    onState?.({ layersOpen, wsOpen, width: railEl?.clientWidth ?? 220 });
+  }
+
+  // 宽度实时回传（max-content：顶行决定宽 → 面板右缘与圆钮右缘对齐）
   $effect(() => {
-    onState?.({ layersOpen, wsOpen });
+    if (!railEl) return;
+    emit();
+    const ro = new ResizeObserver(() => emit());
+    ro.observe(railEl);
+    return () => ro.disconnect();
   });
 </script>
 
-<aside class="rail" style="width:{width}px" aria-label="左栏">
-  <!-- ① 顶行：模式胶囊 + undo/redo 圆钮（top 与顶栏视图胶囊同高） -->
+<aside class="rail" bind:this={railEl} aria-label="左栏">
+  <!-- ① 顶行：模式胶囊 + undo/redo 圆钮（与顶栏视图胶囊同一高度水平线） -->
   <div class="toprow">
     <ModeCapsule
       value={taskMode}
@@ -68,33 +74,25 @@
     <button type="button" class="round" title="重做 (Ctrl+Y)" aria-label="重做" onclick={() => onRedo?.()}>↷</button>
   </div>
 
-  <!-- ② 图层面板：收起=一行把手；展开=子面板（45% 上限内滚由内容负责） -->
-  <section class="pane" class:open={layersOpen}>
-    <FoldHandle
-      icon="📚"
-      label="图层"
-      open={layersOpen}
-      onToggle={(v) => togglePane('layers', v)}
-      title={layersOpen ? '收起图层面板' : '展开图层面板'}
-    />
-    {#if layersOpen}
-      <div class="pane-body">{@render layers()}</div>
-    {/if}
-  </section>
-
-  <!-- ③ 工作区面板：框架与图层一模一样 -->
-  <section class="pane" class:open={wsOpen}>
-    <FoldHandle
-      icon="🗂"
-      label="工作区"
-      open={wsOpen}
-      onToggle={(v) => togglePane('ws', v)}
-      title={wsOpen ? '收起工作区面板' : '展开工作区面板'}
-    />
-    {#if wsOpen}
-      <div class="pane-body">{@render workspace()}</div>
-    {/if}
-  </section>
+  <!-- ② 图层面板 ③ 元素面板：同一 ExpandPanel 单体、只换内容 -->
+  <ExpandPanel
+    icon="📚"
+    label="图层"
+    open={layersOpen}
+    onToggle={(v) => togglePane('layers', v)}
+    title={layersOpen ? '收起图层面板' : '展开图层面板'}
+    grow
+    content={layers}
+  />
+  <ExpandPanel
+    icon="🧩"
+    label="元素"
+    open={wsOpen}
+    onToggle={(v) => togglePane('ws', v)}
+    title={wsOpen ? '收起元素面板' : '展开元素面板'}
+    grow
+    content={workspace}
+  />
 </aside>
 
 <style>
@@ -106,13 +104,13 @@
     z-index: 50;
     display: flex;
     flex-direction: column;
-    gap: 8px; /* 三块之间统一间隔（2026-09-30 终稿） */
+    gap: 8px; /* 三块之间统一间隔 */
     min-height: 0;
     user-select: none;
     font-size: 12px;
-    /* 容器无框：框/影在各 .pane 上（块间露出间隔） */
+    /* max-content：宽度由顶行（胶囊+圆钮）决定 → 面板右缘与圆钮右缘对齐 */
+    width: max-content;
   }
-  /* ① 顶行：与顶栏视图胶囊同一高度（height 26 = 胶囊/圆钮同高） */
   .toprow {
     flex: 0 0 auto;
     display: flex;
@@ -135,29 +133,5 @@
   }
   .round:hover {
     background: rgba(18, 20, 26, 0.96);
-  }
-  /* ② ③ 面板：同款框架（收起 = 仅把手行；展开 = flex:1 分配） */
-  .pane {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-    background: rgba(16, 19, 26, 0.94);
-    border: 1px solid var(--panel-border);
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  }
-  .pane.open {
-    flex: 1 1 0; /* 都展开 = 各占一半；一开一收 = 展开者占满 */
-  }
-  /* 子面板：内容滚动只发生在这里（不溢出把手/框） */
-  .pane-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-top: 1px solid var(--panel-border);
   }
 </style>

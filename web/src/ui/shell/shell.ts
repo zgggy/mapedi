@@ -66,16 +66,13 @@ export interface ShellState {
   viewMode: ViewMode;
   /** 工作区三模式（球面锁定 check，切换由 App effect 强制） */
   wsMode: WsMode;
-  leftW: number;
-  rightW: number;
+  /* 第七轮：左栏宽度 = max-content 实测回传（LeftRail ResizeObserver），固定 leftW/rightW 退役 */
 }
 
 export function initialShell(): ShellState {
   return {
     viewMode: 'view-globe',
     wsMode: readWsMode(),
-    leftW: 220,
-    rightW: 320,
   };
 }
 

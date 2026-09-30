@@ -33,7 +33,7 @@
   let bootError = $state('');
   // panels 状态已退役（2026-09-30 终稿：图层区恒在，开合把手架构随三模式胶囊化取消）
   /** 左栏两面板开合（LeftRail 回传）：驱动 C7 遮挡宽与高度标注显示条件 */
-  let railState = $state({ layersOpen: true, wsOpen: true });
+  let railState = $state({ layersOpen: true, wsOpen: true, width: 220 });
 
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
@@ -270,7 +270,7 @@
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
           workspaceOpen={railState.wsOpen}
-          railW={railState.layersOpen || railState.wsOpen ? shell.leftW : 0}
+          railW={railState.layersOpen || railState.wsOpen ? railState.width : 0}
           highlightRegionId={draw.active
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}
@@ -486,9 +486,8 @@
   />
   {/snippet}
 
-  <!-- 2026-09-30 第六轮终稿：左栏三块框架恒渲染（⊟ 整轨收起已删） -->
+  <!-- 2026-09-30 第七轮：面板右缘与圆钮右缘对齐（max-content），宽度经 onState 实测回传 -->
   <LeftRail
-    width={shell.leftW}
     layers={layersSn}
     workspace={wsSn}
     taskMode={shell.wsMode}

@@ -16,6 +16,7 @@
   import { defaultLayerVisible } from '../../core/displayCompose';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
+  import ExpandPanel from './ExpandPanel.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import CreateBox from './CreateBox.svelte';
@@ -90,7 +91,6 @@
     else filter = '';
   }
 
-  const meta = $derived(LAYER_META[focusLayer]);
   const isHeight = $derived(focusLayer === 'height');
   const isFreeLayer = $derived(
     focusLayer === 'road' || focusLayer === 'route' || focusLayer === 'river',
@@ -278,10 +278,6 @@
     if (selectedRegionId) onSelect(null as unknown as string);
   }
 
-  function activeHeader() {
-    if (isHeight) return { icon: '⛰️', title: '高度' };
-    return { icon: meta?.emoji ?? '📄', title: meta?.name ?? focusLayer };
-  }
   function childNameOf(r: Region): string {
     const cl = childLayerFor(r);
     return cl ? (LAYER_META[cl]?.name ?? cl) : '子元素';
@@ -435,20 +431,11 @@
 
 {#if !world}
   <div class="sec-root">
-    <header class="hd"><span class="ico">🗂</span><span class="nm">工作区</span></header>
     <p class="dim pad">世界尚未生成。</p>
   </div>
 {:else}
-  {@const hd = activeHeader()}
-  <!-- 工作区（2026-09-30 三模式重构）：头部(标题+undo/redo) → 模式 tab → 树区（创建/搜索 + 列表） -->
+  <!-- 第七轮：身份行已删（首行 = 新元素 CreateRow）；面板名与开合由左栏 ExpandPanel 承担 -->
   <div class="sec-root">
-    <header class="hd">
-      <span class="ico">{hd.icon}</span>
-      <span class="nm">工作区 · {hd.title}</span>
-      <!-- undo/redo 已移左栏顶行（模式胶囊右侧，2026-09-30 第六轮） -->
-    </header>
-
-    <!-- 三模式已上移至左栏顶胶囊（2026-09-30 终稿：原图层 header 位）；工作区头 = 元素区域身份 -->
     <div class="ws" onclick={onBlankClick}>
       <!-- 段2 新增元素（仅平面编辑模式） + 搜索按钮（默认收起，点击展开输入框） -->
       {#if mode === 'plane' && !isHeight}
@@ -544,35 +531,46 @@
               intervalAttrs(n.region),
             )}
           {:else if c.kind === 'panel'}
-            <!-- 模式展开区（单开 = 选中行下方）：绘制=本地绘制参数（值滑块在行内）；检查/生成=App 注入 -->
-            {#if taskMode === 'draw'}
-              <div class="mpanel">
-                {#if isFreeLayer}
-                  <p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p>
-                {:else}
-                  <label class="field inline">
-                    <span>笔刷</span>
-                    <CapsuleSlider
-                      min={0.3}
-                      max={8}
-                      step={0.1}
-                      value={brushRadius}
-                      label="笔刷宽度"
-                      width={130}
-                      onInput={(v) => onRadius?.(v)}
-                    />
-                    <span class="dim">{brushRadius.toFixed(1)}°</span>
-                  </label>
-                  <p class="dim hint">
-                    {intervalAttrs(n.region)
-                      ? '左键刷选定值 · 空白点击 / Esc 收起退出'
-                      : '左键加地块 · Shift 移除 · 空白点击 / Esc 收起退出'}
-                  </p>
-                {/if}
-              </div>
-            {:else if elementPanel}
-              {@render elementPanel()}
-            {/if}
+            <!-- 行级展开区 = 同一 ExpandPanel 单体（第七轮：只换传参；header 点击 = 收起 = 取消选中） -->
+            {#snippet panelBody()}
+              {#if taskMode === 'draw'}
+                <div class="mpanel">
+                  {#if isFreeLayer}
+                    <p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p>
+                  {:else}
+                    <label class="field inline">
+                      <span>笔刷</span>
+                      <CapsuleSlider
+                        min={0.3}
+                        max={8}
+                        step={0.1}
+                        value={brushRadius}
+                        label="笔刷宽度"
+                        width={130}
+                        onInput={(v) => onRadius?.(v)}
+                      />
+                      <span class="dim">{brushRadius.toFixed(1)}°</span>
+                    </label>
+                    <p class="dim hint">
+                      {intervalAttrs(n.region)
+                        ? '左键刷选定值 · 空白点击 / Esc 收起退出'
+                        : '左键加地块 · Shift 移除 · 空白点击 / Esc 收起退出'}
+                    </p>
+                  {/if}
+                </div>
+              {:else if elementPanel}
+                {@render elementPanel()}
+              {/if}
+            {/snippet}
+            <ExpandPanel
+              label={n.region.name}
+              open
+              onToggle={(v) => {
+                if (!v) onSelect(null);
+              }}
+              title="收起该元素的展开区"
+              content={panelBody}
+            />
           {:else}
             <div class="create-slot" class:pulse={createPulseParent === id}>
               <CreateBox
@@ -674,30 +672,7 @@
     min-height: 0;
     flex: 1;
   }
-  /* 段 header（§3.1 示意的 `-工作区-` 行）：常驻，无按钮 */
-  .hd {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 26px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--panel-border);
-    flex: 0 0 auto;
-  }
-  .ico {
-    font-size: 12px;
-    line-height: 1;
-  }
-  .nm {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 600;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
+  /* 第七轮：身份行 header 已删（首行 = 新元素）；面板头 = 左栏 ExpandPanel 把手 */
   .ws {
     font-size: 12px;
     user-select: none;
