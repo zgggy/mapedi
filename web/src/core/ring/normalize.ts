@@ -99,6 +99,9 @@ function closeRingForCylindrical(
   if (!base) return [];
   const { pts, verts } = base;
   if (pts.length < 3 || !ring.closed) return [base];
+  // 成员奇偶表决判定的自然绕行环：环已完整（链首尾=同一物理顶点），补边经线
+  // （链起点任意经度）会切入环内部领土 → 海峡/极区条带奇偶翻转 → 填充缺失
+  if (ring.seamNoCap) return [base];
 
   const p0 = pts[0];
   const pN = pts[pts.length - 1];

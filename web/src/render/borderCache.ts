@@ -175,6 +175,7 @@ export function getCellSetRingsCached(
   const rings = cellSetBoundaryRings(
     world, set, project, edges, (y) => projectionPeriodAt(projKey, y) ?? Math.PI * 2,
   );
+  seamWrapVote(world, set, rings, project, projKey);
   const entry: Entry = {
     rings,
     fullWorld: world.cells.length > 0 && set.size === world.cells.length,
@@ -286,6 +287,92 @@ function computeFrameFlip(
   if (!tot) return false;
   const rate = flip / tot;
   return rate >= 0.75 && rate - plain / tot >= 0.1;
+}
+
+/**
+ * 缝环闭合表决（单一裁决口径 = 成员奇偶真值）。
+ *
+ * 背景：x 空间 winding 对「自然闭合的绕行环」恒 ±1——环绕经度一周，unwrap 合法
+ * 累计一个周期，链本身完整（首尾=同一物理顶点）。closeRingForCylindrical 无法凭
+ * winding 区分「自然闭合」与「框缝分裂」，一律补边；而补边经线取链起点的任意经度，
+ * 会切入环内部领土（南北向海峡条带奇偶被两条经线段翻转 → 填充缺失，用户可见缝隙）。
+ *
+ * 裁决：对绕行环构造两种闭合解释（补边 = 现行为 / 自然 = 不补边），在补边纬度带内
+ * 采样成员+非成员格心，用 ringParity（与绘制同副本语义）比吻合率；自然解释明显
+ * 更吻合（rate≥0.75 且领先≥0.05）才改判，否则保持现行为（不回归）。
+ * 与 computeFrameFlip 的 flip 表决同一族：几何猜不准的语义，用成员真值定夺。
+ */
+function seamWrapVote(
+  world: World,
+  set: Set<CellId>,
+  rings: MidRing[],
+  project: (ll: LonLat) => Pt,
+  projKey: ProjectionId,
+): void {
+  if (!projectionWraps(projKey)) return;
+  const periodAt = (y: number) => projectionPeriodAt(projKey, y) ?? Math.PI * 2;
+  const scaleAt = (y: number) => projectionXScale(projKey, y) ?? 1;
+  const wrap: number[] = [];
+  rings.forEach((r, i) => {
+    if (!r.closed || r.pts.length < 3) return;
+    const pp = periodAt(r.pts[0].y);
+    if (Math.round((r.pts[r.pts.length - 1].x - r.pts[0].x) / pp) === 0) return;
+    wrap.push(i);
+  });
+  if (!wrap.length) return;
+  const frameY = frameYEnv(project, projKey);
+  // 采样限制在补边纬度带（p0.y ↔ edgeY）——带外格心在两种解释下奇偶相同，无表决信息
+  const band: { p: Pt; m: boolean }[] = [];
+  const stride = Math.max(1, Math.floor(world.cells.length / 2400));
+  for (let i = 0; i < world.cells.length && band.length < 1200; i += stride) {
+    const c = world.cells[i];
+    if (!c?.center) continue;
+    const p = project(c.center);
+    for (const ri of wrap) {
+      const rp = rings[ri].pts;
+      const y0 = rp[0].y;
+      const edgeY = Math.round((rp[rp.length - 1].x - rp[0].x) / periodAt(y0)) > 0
+        ? frameY.maxY
+        : frameY.minY;
+      if (p.y > Math.min(y0, edgeY) && p.y < Math.max(y0, edgeY)) {
+        band.push({ p, m: set.has(c.id) });
+        break;
+      }
+    }
+  }
+  if (band.length < 50) return;
+  const capRings: Ring[] = [];
+  const natRings: Ring[] = [];
+  rings.forEach((r, i) => {
+    if (!r.closed || r.pts.length < 3) return;
+    if (wrap.includes(i)) {
+      for (const d of prepareDisplayRings(r, frameY)) capRings.push({ pts: sampleMidRing(d, 1, 'fill'), verts: [], closed: true });
+      natRings.push({ pts: sampleMidRing(r, 1, 'fill'), verts: [], closed: true });
+    } else {
+      for (const d of prepareDisplayRings(r, frameY)) {
+        const sampled = { pts: sampleMidRing(d, 1, 'fill'), verts: [], closed: true };
+        capRings.push(sampled);
+        natRings.push(sampled);
+      }
+    }
+  });
+  let aNat = 0;
+  let aCap = 0;
+  for (const s of band) {
+    if (ringParity(natRings, s.p.x, s.p.y, true, scaleAt) === s.m) aNat++;
+    if (ringParity(capRings, s.p.x, s.p.y, true, scaleAt) === s.m) aCap++;
+  }
+  const tot = aNat + aCap;
+  if (!tot) return;
+  const rNat = aNat / tot;
+  const rCap = aCap / tot;
+  // 注意：两种闭合解释在补边纬度带内**精确互补**（excursion 把带内 parity 整体翻转，
+  // rNat + rCap = 1）——不能用 flip 表决的 0.75 吻合率门槛（那要求自然解释近乎完美，
+  // 实测 h3 rNat≈0.6 被错误否决）。这里只问「哪种解释与成员真值吻合更多」：
+  // 多数 + 足够领先（≥0.05）即改判；不明显 → 保持现行为。
+  if (rNat > rCap && rNat - rCap >= 0.05) {
+    for (const i of wrap) rings[i].seamNoCap = true;
+  }
 }
 
 function ringBBox(rings: Ring[]) {

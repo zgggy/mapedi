@@ -17,6 +17,9 @@ export type MidRing = {
   closed: boolean;
   /** First frame-only segment; the preceding segments are real Hermite edges. */
   virtualFrom?: number;
+  /** 成员奇偶表决判定的自然绕行环：x 空间 winding≠0 是环绕经度一周的合法累计，
+   *  不得补边——补边经线取链起点任意经度，会切入环内部领土（海峡条带奇偶翻转）。 */
+  seamNoCap?: boolean;
 };
 
 /** 规范化后的显示环（画前唯一形态） */

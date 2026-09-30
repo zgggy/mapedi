@@ -61,11 +61,30 @@ interface PieceGeo {
 type BufRole = 'fan' | 'strip';
 
 interface GpuBuf {
+  /** 上传的源数组；sweep 失效时据此从 bufs WeakMap 删除条目 */
+  key: Float32Array;
   vbo: WebGLBuffer;
   ibo: WebGLBuffer | null;
   vao: WebGLVertexArrayObject;
   count: number;
   last: number;
+}
+
+/**
+ * 副本可见性（并集判定，与 space.worldCopyKs 同口径）：
+ * 副本占位 = [minX+lo, maxX+hi]（off = scale(y)·T 随 y 取值域 [lo,hi]，恒 lo≤hi），
+ * 与视口相交即保留。交形式（maxX+lo / minX+hi）只认「各 y 位移的公共核心」，
+ * 会把仅以剪切尖端入视的副本整件裁掉 → 罗宾森 + 平移下的渲染缺口/填充消失。
+ */
+function copyVisibleIn(
+  minX: number,
+  maxX: number,
+  lo: number,
+  hi: number,
+  viewL: number,
+  viewR: number,
+): boolean {
+  return maxX + hi > viewL - 1e-9 && minX + lo < viewR + 1e-9;
 }
 
 /**
@@ -570,14 +589,14 @@ export class MapGlRenderer {
     }
     const count = arr.length / (stride / 4);
     gl.bindVertexArray(null);
-    const rec: GpuBuf = { vbo, ibo: null, vao, count, last: this.frame };
+    const rec: GpuBuf = { key: arr, vbo, ibo: null, vao, count, last: this.frame };
     this.bufs.set(arr, rec);
     this.bufAll.add(rec);
     this.sweep();
     return rec;
   }
 
-  /** 定额清扫：600 帧未用的缓冲 deleteBuffer（几何换代后不泄漏显存） */
+  /** 定额清扫：600 帧未用的缓冲 deleteBuffer，并失效 bufs WeakMap 条目（否则 bufFor 复用已删 VAO → 静默不绘制） */
   private sweep(): void {
     if (this.bufAll.size < 1024) return;
     for (const rec of this.bufAll) {
@@ -586,6 +605,7 @@ export class MapGlRenderer {
       gl.deleteBuffer(rec.vbo);
       if (rec.ibo) gl.deleteBuffer(rec.ibo);
       gl.deleteVertexArray(rec.vao);
+      this.bufs.delete(rec.key);
       this.bufAll.delete(rec);
     }
   }
@@ -679,7 +699,7 @@ export class MapGlRenderer {
     };
     const copies = all.filter((k) => {
       const [lo, hi] = offRangeOf(k);
-      return gbox.maxX + lo > viewL - 1e-9 && gbox.minX + hi < viewR + 1e-9;
+      return copyVisibleIn(gbox.minX, gbox.maxX, lo, hi, viewL, viewR);
     });
     if (!copies.length) return;
     let minOff = Infinity;
@@ -884,7 +904,7 @@ export class MapGlRenderer {
       const T = pan + k * Math.PI * 2;
       const lo = Math.min(msLo * T, msHi * T);
       const hi = Math.max(msLo * T, msHi * T);
-      return bb.maxX + lo > viewL && bb.minX + hi < viewR;
+      return copyVisibleIn(bb.minX, bb.maxX, lo, hi, viewL, viewR);
     });
     if (!copies.length) return;
     this.setKs(copies);
