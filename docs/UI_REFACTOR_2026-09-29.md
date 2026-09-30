@@ -188,6 +188,13 @@
 - **U3 有效视口与收尾**：**有效视口与选中露出（C7）** + 全量回归（100k 下滚动与渲染性能、HMR 半热态纪律）。
 - 回归重点：liftDrag 长按拖动、双击、eye、绘制会话（单击选中 / 双击进入 / Esc / Shift 移除）、100k 下滚动与渲染性能、HMR 半热态验证纪律。
 
+> **✓ U3 完成（2026-09-30，`04dcff1` 规格 + `e492241` 实施）**：
+> - **C7 有效视口落地**：选中元素落在左轨/底栏遮挡区 → 相机 180ms easeOut 拉回可见区中心（仅修正越界维度；绘制会话内不触发；untrack 隔离 tween 循环）。修复两处根因：`viewportRoot` 声明未绑 `bind:this`（reveal 永远早退）、tween 未调 `requestRender`（渲染是命令式驱动）。
+> - **生成段按层补全**（U2 生成子面板的按层收尾）：非 height 层按 profile params 类型化控件（count/fromLayerCount/allowOcean）+ `regenLayer` 单层再生成 + 警示文案；无配置层（cells/自定义）把手禁用；height 层原样。
+> - **草稿持久化**：`mapedi.ui.gen`（seed/density/全层 params，500ms 防抖，setter 即存即读），测试后已清理污染。
+> - 验证：tsc 0 / svelte-check 0 err；浏览器端到端——按层面板内容、草稿跨刷新回读、C7 遮挡判定（实测 sx=-1439<L）+ tween 21 帧。
+> - **回归未做全**：100k 性能回归、非 height 层**长按**生成（单击展开已验）、liftDrag/绘制会话全量回归仍待用户验收轮。
+
 ## 9. 决策记录
 
 2026-09-29 用户拍板（原话语义）：
