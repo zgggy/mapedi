@@ -310,6 +310,12 @@
 
 **架构定稿**：左面板=一整个工作区 = 模式 tab（检查/生成/绘制）+ **图层树**（行下展开区：检查=InspectSection 详情+显示参数 / 生成=GenerateSection 三分支 / 绘制=空）+ **元素树**（行下展开区：检查=InspectSection / 生成=元素级生成占位 / 绘制=本地绘制参数区；值滑块=行内且仅绘制模式显示）。展开内容由 App 经 snippet 注入（layerExpand/elementExpand）。
 
+**2026-09-30 第五轮（左栏终稿，`371f8d2`）**——用户原话：「左栏就 header 那里（原图层俩字处）变成三选一胶囊，下面就是两个区域：图层、元素」：
+
+- 模式胶囊（检查/生成/绘制）上移至左栏顶（原图层 header 位），右端保留 ⊟ 收整轨；**ModeCapsule 通用化**（items / segMinW / disabledWhen；顶栏视图两档与左栏工作区三档同款胶囊，shell.ts 导出 VIEW_MODE_ITEMS / WS_MODE_ITEMS）。
+- 其下两区恒在：**图层区**（轻区头「📚 图层」+ 列表 + 聚焦行展开区，45% 限高内滚）、**元素区**（区头「工作区 · 层名 + undo/redo」+ 创建/搜索 + 列表 + 选中行展开区）。
+- 把手架构彻底退役：FoldHandle.svelte 物理删除、panels / onToggleExpand 开合链删除（两区不再开合）；WorkspaceDrawer 的 mtabs 行删除（胶囊替代）。
+
 ## 附录 B：开工前置
 
 - **等用户通知**（并发 AI 会话执行完在途操作）后方可开工，顺序 U1 → U2 → U3。
