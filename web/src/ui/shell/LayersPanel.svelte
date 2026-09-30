@@ -35,6 +35,7 @@
     onMoveLayer,
     onCopyLayer,
     onDeleteLayer,
+    onOpenPanel,
   }: {
     world: World | null;
     /** 图层子面板展开态（收起时只渲染 header 一行，§3.1） */
@@ -63,6 +64,13 @@
     onCollapse?: () => void;
     /** header [展开/收起]：图层子面板开合 */
     onToggleExpand?: () => void;
+    /** 右键菜单 → 信息/参数卡片（需求 4；锚在菜单点击处） */
+    onOpenPanel?: (
+      kind: 'style' | 'layerInfo' | 'elementInfo',
+      id: string,
+      x: number,
+      y: number,
+    ) => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
@@ -139,6 +147,9 @@
     const si = sibs.findIndex((r) => r.id === id);
     const items: MenuItem[] = [
       { id: 'vis', label: rows[idx].visible ? '隐藏' : '显示', action: () => onToggleVisible?.(id) },
+      // 信息/参数入右键菜单（需求 4）：弹层锚在菜单处，由 App 渲染 body 级卡片
+      { id: 'style', label: '显示参数…', action: () => onOpenPanel?.('style', id, e.clientX, e.clientY) },
+      { id: 'info', label: '图层信息…', action: () => onOpenPanel?.('layerInfo', id, e.clientX, e.clientY) },
       { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveLayer?.(id, -1) },
       {
         id: 'down',

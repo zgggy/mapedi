@@ -1,18 +1,19 @@
 <script lang="ts">
   /**
-   * 生成面板（原 TopBar/项目面板拆出的「生成」节，设计稿 §6 + §8 分期修订）。
+   * 段4 低频折叠区（设计稿 §3.3 / C8）：`[生成 ▾]` + `[层设置 ▾]` 两条把手。
    *
-   * 文件/导入导出/世界名已迁顶栏世界名菜单（§2.2），本面板只留生成与地形参数，
-   * **暂留到 U2**——生成入口迁入左轨工作区的生成子面板后，本面板随 Dock 一并退役。
-   * （全库用户可达的生成入口只有这一条，U1 不许把它切断。）
+   * **生成把手 = 长按进度（D5，2026-09-29 拍板）**：
+   * - **单击** = 展开/收起参数子面板（轨内嵌，非浮窗）
+   * - **按住** = 进度从左到右填满 → 满格**直接触发生成**（当前参数）；松手未满 = 取消
+   * - 无确认对话框；键盘 Enter = 触发生成（a11y 等价路径）
+   *
+   * 内容自原项目面板「生成」节整体迁入（U2 分期修订：生成入口不许有空窗）。
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
-  import PanelShell from './PanelShell.svelte';
   import type { WorldShape } from '../../core/layer/genTypes';
   import { HARD_MAX_DENSITY } from '../../core/world';
 
   let {
-    open = $bindable(false),
     generating = false,
     genProgress = 0,
     genStep = '',
@@ -21,8 +22,8 @@
     shape = null as WorldShape | null,
     onGenerate,
     onShape,
+    onOpenStyle,
   }: {
-    open?: boolean;
     generating?: boolean;
     genProgress?: number;
     genStep?: string;
@@ -31,26 +32,100 @@
     shape?: WorldShape | null;
     onGenerate: (seed: number, n: number) => void;
     onShape?: (key: keyof WorldShape, value: number | string | boolean) => void;
+    /** 层设置把手 → 与行右键菜单「显示参数…」同一个卡片（§4 单源） */
+    onOpenStyle?: (x: number, y: number) => void;
   } = $props();
 
-  /** 期望大陆占比档位（小/中/大/特大 → 陆地占比） */
+  const HOLD_MS = 900;
+
   const LAND_TIERS: { label: string; v: number }[] = [
     { label: '小', v: 0.08 },
     { label: '中', v: 0.15 },
     { label: '大', v: 0.25 },
     { label: '特大', v: 0.4 },
   ];
+
+  let genOpen = $state(false);
+  let filling = $state(false);
+  let filled = $state(false);
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function fire() {
+    if (generating) return;
+    onGenerate(Number(seedInput) || 1, densityInput);
+  }
+  function genDown() {
+    if (generating) return;
+    filling = true;
+    filled = false;
+    holdTimer = setTimeout(() => {
+      filled = true;
+    }, HOLD_MS);
+  }
+  function genUp() {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    const didFill = filled;
+    filling = false;
+    filled = false;
+    if (didFill) fire();
+    else genOpen = !genOpen;
+  }
+  function genCancel() {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    filling = false;
+    filled = false;
+  }
 </script>
 
-<PanelShell title="生成" icon="🎲" {open} side="float" width={320} x={420} y={56} onCollapse={() => (open = false)}>
-  <div class="body">
-    <section>
+<div class="wrap">
+  <div class="handles">
+    <button
+      type="button"
+      class="handle"
+      class:open={genOpen}
+      class:filling
+      title="单击展开参数 · 长按直接生成"
+      onpointerdown={genDown}
+      onpointerup={genUp}
+      onpointerleave={genCancel}
+      onpointercancel={genCancel}
+      oncontextmenu={(e) => e.preventDefault()}
+      onkeydown={(e) => {
+        // 键盘可达（a11y 等价路径）：Enter = 触发生成；空格 = 展开/收起参数
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          fire();
+        } else if (e.key === ' ') {
+          e.preventDefault();
+          genOpen = !genOpen;
+        }
+      }}
+    >
+      <span class="fill" style="transition-duration:{HOLD_MS}ms"></span>
+      <span class="lb">🎲 生成 {genOpen ? '▾' : '▸'}</span>
+    </button>
+    <button
+      type="button"
+      class="handle"
+      title="该层显示参数（与行右键菜单同一卡片）"
+      onclick={(e) => onOpenStyle?.(e.clientX, e.clientY)}
+    >🎨 层设置 ▸</button>
+  </div>
+
+  {#if genOpen}
+    <div class="panel">
       <div class="row">
         <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
           <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
         </label>
         <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
-        <button type="button" class="primary" disabled={generating} onclick={() => onGenerate(Number(seedInput) || 1, densityInput)}>🎲 生成</button>
+        <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 生成</button>
       </div>
       {#if shape && onShape}
         <div class="row">
@@ -79,22 +154,74 @@
         </div>
       {/if}
       {#if generating}
-        <div class="prog"><div class="fill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
+        <div class="prog"><div class="pfill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
       {/if}
-    </section>
-  </div>
-</PanelShell>
+    </div>
+  {/if}
+</div>
 
 <style>
-  .body section {
-    margin-bottom: 4px;
+  .wrap {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--panel-border);
+  }
+  .handles {
+    display: flex;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .handle {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text, #ddd);
+    border-radius: 8px;
+    padding: 5px 8px;
+    font-size: 11px;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+  }
+  .handle:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .handle.open {
+    border-color: rgba(240, 195, 106, 0.5);
+  }
+  /* 长按进度（D5）：满格 = 触发生成 */
+  .fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    background: linear-gradient(90deg, rgba(240, 195, 106, 0.75), rgba(216, 164, 82, 0.9));
+    /* 时长由行内 style 给（HOLD_MS）；非 filling 时回到 0 */
+    transition: width 0s linear;
+    pointer-events: none;
+  }
+  .filling .fill {
+    width: 100%;
+  }
+  .lb {
+    position: relative;
+    z-index: 1;
+  }
+  .panel {
+    padding: 2px 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   .row {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-    margin: 6px 0;
+    margin: 4px 0;
   }
   .row label {
     display: inline-flex;
@@ -159,19 +286,15 @@
     background: var(--accent, #c9a24a);
     color: #1a1408;
   }
-  .sm {
-    font-size: 11px;
-    color: var(--text-dim);
-  }
   .prog {
     position: relative;
     height: 16px;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
     overflow: hidden;
-    margin-top: 6px;
+    margin-top: 4px;
   }
-  .prog .fill {
+  .pfill {
     height: 100%;
     background: linear-gradient(90deg, rgba(240, 195, 106, 0.85), rgba(216, 164, 82, 0.85));
     transition: width 0.2s ease;

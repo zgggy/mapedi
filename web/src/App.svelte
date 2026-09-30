@@ -7,7 +7,8 @@
   import { editor } from './app/store.svelte';
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
-  import ProjectPanel from './ui/shell/ProjectPanel.svelte';
+  import GenerateSection from './ui/shell/GenerateSection.svelte';
+  import PlanetParams from './ui/shell/PlanetParams.svelte';
   import LeftRail from './ui/shell/LeftRail.svelte';
   import { persistRailOpen } from './ui/shell/shell';
   import { clearViewMemory } from './ui/viewMemory';
@@ -18,7 +19,6 @@
   import ElementInfoPanel from './ui/shell/ElementInfoPanel.svelte';
   import StatusBar from './ui/shell/StatusBar.svelte';
   import DisplayStylePanel from './ui/shell/DisplayStylePanel.svelte';
-  import PanelDock from './ui/shell/PanelDock.svelte';
   import { setSuzerain, toggleEnemy, toggleAlly } from './core/diplomacy';
 
   let shell = $state<ShellState>(initialShell());
@@ -37,33 +37,17 @@
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
   let styleLayerId = $state<string | null>(null);
-
-  /** 同级面板：Dock 图标切换；黄框 = 打开。视图面板已退役入顶栏（U1） */
+  /** 图层信息卡片的目标层（菜单可从任意层/元素发起，不再绑定 focusLayer） */
+  let infoLayerId = $state<string | null>(null);
+  /** 信息/参数卡片锚点（右键菜单处打开，越界 clamp，§4） */
+  let infoAnchor = $state({ x: 250, y: 56 });
+  /** panels.layers = 图层子面板展开；其余三张信息卡片（同刻最多一张，入口 = 行右键菜单） */
   let panels = $state({
     layers: true,
     layerInfo: false,
     style: false,
     elementInfo: false,
   });
-
-  const dockItems = $derived([
-    // 「项目」面板只剩生成（文件节已迁顶栏世界名菜单）——U2 迁入左轨后随 Dock 一并退役
-    { id: 'project', icon: '🎲', title: '生成', open: shell.projectOpen },
-    { id: 'layers', icon: '📚', title: '图层', open: panels.layers },
-    { id: 'layerInfo', icon: 'ℹ', title: '图层信息', open: panels.layerInfo },
-    { id: 'style', icon: '🎨', title: '显示参数', open: panels.style },
-    { id: 'elementInfo', icon: '📝', title: '元素信息', open: panels.elementInfo },
-  ]);
-
-  function togglePanel(id: string) {
-    if (id === 'project') {
-      shell.projectOpen = !shell.projectOpen;
-      return;
-    }
-    const key = id as keyof typeof panels;
-    panels[key] = !panels[key];
-    if (key === 'style' && panels.style && !styleLayerId) styleLayerId = focusLayer;
-  }
 
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
@@ -131,6 +115,52 @@
       if (r?.layerId === focusLayer) hit = id; // 同层多归属时取列表末（与叠放一致）
     }
     if (hit) selectElement(hit);
+  }
+
+  /**
+   * 右键菜单 → 信息/参数卡片（需求 4）：锚在菜单点击处、越界 clamp、同刻只开一张。
+   * id = 图层行给 layerId、元素行给 regionId —— 两者都能解出 layerId。
+   */
+  function openInfoPanel(
+    kind: 'style' | 'layerInfo' | 'elementInfo',
+    id: string,
+    x: number,
+    y: number,
+  ) {
+    const reg = world?.regions.find((r) => r.id === id);
+    const layerId = reg ? reg.layerId : id;
+    const W = kind === 'style' ? 230 : 280;
+    infoAnchor = {
+      x: Math.max(8, Math.min(x, window.innerWidth - W - 8)),
+      y: Math.max(44, Math.min(y, window.innerHeight - 260)),
+    };
+    panels.style = kind === 'style';
+    panels.layerInfo = kind === 'layerInfo';
+    panels.elementInfo = kind === 'elementInfo';
+    if (kind === 'style') styleLayerId = layerId;
+    if (kind === 'layerInfo') infoLayerId = layerId;
+    if (kind === 'elementInfo') {
+      editor.selectedRegionId = id;
+      editor.notify();
+    }
+  }
+
+  /** 信息/参数卡片：点外 / Esc 关闭（§4）；卡片是 App 顶层唯一的 PanelShell（.ps）浮面 */
+  function closeInfoPanels() {
+    if (panels.style || panels.layerInfo || panels.elementInfo) {
+      panels.style = false;
+      panels.layerInfo = false;
+      panels.elementInfo = false;
+    }
+  }
+  function onInfoDocPointer(e: PointerEvent) {
+    if (!(panels.style || panels.layerInfo || panels.elementInfo)) return;
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.('.ps')) return;
+    closeInfoPanels();
+  }
+  function onInfoDocKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') closeInfoPanels();
   }
 
   function switchView(m: ViewMode) {
@@ -230,6 +260,8 @@
   });
 </script>
 
+<svelte:document onpointerdown={onInfoDocPointer} onkeydown={onInfoDocKey} />
+
 <main>
   {#if bootError}
     <div class="err">启动错误：{bootError}</div>
@@ -323,50 +355,14 @@
     onStyle={(s) => (styleId = s)}
     projection={projection}
     onProjection={(p) => (projection = p as import('./core/project/projections').ProjectionId)}
-    globeShowAxis={globeAxis}
-    globeShowEcliptic={globeEcliptic}
-    globeSpin={globeSpin}
-    globeTilt={editor.climateDraft.axialTiltDeg}
-    globeRotHours={editor.climateDraft.rotationHours}
-    onGlobeShowAxis={(v) => (globeAxis = v)}
-    onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
-    onGlobeSpin={(v) => (globeSpin = v)}
-    onGlobeTilt={(v) => {
-      editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
-    }}
-    onGlobeRotHours={(v) => {
-      editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
-    }}
   />
 
-  <!-- 生成面板（原项目面板拆出；文件节已迁顶栏）；U2 迁入左轨后退役 -->
-  <ProjectPanel
-    bind:open={shell.projectOpen}
-    generating={editor.generating}
-    genProgress={editor.genProgress}
-    genStep={editor.genStep}
-    seedInput={editor.seedInput}
-    densityInput={editor.densityInput}
-    shape={editor.worldShape}
-    onShape={(k, v) => editor.setProfileParam('height', k, v)}
-    onGenerate={(s, n) => {
-      bootError = '';
-      // 重新生成完成 → 进入球面展示（用户定）
-      return editor.generate(s, n).then((r) => {
-        switchView('view-globe');
-        return r;
-      });
-    }}
-  />
+  {#snippet layersSn()}
 
-  {#if shell.railOpen}
-    <LeftRail width={shell.leftW}>
-      {#snippet layers()}
   <LayersPanel
     expanded={panels.layers}
     {world}
     {focusLayer}
-    leftW={shell.leftW}
     newName={editor.newName}
     onSelect={(id) => {
       if (!id) {
@@ -394,12 +390,55 @@
       persistRailOpen(false);
     }}
     onToggleExpand={() => (panels.layers = !panels.layers)}
+    onOpenPanel={openInfoPanel}
     onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyLayer={(id) => editor.copyItem(id)}
     onDeleteLayer={(id) => editor.deleteItem(id)}
   />
-      {/snippet}
-      {#snippet workspace()}
+  {/snippet}
+
+  {#snippet wsSn()}
+
+  {#if shell.viewMode === 'view-globe'}
+    <!-- D3：球面 = 工作区整体换成「星球」参数区（无工具带/生成/元素列表） -->
+    <PlanetParams
+      globeShowAxis={globeAxis}
+      globeShowEcliptic={globeEcliptic}
+      globeSpin={globeSpin}
+      globeTilt={editor.climateDraft.axialTiltDeg}
+      globeRotHours={editor.climateDraft.rotationHours}
+      onGlobeShowAxis={(v) => (globeAxis = v)}
+      onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
+      onGlobeSpin={(v) => (globeSpin = v)}
+      onGlobeTilt={(v) => {
+        editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
+      }}
+      onGlobeRotHours={(v) => {
+        editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
+      }}
+    />
+  {:else}
+    {#snippet generate()}
+      <!-- 段4 低频折叠区：生成把手（D5 长按进度）+ 层设置把手（§4 单源卡片） -->
+      <GenerateSection
+        generating={editor.generating}
+        genProgress={editor.genProgress}
+        genStep={editor.genStep}
+        seedInput={editor.seedInput}
+        densityInput={editor.densityInput}
+        shape={editor.worldShape}
+        onShape={(k, v) => editor.setProfileParam('height', k, v)}
+        onGenerate={(s, n) => {
+          bootError = '';
+          // 重新生成完成 → 进入球面展示（用户定）
+          return editor.generate(s, n).then((r) => {
+            switchView('view-globe');
+            return r;
+          });
+        }}
+        onOpenStyle={(x, y) => openInfoPanel('style', focusLayer, x, y)}
+      />
+    {/snippet}
   <WorkspaceDrawer
     {world}
     {focusLayer}
@@ -428,6 +467,7 @@
     }}
     onUndo={() => editor.undo()}
     onRedo={() => editor.redo()}
+    onOpenPanel={openInfoPanel}
     onDelete={(id) => {
       editor.selectedRegionId = id;
       editor.deleteSelected();
@@ -468,9 +508,13 @@
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
     onToggleHidden={(id) => editor.toggleItemHidden(id)}
+    lowFreq={generate}
   />
-      {/snippet}
-    </LeftRail>
+  {/if}
+  {/snippet}
+
+  {#if shell.railOpen}
+    <LeftRail width={shell.leftW} layers={layersSn} workspace={wsSn} />
   {:else}
     <!-- §3.5 收起整轨 → 左上角独立圆钮 -->
     <button
@@ -486,8 +530,10 @@
 
   <LayerInfoPanel
     {world}
-    layerId={focusLayer}
+    layerId={infoLayerId ?? focusLayer}
     open={panels.layerInfo}
+    x={infoAnchor.x}
+    y={infoAnchor.y}
     onCollapse={() => (panels.layerInfo = false)}
     onNotice={(msg) => {
       editor.status = msg;
@@ -500,8 +546,8 @@
     regionId={selectedRegionId}
     open={panels.elementInfo}
     onCollapse={() => (panels.elementInfo = false)}
-    x={250}
-    y={56}
+    x={infoAnchor.x}
+    y={infoAnchor.y}
     onSaveInfo={(id, patch) => {
       if (!world) return;
       const r = world.regions.find((x) => x.id === id);
@@ -559,12 +605,12 @@
     onChange={(patch) => {
       editor.setLayerStyle(styleLayer, patch);
     }}
+    x={infoAnchor.x}
+    y={infoAnchor.y}
     onCollapse={() => (panels.style = false)}
   />
 
-  <!-- ValidatorPanel 已按 D4=B 归档（核心规则与测试保留，见设计稿附录 A） -->
-
-  <PanelDock items={dockItems} onToggle={togglePanel} />
+  <!-- ValidatorPanel 已按 D4=B 归档；PanelDock 已随面板退役删除（需求 6：常驻浮窗 = 0） -->
 </main>
 
 <style>

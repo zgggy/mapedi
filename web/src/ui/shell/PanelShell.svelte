@@ -103,7 +103,8 @@
     border-radius: 12px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
     overflow: hidden;
-    backdrop-filter: blur(8px);
+    /* 不用 backdrop-filter：①GL 画布上逐帧毛玻璃是帧率杀手（显示不打折红线）；
+       ②它是祖先 containing block，会把 fixed 定位的右键菜单裁在面板内（§4 根因）。 */
   }
   .hd {
     position: relative;

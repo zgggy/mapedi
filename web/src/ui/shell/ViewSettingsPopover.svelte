@@ -1,11 +1,8 @@
 <script lang="ts">
   /**
-   * ⚙ 视图设置 popover（设计稿 §2.3）：投影 + 地图风格（StyleSet 正名）。
-   *
-   * 球面参数本应迁到左轨「星球」参数区（§3.4 / D3），但左轨到 U2 才成型——
-   * **U1 期间暂留此处**，保证球面参数始终可达（见 §8 分期修订：功能不许有空窗）。
+   * ⚙ 视图设置 popover（设计稿 §2.3）：只留**投影 + 地图风格**（StyleSet 正名）。
+   * 球面参数已迁到左轨「星球」参数区（§3.4 / D3，U2 落地）——此处不再重复。
    */
-  import CapsuleSlider from './CapsuleSlider.svelte';
   import type { ViewMode } from './shell';
 
   let {
@@ -16,16 +13,6 @@
     onProjection,
     styleId = 'dark',
     onStyle,
-    globeShowAxis = true,
-    globeShowEcliptic = true,
-    globeSpin = false,
-    globeTilt = 23.4,
-    globeRotHours = 24,
-    onGlobeShowAxis,
-    onGlobeShowEcliptic,
-    onGlobeSpin,
-    onGlobeTilt,
-    onGlobeRotHours,
   }: {
     open?: boolean;
     onClose: () => void;
@@ -34,16 +21,6 @@
     onProjection?: (p: string) => void;
     styleId?: string;
     onStyle?: (s: string) => void;
-    globeShowAxis?: boolean;
-    globeShowEcliptic?: boolean;
-    globeSpin?: boolean;
-    globeTilt?: number;
-    globeRotHours?: number;
-    onGlobeShowAxis?: (v: boolean) => void;
-    onGlobeShowEcliptic?: (v: boolean) => void;
-    onGlobeSpin?: (v: boolean) => void;
-    onGlobeTilt?: (v: number) => void;
-    onGlobeRotHours?: (v: number) => void;
   } = $props();
 
   function onDocPointer(e: PointerEvent) {
@@ -83,24 +60,8 @@
           </label>
         {/if}
       </div>
-      <p class="dim">「地图风格」改的是海色/陆色/描边（StyleSet），不是界面主题。</p>
+      <p class="dim">「地图风格」改的是海色/陆色/描边（StyleSet），不是界面主题；球面参数在左轨「工作区 · 星球」。</p>
     </section>
-
-    {#if viewMode === 'view-globe'}
-      <section>
-        <h3>球面 <span class="tmp">U1 暂留 · U2 迁入左轨</span></h3>
-        <div class="row">
-          <label class="sm"><input type="checkbox" checked={globeShowAxis} onchange={(e) => onGlobeShowAxis?.(e.currentTarget.checked)} /> 轴/赤道</label>
-          <label class="sm"><input type="checkbox" checked={globeShowEcliptic} onchange={(e) => onGlobeShowEcliptic?.(e.currentTarget.checked)} /> 黄道</label>
-          <label class="sm"><input type="checkbox" checked={globeSpin} onchange={(e) => onGlobeSpin?.(e.currentTarget.checked)} /> 自转预览</label>
-        </div>
-        <div class="row">
-          <label class="sm">倾角 <CapsuleSlider min={0} max={60} step={0.5} value={globeTilt} label="轴倾角" width={110} onInput={(v) => onGlobeTilt?.(v)} /> {globeTilt.toFixed(1)}°</label>
-          <label class="sm">自转 <CapsuleSlider min={6} max={48} step={1} value={globeRotHours} label="自转周期" width={110} onInput={(v) => onGlobeRotHours?.(v)} /> {globeRotHours}h</label>
-        </div>
-        <p class="dim">球面为纯展示：高度随半径凸起，图层叠加与平面同源；滚轮 = 缩放，拖动 = 环绕。</p>
-      </section>
-    {/if}
   </div>
 {/if}
 

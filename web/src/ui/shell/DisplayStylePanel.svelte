@@ -15,6 +15,8 @@
     cfg,
     onChange,
     onCollapse,
+    x = 250,
+    y = 56,
   }: {
     open?: boolean;
     layerId?: string;
@@ -22,6 +24,9 @@
     cfg?: ElementStyle;
     onChange?: (patch: ElementStylePatch) => void;
     onCollapse?: () => void;
+    /** 卡片锚点（右键菜单处打开，越界由调用方 clamp） */
+    x?: number;
+    y?: number;
   } = $props();
 
   const isFreeform = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
@@ -50,7 +55,7 @@
   }
 </script>
 
-<PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} x={250} y={56} onCollapse={onCollapse}>
+<PanelShell title="显示参数 · {layerName}" icon="🎨" {open} side="float" width={230} {x} {y} onCollapse={onCollapse}>
     <div class="body">
       {#if isFreeform}
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素样式。</p>

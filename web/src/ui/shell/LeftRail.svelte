@@ -16,9 +16,9 @@
   }: {
     width?: number;
     /** 图层段（含自己的 header 与展开/收起） */
-    layers: Snippet;
-    /** 工作区段（含自己的 header 与四段内容） */
-    workspace: Snippet;
+    layers: Snippet<[]>;
+    /** 工作区段（含自己的 header 与四段内容）；内容按模式在调用方决定 */
+    workspace: Snippet<[]>;
   } = $props();
 </script>
 

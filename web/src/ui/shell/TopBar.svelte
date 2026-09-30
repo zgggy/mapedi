@@ -21,16 +21,6 @@
     onProjection,
     styleId = 'dark',
     onStyle,
-    globeShowAxis = true,
-    globeShowEcliptic = true,
-    globeSpin = false,
-    globeTilt = 23.4,
-    globeRotHours = 24,
-    onGlobeShowAxis,
-    onGlobeShowEcliptic,
-    onGlobeSpin,
-    onGlobeTilt,
-    onGlobeRotHours,
   }: {
     viewMode?: ViewMode;
     onSwitchView: (m: ViewMode) => void;
@@ -44,16 +34,6 @@
     onProjection?: (p: string) => void;
     styleId?: string;
     onStyle?: (s: string) => void;
-    globeShowAxis?: boolean;
-    globeShowEcliptic?: boolean;
-    globeSpin?: boolean;
-    globeTilt?: number;
-    globeRotHours?: number;
-    onGlobeShowAxis?: (v: boolean) => void;
-    onGlobeShowEcliptic?: (v: boolean) => void;
-    onGlobeSpin?: (v: boolean) => void;
-    onGlobeTilt?: (v: number) => void;
-    onGlobeRotHours?: (v: number) => void;
   } = $props();
 
   // —— 世界名：单击开菜单 / 双击改名（D2）——
@@ -169,16 +149,6 @@
       {onProjection}
       {styleId}
       {onStyle}
-      {globeShowAxis}
-      {globeShowEcliptic}
-      {globeSpin}
-      {globeTilt}
-      {globeRotHours}
-      {onGlobeShowAxis}
-      {onGlobeShowEcliptic}
-      {onGlobeSpin}
-      {onGlobeTilt}
-      {onGlobeRotHours}
     />
   </div>
 </div>

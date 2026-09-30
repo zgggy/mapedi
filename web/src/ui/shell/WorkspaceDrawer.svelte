@@ -48,6 +48,8 @@
     onToggleHidden,
     onUndo,
     onRedo,
+    onOpenPanel,
+    lowFreq,
   }: {
     world: World | null;
     focusLayer?: string;
@@ -79,6 +81,15 @@
     /** 工具带 undo/redo（D1′：接现有 editor.undo/redo，不造新能力） */
     onUndo?: () => void;
     onRedo?: () => void;
+    /** 右键菜单 → 信息/参数卡片（需求 4；锚在菜单点击处） */
+    onOpenPanel?: (
+      kind: 'style' | 'layerInfo' | 'elementInfo',
+      id: string,
+      x: number,
+      y: number,
+    ) => void;
+    /** 段4 低频折叠区（C8：生成把手 / 层设置把手），内容由调用方提供 */
+    lowFreq?: import('svelte').Snippet;
   } = $props();
 
   /** 元素名过滤（C4：打字即过滤本层元素列表） */
@@ -311,6 +322,9 @@
     const derived = !!reg && !!intervalAttrs(reg);
     const items: MenuItem[] = [
       { id: 'vis', label: '显示 / 隐藏', action: () => onToggleHidden?.(id) },
+      // 信息/参数入右键菜单（需求 4）
+      { id: 'info', label: '元素信息…', action: () => onOpenPanel?.('elementInfo', id, e.clientX, e.clientY) },
+      { id: 'style', label: '显示参数…', action: () => onOpenPanel?.('style', id, e.clientX, e.clientY) },
       // 列表为叠放反序（上 = 高）：列表上移 = 数组后移（dir=+1）
       { id: 'up', label: '上移一层', disabled: si <= 0, action: () => onMoveItem?.(id, 1) },
       {
@@ -659,6 +673,11 @@
       <!-- 过滤无结果（C4）：一句话提示而非空白 -->
       {#if filter.trim() && (isFreeLayer ? !pathItems.length : !cells.length)}
         <p class="dim-pad">没有匹配「{filter.trim()}」的元素</p>
+      {/if}
+
+      <!-- 段4 低频折叠区（C8：生成与渲染样式优先级低于绘制工具） -->
+      {#if lowFreq}
+        <div class="lowfreq">{@render lowFreq()}</div>
       {/if}
     </div>
 

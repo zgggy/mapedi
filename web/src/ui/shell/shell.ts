@@ -38,7 +38,6 @@ export function persistRailOpen(v: boolean): void {
 export interface ShellState {
   /** 左轨整体开合（§3.5，localStorage 持久化） */
   railOpen: boolean;
-  projectOpen: boolean;
   viewMode: ViewMode;
   leftW: number;
   rightW: number;
@@ -47,7 +46,6 @@ export interface ShellState {
 export function initialShell(): ShellState {
   return {
     railOpen: readBool(RAIL_KEY, true),
-    projectOpen: false,
     viewMode: 'view-globe',
     leftW: 220,
     rightW: 320,
