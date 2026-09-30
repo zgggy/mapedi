@@ -60,7 +60,8 @@ export const SLOT_GAP = 4;
 
 export function measureSlot(listEl: HTMLElement | undefined): number {
   if (!listEl) return SLOT;
-  let need = 40;
+  // 26 起步（第九轮：与把手行高精确相等——把手 = txt14 + padding12 = 26；名称换行由测量撑高）
+  let need = 26;
   for (const b of listEl.querySelectorAll<HTMLElement>('.ibtn')) {
     const t = b.querySelector<HTMLElement>('.txt');
     const h = (t ? t.scrollHeight : 0) + 12;

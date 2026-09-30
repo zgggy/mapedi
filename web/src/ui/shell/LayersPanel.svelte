@@ -193,6 +193,11 @@
   }
 
   function handleSelect(id: string) {
+    if (focusLayer === id) {
+      // 再点已聚焦行 = 收起（对称单开：聚焦取消 → 行展开区消失、工作区回空态提示）
+      onSelect?.('');
+      return;
+    }
     onSelect?.(id);
     onDrawLayer?.(id);
   }

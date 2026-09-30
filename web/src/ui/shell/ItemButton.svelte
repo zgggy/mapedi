@@ -1,11 +1,11 @@
 <script lang="ts">
   /**
-   * 行按钮（2026-09-30 第八轮：**把手化手风琴**）——外层 .iacc = 与图层/元素展开把手
-   * 一模一样的样式（圆角框/内边距/字号/悬停）；头部 button 行自身可展开（open+content
-   * 原地长出内容，不在行下另起一块）；**眼睛已移入检查模式展开区**（InspectSection）。
-   * 等高机制按头部 .txt 测量（展开内容不参与）；长按拖动/右键/选中语义不变。
+   * 行按钮（2026-09-30 第九轮：**完全代码复用**）——外壳/开合/body/限高滚动全部 =
+   * ExpandPanel（header 槽放原交互按钮），本组件只管头部交互（单击/双击/右键/长按拖动）
+   * 与头部内容；眼睛在检查模式展开区（InspectSection）。等高按头部 .txt 测量。
    */
   import type { Snippet } from 'svelte';
+  import ExpandPanel from './ExpandPanel.svelte';
 
   let {
     logo = '',
@@ -121,102 +121,83 @@
   }
 </script>
 
-<div class="iacc" class:open={open && !!content} class:selected class:dragging class:lift>
-<button
-  type="button"
-  class="ibtn"
-  class:dragging
-  class:hold={holding}
-  style="--hold-ms:{holdMs}ms"
-  onclick={handleClick}
-  ondblclick={(e) => {
-    e.preventDefault();
-    if (!moved && !unlocked) onDblclick?.();
-  }}
-  oncontextmenu={(e) => {
-    e.preventDefault();
-    if (!unlocked) onMenu?.(e);
-  }}
-  onpointerdown={onPointerDown}
-  onpointercancel={() => {
-    clearHold();
-    unlocked = false;
-  }}
+<ExpandPanel
+  open={open && !!content}
+  {content}
+  {selected}
+  {dragging}
+  {lift}
+  bodyMax="42vh"
 >
-  <span class="hold-fill" aria-hidden="true"></span>
-  {#if logoColor}
-    <span class="logo swatch" style="background:{logoColor}"></span>
-  {:else if logo}
-    <span class="logo em">{logo}</span>
-  {/if}
-  <span class="txt">
-    <span class="nm">{name}</span>
-    {#if desc}
-      <span class="desc">{desc}</span>
-    {/if}
-    {#if badge}
-      <span class="badge" title={badge}>{badge}</span>
-    {/if}
-  </span>
-  {#if control}
-    <span
-      class="ctl no-drag"
-      onpointerdown={(e) => e.stopPropagation()}
-      onclick={(e) => e.stopPropagation()}
-      ondblclick={(e) => e.stopPropagation()}
-      oncontextmenu={(e) => e.stopPropagation()}
+  {#snippet header()}
+    <button
+      type="button"
+      class="ibtn"
+      class:open={open && !!content}
+      class:hold={holding}
+      style="--hold-ms:{holdMs}ms"
+      onclick={handleClick}
+      ondblclick={(e) => {
+        e.preventDefault();
+        if (!moved && !unlocked) onDblclick?.();
+      }}
+      oncontextmenu={(e) => {
+        e.preventDefault();
+        if (!unlocked) onMenu?.(e);
+      }}
+      onpointerdown={onPointerDown}
+      onpointercancel={() => {
+        clearHold();
+        unlocked = false;
+      }}
     >
-      {@render control()}
-    </span>
-  {/if}
-  {#if content}
-    <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
-  {/if}
-</button>
-{#if open && content}
-  <div class="ibtn-body">{@render content()}</div>
-{/if}
-</div>
+      <span class="hold-fill" aria-hidden="true"></span>
+      {#if logoColor}
+        <span class="logo swatch" style="background:{logoColor}"></span>
+      {:else if logo}
+        <span class="logo em">{logo}</span>
+      {/if}
+      <span class="txt">
+        <span class="nm">{name}</span>
+        {#if desc}
+          <span class="desc">{desc}</span>
+        {/if}
+        {#if badge}
+          <span class="badge" title={badge}>{badge}</span>
+        {/if}
+      </span>
+      {#if control}
+        <span
+          class="ctl no-drag"
+          onpointerdown={(e) => e.stopPropagation()}
+          onclick={(e) => e.stopPropagation()}
+          ondblclick={(e) => e.stopPropagation()}
+          oncontextmenu={(e) => e.stopPropagation()}
+        >
+          {@render control()}
+        </span>
+      {/if}
+      {#if content}
+        <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      {/if}
+    </button>
+  {/snippet}
+</ExpandPanel>
 
 <style>
-  /* 把手同款外壳（第八轮：与图层/元素展开把手一模一样的样式语言）：
-     圆角 12 框 / 透明深底 / 悬停微亮 / 选中金边；阴影不逐行（面板级才有） */
-  .iacc {
-    position: relative;
-    width: 100%;
-    min-width: 0;
-    border: 1px solid var(--panel-border);
-    border-radius: 12px;
-    background: rgba(16, 19, 26, 0.94);
-    overflow: hidden;
-    user-select: none;
-  }
-  .iacc:hover {
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .iacc.selected {
-    border-color: #f0c36a;
-    box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
-  }
-  .iacc.open {
-    background: rgba(16, 19, 26, 0.94);
-  }
-  /* 被拿起来：整行（含框）隐藏，浮动件表示 */
-  .iacc.dragging {
-    visibility: hidden;
-  }
+  /* 头部内芯（外壳/开合/body = ExpandPanel，样式单源回归其组件） */
   .ibtn {
     position: relative;
     width: 100%;
     min-width: 0;
     /* 等高：由列表统一测量设定（按头部 .txt，展开内容不参与） */
-    height: var(--ibtn-h, 40px);
+    height: var(--ibtn-h, 26px);
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 5px 8px; /* 把手同款内边距 */
     border: 0;
-    border-radius: 12px 12px 0 0;
+    border-radius: 12px;
     background: transparent;
     color: inherit;
     cursor: pointer;
@@ -226,21 +207,12 @@
     touch-action: none;
     user-select: none;
   }
-  .iacc.open .ibtn {
+  .ibtn.open {
     border-bottom: 1px solid var(--panel-border);
+    border-radius: 12px 12px 0 0;
   }
   .ibtn:hover {
     background: rgba(255, 255, 255, 0.04);
-  }
-  /* 抬起中的浮动件：整行（iacc）跟指针 */
-  .iacc.lift {
-    position: fixed;
-    z-index: 200;
-    width: var(--lift-w, 240px);
-    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
-    border-color: rgba(240, 195, 106, 0.7);
-    opacity: 0.95;
-    pointer-events: none;
   }
   /* 展开箭头（把手语言） */
   .caret {
@@ -248,13 +220,6 @@
     font-size: 10px;
     color: var(--text-dim);
     padding-left: 2px;
-  }
-  /* 行内展开区（原地长出，非行下另起） */
-  .ibtn-body {
-    border-top: 1px solid var(--panel-border);
-    padding: 6px 8px;
-    font-size: 11px;
-    user-select: text;
   }
   .hold-fill {
     position: absolute;

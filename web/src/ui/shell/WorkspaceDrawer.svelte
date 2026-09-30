@@ -424,8 +424,10 @@
   <!-- 第七轮：身份行已删（首行 = 新元素 CreateRow）；面板名与开合由左栏 ExpandPanel 承担 -->
   <div class="sec-root">
     <div class="ws" onclick={onBlankClick}>
-      <!-- 段2 新增元素（仅平面编辑模式） + 搜索按钮（默认收起，点击展开输入框） -->
-      {#if mode === 'plane' && !isHeight}
+      <!-- 空态（图层行再点=取消聚焦后回此态）；创建/搜索仅聚焦且平面编辑时可见 -->
+      {#if !focusLayer}
+        <p class="dim-pad">点击左侧图层查看或创建其元素</p>
+      {:else if mode === 'plane' && !isHeight}
         <div class="create">
           <CreateRow
             placeholder="新元素"
@@ -436,6 +438,7 @@
           />
         </div>
       {/if}
+      {#if focusLayer}
       <div class="filter">
         {#if searchOpen}
           <input
@@ -455,6 +458,7 @@
           <button type="button" class="search-open" onclick={toggleSearch}>🔍 搜索元素</button>
         {/if}
       </div>
+      {/if}
 
       {#snippet itemBtn(
         id: string,

@@ -9,7 +9,7 @@
 
   let {
     icon = '',
-    label,
+    label = '',
     title = '',
     open = false,
     onToggle,
@@ -17,9 +17,15 @@
     right,
     grow = false,
     content,
+    header,
+    bodyMax,
+    selected = false,
+    dragging = false,
+    lift = false,
   }: {
     icon?: string;
-    label: string;
+    /** header 缺省时的头部文字（header 存在时可省） */
+    label?: string;
     title?: string;
     open?: boolean;
     onToggle?: (next: boolean) => void;
@@ -30,6 +36,16 @@
     grow?: boolean;
     /** 展开时渲染的内容（滚动由本组件 body 负责） */
     content?: Snippet;
+    /** 自定义头部（完全代码复用：列表行把原按钮放这里，默认把手头不再渲染） */
+    header?: Snippet;
+    /** body 限高（行内场景传值防撑爆；左栏 flex 场景不传） */
+    bodyMax?: string;
+    /** 选中态金边（列表行经此透传到外壳） */
+    selected?: boolean;
+    /** 拖动来源行（整壳隐藏，浮动件表示） */
+    dragging?: boolean;
+    /** 抬起中的浮动件（整壳跟指针） */
+    lift?: boolean;
   } = $props();
 
   function toggle() {
@@ -38,27 +54,34 @@
   }
 </script>
 
-<div class="acc" class:open class:grow>
-  <button
-    type="button"
-    class="handle"
-    {disabled}
-    {title}
-    aria-expanded={content ? open : undefined}
-    onclick={toggle}
-    oncontextmenu={(e) => e.preventDefault()}
-    onkeydown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggle();
-      }
-    }}
-  >
-    <span class="lb">{icon ? icon + ' ' : ''}{label}{content ? (open ? ' ▾' : ' ▸') : ''}</span>
-    {#if right}{@render right()}{/if}
-  </button>
+<div class="acc" class:open class:grow class:selected class:dragging class:lift>
+  {#if header}
+    <!-- 完全复用：调用方自带头部（列表行 = 原交互按钮），开合状态仍由 open 控制 -->
+    {@render header()}
+  {:else}
+    <button
+      type="button"
+      class="handle"
+      {disabled}
+      {title}
+      aria-expanded={content ? open : undefined}
+      onclick={toggle}
+      oncontextmenu={(e) => e.preventDefault()}
+      onkeydown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      <span class="lb">{icon ? icon + ' ' : ''}{label}{content ? (open ? ' ▾' : ' ▸') : ''}</span>
+      {#if right}{@render right()}{/if}
+    </button>
+  {/if}
   {#if open && content}
-    <div class="body">{@render content()}</div>
+    <div class="body" style={bodyMax ? `max-height:${bodyMax};overflow-y:auto` : undefined}>
+      {@render content()}
+    </div>
   {/if}
 </div>
 
@@ -77,6 +100,22 @@
   .acc.grow.open {
     flex: 1 1 0; /* 左栏：都展开=各占一半；一开一收=展开者占满；收起时 auto=仅把手行 */
   }
+  .acc.selected {
+    border-color: #f0c36a;
+    box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
+  }
+  .acc.dragging {
+    visibility: hidden;
+  }
+  .acc.lift {
+    position: fixed;
+    z-index: 200;
+    width: var(--lift-w, 240px);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
+    border-color: rgba(240, 195, 106, 0.7);
+    opacity: 0.95;
+    pointer-events: none;
+  }
   .handle {
     position: relative;
     display: flex;
@@ -89,7 +128,7 @@
     background: transparent;
     color: var(--text, #ddd);
     border-radius: 12px;
-    padding: 5px 8px;
+    padding: 6px 8px; /* 高度与列表行头精确对齐（26 = txt 14 + padding 12） */
     font-size: 11px;
     line-height: 1.2;
     cursor: pointer;
@@ -119,5 +158,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    padding: 6px 8px; /* 统一内容内距（行内/左栏一致） */
+    box-sizing: border-box;
   }
 </style>
