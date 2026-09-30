@@ -104,3 +104,9 @@
 - D1-D6 已全部拍板（2026-09-29，见设计稿 §9）；D1′ 澄清：undo/redo 按钮**接现有 editor.undo/redo**（不接新能力）。D4 = B（ValidatorPanel 归档删除，规则与测试保留，还债步骤 1 后以自动校验 + toast 回归）。
 - 结构层 C1-C9 二轮拍板（2026-09-29）+ **A-D′ 四项（2026-09-30）**：默认模式回球面、还债不同包、**画布右键=纯位移（仅面板行出菜单）**、undo/redo 接已有功能。
 - **U1 开工前置已满足**（2026-09-30）：并发线（投影动画批1-3 / 模式切换）已落定，`git log`/`git status` 干净。
+- **✓ U1 完成（2026-09-30，`3abf544` + 决策落档 `8dadfd1`）**：顶栏三件（模式胶囊/世界名菜单+双击改名含 `meta.name`/⚙视图设置）、状态栏三分区、双模式相机记忆、视图面板退役；浏览器验收过（改名存档往返、模式切换、导出 SVG、几何零重叠）。
+- **✓ U2 完成（2026-09-30，`9b4868c` + `0ea7eed`）**：
+  - 1/2 = 左轨合并（LeftRail：图层段 ≤45% 内滚 + 工作区段、⊟↔圆钮 localStorage 持久化）+ C1 契约（单击选中/双击绘制/画布反选/隐藏层红字守卫）+ 工具带（weight 删、fill/center 死值删、undo/redo 接现有 editor.undo/redo + Ctrl+Y）+ 元素过滤 + 悬停归属元素名可跳选；ValidatorPanel 按 D4=B 归档删除。
+  - 2/2 = 信息入右键菜单卡片（锚点/点外/Esc 关闭）、PanelShell 去 backdrop-filter（菜单被裁根因）、生成入轨 GenerateSection（D5 长按 900ms 进度触发）、球面星球参数区 PlanetParams、**PanelDock 删除 → 常驻浮窗 = 0**。
+  - **教训（svelte-check 抓不到）**：`.svelte` 里漏解构的 props **类型检查 0 错**但运行 `ReferenceError`——WorkspaceDrawer 漏 `lowFreq` 一度打断 effect 树、表现成「左轨不随模式切换」的假性响应失灵；排查时勿先怀疑响应性系统。
+- **☐ U3 待做**：有效视口与选中露出（C7，相机按未遮挡区取景 + 选中自动平移露出）+ 全量回归（100k 性能、HMR 半热态纪律）。
