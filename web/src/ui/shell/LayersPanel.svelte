@@ -12,7 +12,8 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
   import ItemButton from './ItemButton.svelte';
-  import FoldHandle from './FoldHandle.svelte';
+  import ModeCapsule from './ModeCapsule.svelte';
+  import { WS_MODE_ITEMS } from './shell';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
@@ -31,17 +32,24 @@
     onNewName,
     onRandomName,
     onCollapse,
-    onToggleExpand,
     onMoveLayer,
     onCopyLayer,
     onDeleteLayer,
     expandPanel,
+    taskMode = 'check',
+    globeLocked = false,
+    onTaskMode,
   }: {
     world: World | null;
-    /** 图层子面板展开态（收起时只渲染 header 一行，§3.1） */
+    /** 图层子面板展开态（三模式后恒 true；保留 prop 以兼容空态渲染） */
     expanded?: boolean;
     focusLayer?: string;
     newName?: string;
+    /** 工作区三模式（2026-09-30 终稿：胶囊位于原图层 header 位） */
+    taskMode?: 'check' | 'gen' | 'draw';
+    /** 球面锁定：仅检查档可用 */
+    globeLocked?: boolean;
+    onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
     /** 眼睛图标：显隐 */
@@ -60,8 +68,6 @@
     onRandomName?: () => void;
     /** header ⊟：收起整条左轨 */
     onCollapse?: () => void;
-    /** header [展开/收起]：图层子面板开合 */
-    onToggleExpand?: () => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
@@ -122,13 +128,6 @@
   });
 
   const flatRows = $derived(rows.map((r) => ({ id: r.id, parentId: r.parentId }) as FlatRow));
-
-  /** header 展示的当前层（收起态显示聚焦层身份，展开态显示「图层」，§3.2） */
-  const focusRow = $derived(rows.find((r) => r.id === focusLayer));
-  /** 当前层元素数（收起态 header 的一个字段） */
-  const focusCount = $derived(
-    focusRow ? (world?.regions ?? []).filter((r) => r.layerId === focusLayer).length : 0,
-  );
 
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -228,25 +227,19 @@
 
 <div class="sec-root">
   <header class="hd">
+    <!-- 2026-09-30 终稿：原图层把手位 = 工作区三模式胶囊（检查/生成/绘制） -->
+    <ModeCapsule
+      value={taskMode}
+      onChange={(v) => onTaskMode?.(v as 'check' | 'gen' | 'draw')}
+      items={WS_MODE_ITEMS}
+      ariaLabel="工作区模式"
+      segMinW={0}
+      disabledWhen={(id) => globeLocked && id !== 'check'}
+    />
     <button type="button" class="collapse" title="收起面板" aria-label="收起面板" onclick={() => onCollapse?.()}>⊟</button>
-    <!-- 图层子面板把手（2026-09-30 四把手重排：样式与其他把手单源） -->
-    <FoldHandle
-      grow
-      icon={focusRow?.meta.emoji ?? '📚'}
-      label="图层"
-      open={expanded}
-      onToggle={() => onToggleExpand?.()}
-      title={expanded ? '收起图层列表' : '展开图层列表'}
-    >
-      {#snippet right()}
-        {#if !expanded}
-          <span class="eye" title={focusRow?.visible ? '该层已显示' : '该层已隐藏'}>{focusRow?.visible ? '👁' : '🚫'}</span>
-          <span class="cnt">{focusCount}</span>
-        {/if}
-      {/snippet}
-    </FoldHandle>
   </header>
   {#if expanded}
+    <div class="sect">📚 图层</div>
     <div class="body">
       <div class="create">
     <CreateRow
@@ -324,14 +317,18 @@
   .collapse:hover {
     background: rgba(255, 255, 255, 0.12);
   }
-  .eye {
-    font-size: 11px;
-    opacity: 0.85;
+  .collapse {
+    margin-left: auto;
   }
-  .cnt {
+  /* 图层轻区头（2026-09-30 终稿：图层/元素两区域，区头只做标识不开合） */
+  .sect {
+    flex: 0 0 auto;
+    padding: 5px 8px 3px;
     font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
     color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid var(--panel-border);
   }
   /* 展开体：由左轨段负责滚动（§3.1 双滚动模型），这里只撑满 */
   .body {

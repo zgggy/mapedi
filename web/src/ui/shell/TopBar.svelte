@@ -6,7 +6,7 @@
   import ModeCapsule from './ModeCapsule.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import ViewSettingsPopover from './ViewSettingsPopover.svelte';
-  import type { ViewMode } from './shell';
+  import { VIEW_MODE_ITEMS, type ViewMode } from './shell';
 
   let {
     viewMode = 'view-globe',
@@ -119,7 +119,13 @@
 
 <!-- 模式胶囊 + 视图设置：顶栏居中悬浮（2026-09-30：⚙ 移到切换显示右侧） -->
 <div class="center">
-  <ModeCapsule value={viewMode} onChange={onSwitchView} />
+  <ModeCapsule
+    value={viewMode}
+    onChange={(v) => onSwitchView(v as ViewMode)}
+    items={VIEW_MODE_ITEMS}
+    ariaLabel="视图模式（球面 / 平面）"
+    segMinW={96}
+  />
   <div class="gear-wrap">
     <button
       type="button"

@@ -82,3 +82,16 @@ export function initialShell(): ShellState {
     rightW: 320,
   };
 }
+
+/** 顶栏视图模式两档（ModeCapsule items；2026-09-30 通用化） */
+export const VIEW_MODE_ITEMS = [
+  { id: 'view-globe', icon: '🌐', label: '球面展示' },
+  { id: 'view-2d', icon: '✏️', label: '平面编辑' },
+];
+
+/** 左栏工作区三模式三档（检查 / 生成 / 绘制；2026-09-30 E 系拍板） */
+export const WS_MODE_ITEMS = [
+  { id: 'check', icon: '🔍', label: '检查' },
+  { id: 'gen', icon: '🎲', label: '生成' },
+  { id: 'draw', icon: '✏️', label: '绘制' },
+];

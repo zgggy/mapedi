@@ -32,10 +32,7 @@
   let viewFade = $state(1);
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
-  /** panels.layers = 图层子面板展开（三张信息 popover 已退役：展开区为唯一信息入口，2026-09-30） */
-  let panels = $state({
-    layers: true,
-  });
+  // panels 状态已退役（2026-09-30 终稿：图层区恒在，开合把手架构随三模式胶囊化取消）
 
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
@@ -411,9 +408,12 @@
   {#snippet layersSn()}
 
   <LayersPanel
-    expanded={panels.layers}
+    expanded
     {world}
     {focusLayer}
+    taskMode={shell.wsMode}
+    globeLocked={shell.viewMode === 'view-globe'}
+    onTaskMode={setWsMode}
     newName={editor.newName}
     onSelect={(id) => {
       if (!id) {
@@ -435,7 +435,6 @@
       shell.railOpen = false;
       persistRailOpen(false);
     }}
-    onToggleExpand={() => (panels.layers = !panels.layers)}
     expandPanel={layerExpand}
     onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyLayer={(id) => editor.copyItem(id)}
@@ -453,8 +452,6 @@
     {newName}
     mode={shell.viewMode === 'view-globe' ? 'globe' : 'plane'}
     taskMode={shell.wsMode}
-    globeLocked={shell.viewMode === 'view-globe'}
-    onTaskMode={setWsMode}
     layerPanel={layerExpand}
     elementPanel={elementExpand}
     bind:expandedIds

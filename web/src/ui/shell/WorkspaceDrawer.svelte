@@ -31,12 +31,10 @@
     brushRadius = 1.5,
     newName = '',
     taskMode = 'check',
-    globeLocked = false,
     onSelect,
     onDelete,
     onPaintValue,
     onRadius,
-    onTaskMode,
     onCreate,
     onCreateChild,
     onRandomName,
@@ -58,16 +56,13 @@
     drawActive?: boolean;
     brushRadius?: number;
     newName?: string;
-    /** 工作区三模式（2026-09-30 拍板：检查 / 生成 / 绘制） */
+    /** 工作区三模式（2026-09-30 拍板：检查 / 生成 / 绘制；胶囊已上移至左栏顶） */
     taskMode?: 'check' | 'gen' | 'draw';
-    /** 球面视图锁定检查模式 */
-    globeLocked?: boolean;
     onSelect: (id: string | null) => void;
     onDelete: (id: string) => void;
     /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字（仅绘制模式行内显示） */
     onPaintValue?: (id: string, value: number) => void;
     onRadius?: (v: number) => void;
-    onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
     onCreate?: () => void;
     onCreateChild?: (parentId: string) => void;
     onRandomName?: () => void;
@@ -459,22 +454,7 @@
       <button type="button" class="ur" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
     </header>
 
-    <!-- 三模式 tab（检查 / 生成 / 绘制）；球面锁定检查 -->
-    <div class="mtabs" role="tablist" aria-label="工作区模式">
-      {#each [{ k: 'check', l: '🔍 检查' }, { k: 'gen', l: '🎲 生成' }, { k: 'draw', l: '✏️ 绘制' }] as t (t.k)}
-        <button
-          type="button"
-          role="tab"
-          class="mtab"
-          class:on={taskMode === t.k}
-          aria-selected={taskMode === t.k}
-          disabled={globeLocked && t.k !== 'check'}
-          title={globeLocked && t.k !== 'check' ? '球面为纯展示，仅检查模式可用' : undefined}
-          onclick={() => onTaskMode?.(t.k as 'check' | 'gen' | 'draw')}>{t.l}</button
-        >
-      {/each}
-    </div>
-
+    <!-- 三模式已上移至左栏顶胶囊（2026-09-30 终稿：原图层 header 位）；工作区头 = 元素区域身份 -->
     <div class="ws" onclick={onBlankClick}>
       <!-- 段2 新增元素（仅平面编辑模式） + 搜索按钮（默认收起，点击展开输入框） -->
       {#if mode === 'plane' && !isHeight}
@@ -780,33 +760,6 @@
     flex: 0 0 auto;
     text-align: center;
     padding: 3px 7px;
-  }
-  /* —— 模式 tab 行（检查/生成/绘制；2026-09-30 三模式） —— */
-  .mtabs {
-    display: flex;
-    gap: 4px;
-    padding: 6px 8px 0;
-    flex: 0 0 auto;
-  }
-  .mtab {
-    flex: 1;
-    border: 1px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-dim);
-    border-radius: 999px;
-    padding: 4px 6px;
-    font-size: 11px;
-    line-height: 1.2;
-    cursor: pointer;
-  }
-  .mtab.on {
-    background: rgba(240, 195, 106, 0.22);
-    border-color: rgba(240, 195, 106, 0.65);
-    color: var(--text, #ddd);
-  }
-  .mtab:disabled {
-    opacity: 0.4;
-    cursor: default;
   }
   /* 头部右端 undo/redo 小钮 */
   .ur {
