@@ -17,6 +17,7 @@
 ## 当前状态（2026-09-30，UI 重构 U1-U3 + 四把手重排完成后填写）
 
 - **在途未提交改动**：无（工作区干净）。最近提交：`4492ba4`（**1-b 字段类命令化**）、`e837f67`（**第七轮 ExpandPanel 单体**）、`3b43698`（1-a undo 腐蚀）。
+- **2026-09-30 第八轮（列表行把手化，`1874a7a`）**：**行按钮本身 = 把手**——ItemButton 手风琴化（外层 .iacc 与图层/元素把手同款样式语言；头部行 open+content **原地长出**展开区，独立 panel li 与第七轮行级 ExpandPanel 包装全部退役）；**眼睛从行按钮移入检查模式展开区**（InspectSection 两处 vis-toggle：图层/元素；行上 visible/onEye 全链删除）；li `.cell.open` 自适应高（等高机制只测头部不受影响）；toggleItemHidden 包 patchRegions（1-b 补账）。浏览器全绿零错误（两列表 15+8 行、检查/绘制两态展开、再点收起）。
 - **2026-09-30 第七轮 + 1-b**：① 左栏单体手风琴——`ExpandPanel`（收起=一行 button、展开=同容器长内容）四处复用传参（左栏图层/元素两面板 + 两侧行级展开区）；工作区改名「元素」、身份行删（首行=新元素）；rail=max-content → 面板右缘与 ↶↷ 圆钮精确对齐（实测 249=249），宽度 ResizeObserver 回传 C7；行级 header 点击收起（图层换聚焦重开/元素=清选中）。② **1-b**：纯数据命令四件（RegionFields/LayersVisibility/LayerStyle/AddLayer）+ `patchRegions` 快照执行器；显隐（含 3 树拒绝分支净变化）、样式、建层、保存信息、外交三操作全部入栈——「core 直改+touch」主路径关闭。浏览器干净复测（显隐三态/改名列表回滚/建层消失）全绿零错误。
 - **留下一批（1-b 剩余）**：路径编辑（Viewport 直改 points，8 处）、图层树拖拽排序/复制/删除、climate/astro、**1-c 整体**（PatchRegionsCommand/HeightStrokeCommand 闭包仍在——历史面板前置）。
 - **验证教训（累积）**：CUA 组合键会整轮失灵 → 页内 `window.dispatchEvent(KeyboardEvent)` 直发；状态栏 error 盖 status → 先开眼；`createRegion` 自动选中 → 再点行=toggle 取消；改名撤销判定要读**列表行文本**（EntityInfoBody 输入框是本地副本不随 undo 刷新，读它会误判）；眼睛悬停才可见 → evaluate 派发 click。

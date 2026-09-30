@@ -322,6 +322,14 @@
 - **退役**：⊟ 整轨收起与左上圆钮、`shell.railOpen`/`persistRailOpen`、LayersPanel 的 header/胶囊/轻区头/expanded 链、WorkspaceDrawer 头部 undo/redo（留轻身份行）。
 - 实测：胶囊 y=10 与顶栏视图胶囊同高；两 pane 330/330；gap 8；收起 27px；内滚 contained；reload 持久化；console 零错误。
 
+**2026-09-30 第八轮（列表行把手化，`1874a7a`）**——用户原话要点：列表元素的 button 与图层/元素把手样式一模一样、**button 本身展开而非下面另起**、**眼睛暂移检查模式展开区**：
+
+- **ItemButton 手风琴化**：外层 `.iacc` = 把手同款样式语言（圆角 12 框 / 透明深底 / 悬停微亮 / 选中金边 / 把手内边距字号；阴影不逐行——面板级才有）；头部行 `open+content` 原地长出 `.ibtn-body`；caret 把手箭头；**独立 panel li 节点与第七轮行级 ExpandPanel 包装全部退役**（结构再度收敛）。
+- **眼睛移入检查模式展开区**：InspectSection 顶部 `vis-toggle`（图层 = toggleLayerVisible、元素 = toggleItemHidden，文案带状态与“点击切换”）；行按钮的 visible/onEye/eye 样式全链删除——**行上暂无任何显隐入口**（用户原话“暂时”，后续可再议）。
+- **等高机制**：`measureSlot` 按头部 `.txt` 测量，展开内容不参与；li `.cell.open` 自适应高。
+- 顺手：`toggleItemHidden` region 分支包 `patchRegions`（1-b 补账，可撤销）。
+- 实测：两列表 15+8 行全把手化、无眼睛/无独立 panel、检查态展开含 Inspect+显隐开关、绘制态展开换参数区+会话推导、再点行头收起、console 零错误。
+
 ## 附录 B：开工前置
 
 - **等用户通知**（并发 AI 会话执行完在途操作）后方可开工，顺序 U1 → U2 → U3。
