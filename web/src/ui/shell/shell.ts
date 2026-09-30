@@ -21,7 +21,7 @@ export function initialShell(): ShellState {
     layersOpen: true,
     workspaceOpen: false,
     projectOpen: false,
-    viewMode: 'view-globe', // 默认球面展示（用户定）
+    viewMode: 'view-2d', // 默认平面绘制（用户定 2026-09-29：调试缝隙用；球面展示仍可手动切换）
     leftW: 200,
     rightW: 320,
   };

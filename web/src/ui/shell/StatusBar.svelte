@@ -5,7 +5,7 @@
     fps = 0,
     zoom = 1,
   }: {
-    hover?: { cellId: number; lon: number; lat: number; height: number } | null;
+    hover?: { cellId: number; lon: number; lat: number; height: number; elementIds?: string[] } | null;
     status?: string;
     fps?: number;
     /** 缩放级别（相对默认视野的倍率） */
@@ -20,6 +20,9 @@
     <span>{hover.lon.toFixed(1)}°,{hover.lat.toFixed(1)}°</span>
     <span class="h">高度 {hover.height.toFixed(3)}</span>
     <span class="dim">{hover.height > 0 ? '陆地' : hover.height === 0 ? '海平面' : '海洋'}</span>
+    {#if hover.elementIds?.length}
+      <span class="el" title={hover.elementIds.join(' ')}>🧩 {hover.elementIds.join(' ')}</span>
+    {/if}
   {/if}
   <span class="st">{status}</span>
   <span class="be gpu">GPU</span>
@@ -50,6 +53,14 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 40vw;
+  }
+  .el {
+    max-width: 22vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--accent, #7ec8ff);
+    opacity: 0.9;
   }
   .be {
     opacity: 0.75;

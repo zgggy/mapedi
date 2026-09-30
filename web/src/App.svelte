@@ -21,7 +21,7 @@
   let shell = $state<ShellState>(initialShell());
   let hover = $state<HoverInfo | null>(null);
   let styleId = $state('dark');
-  let projection = $state<import('./core/project/projections').ProjectionId>('mercator');
+  let projection = $state<import('./core/project/projections').ProjectionId>('robinson');
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
   let globeSpin = $state(false);
@@ -188,7 +188,8 @@
           {projParams}
           {styleId}
           bindCanvas={(c) => (exportCanvas = c)}
-          onhover={(h) => (hover = h)}
+          onhover={(h) =>
+            (hover = h ? { ...h, elementIds: editor.regionIdsOfCell(h.cellId) } : null)}
           onzoom={(z) => (zoomScale = z)}
           onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
           onradius={(v) => {

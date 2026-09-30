@@ -22,6 +22,9 @@ export function bumpAllRev(): void {
   height++;
   regions++;
 }
+export function regionsRev(): number {
+  return regions;
+}
 export function dataRev(): string {
   return `${geom}:${height}:${regions}`;
 }

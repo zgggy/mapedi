@@ -47,7 +47,7 @@ import {
   visibleColorRoots,
   materializeParentCells,
 } from '../core/displayCompose';
-import { bumpAllRev, bumpHeightRev, bumpRegionsRev } from '../core/rev';
+import { bumpAllRev, bumpHeightRev, bumpRegionsRev, regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { generateWorldAsync, loadWorldAsync } from '../core/generate/runGenerate';
 import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
@@ -133,6 +133,28 @@ export class EditorStore {
   // 松手重建放大 50-70×（2.2s/次）；响应性 = 身份变更 + notify（本设计的驱动方式）
   get world() { return worldRaw; }
   set world(v: World | null) { worldRaw = v; }
+  /** 鼠标格 → 所属元素 id 列表（Region.cells 反查；仅 regions 域 rev 失效，height 绘制不触发重建） */
+  private cellRegions: Map<number, string[]> | null = null;
+  private cellRegionsRev = -1;
+  regionIdsOfCell(cellId: number): string[] {
+    const rev = regionsRev();
+    if (!this.cellRegions || rev !== this.cellRegionsRev) {
+      const m = new Map<number, string[]>();
+      const w = worldRaw;
+      if (w) {
+        for (const r of w.regions) {
+          for (const id of r.cells) {
+            let l = m.get(id);
+            if (!l) { l = []; m.set(id, l); }
+            l.push(r.id);
+          }
+        }
+      }
+      this.cellRegions = m;
+      this.cellRegionsRev = rev;
+    }
+    return this.cellRegions.get(cellId) ?? [];
+  }
   get status() { return ui.status; }
   set status(v: string) { ui.status = v; }
   get generating() { return ui.generating; }

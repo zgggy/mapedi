@@ -29,6 +29,8 @@ export interface HoverInfo {
   lon: number;
   lat: number;
   height: number;
+  /** 鼠标所在格从属的元素 id（全部层，Region.cells 反查；调试缝隙定位用） */
+  elementIds?: string[];
 }
 
 /**
