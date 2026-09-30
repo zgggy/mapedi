@@ -14,17 +14,15 @@
 
 **必守**（详见 AGENTS）：整包交付；交付说明 = 问题/原理/预期效果；发现双真相要指出不打补丁；显示不打折；**除非用户明确说 test，否则不跑测试**；视觉差异先打印数据层实际值。
 
-## 当前状态（2026-09-30，UI 重构 U1-U3 全部完成后填写）
+## 当前状态（2026-09-30，UI 重构 U1-U3 + 四把手重排完成后填写）
 
-- **在途未提交改动**：无（工作区干净）。
-- **测试基线**：`web/tests/` 33 文件 / 171 用例；静态 = tsc 0 + svelte-check 0 errors（5 warnings 为 tsconfig 元配置既有）。跑测试仅在用户要求时；tsc 用 `npx tsc -p tsconfig.app.json`（裸跑有假绿陷阱）。
-- **UI 重构 U1-U3 已完成**（设计稿 `docs/UI_REFACTOR_2026-09-29.md` §8）：
-  - U1 `3abf544`：顶栏模式胶囊/世界名菜单/视图设置 + 状态栏三分区；项目/视图面板退役。
-  - U2 `9b4868c`+`0ea7eed`：左轨合并（图层子面板+工作区四段）、C1 契约（单击选中/双击绘制/画布反选/悬停归属/搜索框）、菜单 portal、球面星球区、undo/redo 按钮、ValidatorPanel 删除（D4=B）；Dock 与五浮窗退役，**常驻浮窗=0**。
-  - U3 `04dcff1`+`e492241`：非高度层生成分支（params 类型化控件 + regenLayer 单层再生成）、生成参数草稿持久化（mapedi.ui.gen 防抖）、C7 有效视口（选中遮挡区 180ms 拉回）。
-- **本轮教训（已修，勿重犯）**：① `viewportRoot` 声明未绑 `bind:this` → 函数永远早退（死变量要删或绑）；② **渲染是命令式驱动**——改 `cam` 等 $state 不自动重绘，必须 `requestRender()`；③ Playwright `fill()+Tab` 不触发 Svelte `onchange`，验证用原生 dispatchEvent；④ 验证“选中露出”勿 hover 质心断言归属（质心常不在自身领土），断言 tween 帧数（`__drawCount` 增量）。
-- **遗留小项**：`Choose File` file input 视觉已隐藏但 a11y 裸露（应 aria-hidden）；非 height 层**长按**触发生成未实测（单击展开已验）；100k 性能与全量回归待用户验收轮。**C2 已拍板无需再问**（A-D′：画布右键=纯位移，仅面板行出右键菜单）。
-- **更早轮次**：第五十九次链化栈式拆环；第五十六次取消穿极+罗宾森；第五十五次地形回退 v5；第五十九次之后的环定向/罗宾森/投影动画提交见 `git log`（`1d8945f`…`1b8971a`）。完整 59 轮日志：`docs/history/HANDOFF_LOG_2026-09-29.md`。
+- **在途未提交改动**：无（工作区干净）。最近提交：`6ceb132`（四把手+生成三分支）、`04d9bb8`（统一生成架构设计稿）、`e492241`/`04dcff1`（U3 收尾）、`524e06e`（U1-U3 文档同步）。
+- **测试基线**：`web/tests/` 33 文件 / 171 用例；静态 = tsc 0 + svelte-check 0 errors（5 warnings 为 tsconfig 元配置既有）。跑测试仅在用户要求时；tsc 用 `npx tsc -p tsconfig.app.json`。
+- **2026-09-30 四把手重排包（`6ceb132`）**：左栏 = 图层把手 + 绘制/生成/显示三把手（FoldHandle 单源）+ 元素列表；生成三分支（cells=重新撒点 / height=生成高度图+海陆删旧建新 / 普通层 regen / 路径禁用待设计）；⚙ 移模式胶囊右 + 视图面板 3d/2d 互斥（星球组自 PlanetParams 迁回）；搜索按钮化；紧凑统一。浏览器端到端全绿（三分支文案、互斥、长按 filling、`已重新生成：height`+海陆重建、console 零错）。
+- **统一生成架构设计稿**：`docs/GEN_UNIFIED_DESIGN.md`（genParent 单源/递归/CASCADE 拓扑推导/parentLayerId 同构投影/海陆 A 案待拍板）——**引擎包待用户过目后实施**。
+- **本轮教训**：① FoldHandle 的 `grow` prop 解决跨组件样式（Svelte scoped 父选不中子内部）；② 验证批次要显式记录起始模式（上一批切了球面，下一批按平面断言全部误报）；③ `playwright.keyboard` 不在 IAB API 面，用 `cua.keypress`。
+- **遗留**：非 height 层长按触发生成未实测（filling 态已验，fire 与按钮同函数已由 height 按钮路径覆盖）；100k 性能回归与全量回归待用户验收轮；`Choose File` a11y 裸露小疵。
+- **更早**：U1-U3 见 `3abf544`/`9b4868c`/`0ea7eed`/`04dcff1`/`e492241`；59 轮日志 `docs/history/HANDOFF_LOG_2026-09-29.md`。
 
 ## 交接纪律（新轮次怎么记）
 

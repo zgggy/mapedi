@@ -110,4 +110,5 @@
   - 2/2 = 信息入右键菜单卡片（锚点/点外/Esc 关闭）、PanelShell 去 backdrop-filter（菜单被裁根因）、生成入轨 GenerateSection（D5 长按 900ms 进度触发）、球面星球参数区 PlanetParams、**PanelDock 删除 → 常驻浮窗 = 0**。
   - **教训（svelte-check 抓不到）**：`.svelte` 里漏解构的 props **类型检查 0 错**但运行 `ReferenceError`——WorkspaceDrawer 漏 `lowFreq` 一度打断 effect 树、表现成「左轨不随模式切换」的假性响应失灵；排查时勿先怀疑响应性系统。
 - **✓ U3 完成（2026-09-30，`04dcff1`+`e492241`）**：C7 有效视口（选中遮挡区 180ms easeOut 拉回；修 `viewportRoot` 未绑定、tween 漏 `requestRender` 两处根因）+ 生成段按层补全（非 height 层 params 类型化控件 + regenLayer、无配置层禁用、height 原样）+ 草稿持久化（mapedi.ui.gen 500ms 防抖）。浏览器端到端验证过（按层面板/草稿回读/遮挡判定+tween 帧数断言）。
-- **待验收**：100k 性能回归、非 height 层长按生成、liftDrag/绘制会话全量回归（用户验收轮）。
+- **✓ 四把手重排包（2026-09-30 第三轮需求，`6ceb132`）**：左栏=图层把手+绘制/生成/显示三把手（FoldHandle 单源）+列表；**生成三分支**（cells=重新撒点 / height=生成高度图+海陆删旧建新 / 普通 regen / 路径禁用）；⚙ 移模式胶囊右、视图面板 3d/2d 互斥、星球组迁回；搜索按钮化；紧凑统一。配套架构设计：**`docs/GEN_UNIFIED_DESIGN.md`**（genParent 单源/递归/CASCADE 推导——引擎包待过目）。
+- **待验收**：100k 性能回归、非 height 层长按生成、liftDrag/绘制会话全量回归（用户验收轮）；引擎包/海陆案 A 待拍板（设计稿 §6/§7）。
