@@ -424,6 +424,106 @@ export class AddLayerCommand implements EditCommand {
   }
 }
 
+/**
+ * 元素数组序补丁（组织模式：上移/下移/缩进/提升都伴随 regions 数组序=叠放/显示序变化）。
+ * 整数组 id 快照（几百 id × 2 份，便宜且对插入/删除天然稳健——只要回放时全集一致）。
+ */
+export class RegionsOrderCommand implements EditCommand {
+  constructor(
+    public before: string[],
+    public after: string[],
+    public label = '调整顺序',
+  ) {}
+
+  private static applyOrder(world: World, ids: string[]): void {
+    const map = new Map(world.regions.map((r) => [r.id, r]));
+    const next: Region[] = [];
+    for (const id of ids) {
+      const r = map.get(id);
+      if (r) next.push(r);
+    }
+    // 回放期间新增的元素（不在此快照）追加到尾部，不丢数据
+    for (const r of world.regions) if (!ids.includes(r.id)) next.push(r);
+    world.regions = next;
+  }
+
+  apply(world: World): void {
+    RegionsOrderCommand.applyOrder(world, this.after);
+  }
+
+  revert(world: World): void {
+    RegionsOrderCommand.applyOrder(world, this.before);
+  }
+}
+
+/** 图层数组序补丁（图层组织模式的上移/下移/缩进/提升） */
+export class LayersOrderCommand implements EditCommand {
+  constructor(
+    public before: string[],
+    public after: string[],
+    public label = '调整图层顺序',
+  ) {}
+
+  private static applyOrder(world: World, ids: string[]): void {
+    const map = new Map(world.layers.map((l) => [l.id, l]));
+    const next: World['layers'] = [];
+    for (const id of ids) {
+      const l = map.get(id);
+      if (l) next.push(l);
+    }
+    for (const l of world.layers) if (!ids.includes(l.id)) next.push(l);
+    world.layers = next;
+  }
+
+  apply(world: World): void {
+    LayersOrderCommand.applyOrder(world, this.after);
+  }
+
+  revert(world: World): void {
+    LayersOrderCommand.applyOrder(world, this.before);
+  }
+}
+
+/** 组合命令：一次操作的多个子变更（如缩进 = parent 字段 + 数组序）一次 undo/redo */
+export class CompositeCommand implements EditCommand {
+  constructor(
+    public children: EditCommand[],
+    public label = '编辑',
+  ) {}
+
+  apply(world: World): void {
+    for (const c of this.children) c.apply(world);
+  }
+
+  revert(world: World): void {
+    for (let i = this.children.length - 1; i >= 0; i--) this.children[i].revert(world);
+  }
+}
+
+/** 图层浅字段补丁（parentLayerId/名称等——组织模式缩进/提升用） */
+export class LayerFieldsCommand implements EditCommand {
+  constructor(
+    public patches: { id: string; before: Partial<World['layers'][number]>; after: Partial<World['layers'][number]> }[],
+    public label = '编辑图层',
+  ) {}
+
+  private static assign(world: World, patches: LayerFieldsCommand['patches'], dir: 1 | -1): void {
+    for (const p of patches) {
+      const l = world.layers.find((x) => x.id === p.id);
+      if (!l) continue;
+      Object.assign(l, dir === 1 ? p.after : p.before);
+    }
+  }
+
+  apply(world: World): void {
+    LayerFieldsCommand.assign(world, this.patches, 1);
+  }
+
+  revert(world: World): void {
+    LayerFieldsCommand.assign(world, this.patches, -1);
+  }
+}
+
 export class History {
   private stack: EditCommand[] = [];
   private redoStack: EditCommand[] = [];

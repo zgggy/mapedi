@@ -49,19 +49,25 @@
     onState?.({ layersOpen, wsOpen, width: railEl?.clientWidth ?? 220 });
   }
 
-  // 宽度实时回传（max-content：顶行决定宽 → 面板右缘与圆钮右缘对齐）
+  let toprowEl: HTMLElement | undefined = $state();
+  // 宽度基准 = 顶行（胶囊+圆钮）——只观测 toprow，面板内容撑不宽 rail；实测宽回传（C7）
   $effect(() => {
-    if (!railEl) return;
-    emit();
-    const ro = new ResizeObserver(() => emit());
-    ro.observe(railEl);
+    if (!railEl || !toprowEl) return;
+    const apply = () => {
+      const w = toprowEl!.clientWidth;
+      railEl!.style.setProperty('--rail-w', `${w}px`);
+      emit();
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(toprowEl);
     return () => ro.disconnect();
   });
 </script>
 
 <aside class="rail" bind:this={railEl} aria-label="左栏">
   <!-- ① 顶行：模式胶囊 + undo/redo 圆钮（与顶栏视图胶囊同一高度水平线） -->
-  <div class="toprow">
+  <div class="toprow" bind:this={toprowEl}>
     <ModeCapsule
       value={taskMode}
       onChange={(v) => onTaskMode?.(v as 'check' | 'gen' | 'draw')}
@@ -107,9 +113,9 @@
     gap: 8px; /* 三块之间统一间隔 */
     min-height: 0;
     user-select: none;
-    font-size: 12px;
-    /* max-content：宽度由顶行（胶囊+圆钮）决定 → 面板右缘与圆钮右缘对齐 */
-    width: max-content;
+    font-size: 11px; /* 面板字体统一 11（第十轮） */
+    /* 宽度基准 = 顶行（胶囊+圆钮）：panel 内容不得撑宽（展开定宽） */
+    width: var(--rail-w, max-content);
   }
   .toprow {
     flex: 0 0 auto;

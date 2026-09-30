@@ -12,9 +12,10 @@ export type ViewMode = 'view-2d' | 'view-globe';
  * - check 检查：展开区 = 信息/显示参数
  * - gen 生成：展开区 = 生成参数
  * - draw 绘制：展开区 = 绘制参数；**展开的元素 = 选中并被绘制**（全收起 = 无绘制能力）
+ * - organize 组织：展开区 = 上移/下移/缩进/提升（树结构调整；拖动排序已退役，2026-09-30）
  * 球面视图锁定 check（纯展示契约）。
  */
-export type WsMode = 'check' | 'gen' | 'draw';
+export type WsMode = 'check' | 'gen' | 'draw' | 'organize';
 
 /** UI 偏好持久化命名空间（设计稿 §7：mapedi.ui.*） */
 const UI_NS = 'mapedi.ui';
@@ -56,7 +57,7 @@ export function persistWsMode(v: WsMode): void {
 export function readWsMode(): WsMode {
   try {
     const v = localStorage.getItem(`${UI_NS}.wsMode`);
-    return v === 'gen' || v === 'draw' ? v : 'check';
+    return v === 'gen' || v === 'draw' || v === 'organize' ? v : 'check';
   } catch {
     return 'check';
   }
@@ -87,4 +88,5 @@ export const WS_MODE_ITEMS = [
   { id: 'check', icon: '🔍', label: '检查' },
   { id: 'gen', icon: '🎲', label: '生成' },
   { id: 'draw', icon: '✏️', label: '绘制' },
+  { id: 'organize', icon: '🗂', label: '组织' },
 ];

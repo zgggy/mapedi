@@ -20,8 +20,6 @@
     header,
     bodyMax,
     selected = false,
-    dragging = false,
-    lift = false,
   }: {
     icon?: string;
     /** header 缺省时的头部文字（header 存在时可省） */
@@ -42,10 +40,6 @@
     bodyMax?: string;
     /** 选中态金边（列表行经此透传到外壳） */
     selected?: boolean;
-    /** 拖动来源行（整壳隐藏，浮动件表示） */
-    dragging?: boolean;
-    /** 抬起中的浮动件（整壳跟指针） */
-    lift?: boolean;
   } = $props();
 
   function toggle() {
@@ -54,7 +48,7 @@
   }
 </script>
 
-<div class="acc" class:open class:grow class:selected class:dragging class:lift>
+<div class="acc" class:open class:grow class:selected>
   {#if header}
     <!-- 完全复用：调用方自带头部（列表行 = 原交互按钮），开合状态仍由 open 控制 -->
     {@render header()}
@@ -92,6 +86,7 @@
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
+    overflow-x: hidden; /* 展开内容不得把面板/轨撑宽（宽度恒定） */
     background: rgba(16, 19, 26, 0.94);
     border: 1px solid var(--panel-border);
     border-radius: 12px;
@@ -103,18 +98,6 @@
   .acc.selected {
     border-color: #f0c36a;
     box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
-  }
-  .acc.dragging {
-    visibility: hidden;
-  }
-  .acc.lift {
-    position: fixed;
-    z-index: 200;
-    width: var(--lift-w, 240px);
-    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
-    border-color: rgba(240, 195, 106, 0.7);
-    opacity: 0.95;
-    pointer-events: none;
   }
   .handle {
     position: relative;
@@ -137,7 +120,7 @@
     text-align: left;
   }
   .acc.open .handle {
-    border-bottom: 1px solid var(--panel-border);
+    /* 第十轮：展开不加标题下横线（用户定）；上圆角随开合 */
     border-radius: 12px 12px 0 0;
   }
   .handle:hover:not(:disabled) {

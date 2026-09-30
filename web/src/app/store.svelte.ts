@@ -15,10 +15,15 @@ import {
   DeleteRegionCommand,
   HeightStrokeCommand,
   MultiRegionCommand,
+  type EditCommand,
   RegionFieldsCommand,
   LayersVisibilityCommand,
   LayerStyleCommand,
   AddLayerCommand,
+  RegionsOrderCommand,
+  LayersOrderCommand,
+  CompositeCommand,
+  LayerFieldsCommand,
   SetCenterCommand,
   history,
 } from '../core/history';
@@ -782,8 +787,213 @@ export class EditorStore {
     }
   }
 
-  /** 右键菜单：同父兄弟内上移/下移一层（dir=-1 上移）；图层/元素/路径通用 */
+  /**
+   * 视觉列表（组织模式用，与 UI 渲染同序）：数组**反序**（顶=数组末=叠放高），
+   * 根在前、子递归（子也取视觉序）——与 WorkspaceDrawer/LayersPanel 的 reverse 树一致。
+   */
+  private visualItems(
+    kind: 'layer' | 'region',
+    scope?: string,
+  ): { id: string; parentId: string | undefined }[] {
+    const w = this.world;
+    if (!w) return [];
+    const items =
+      kind === 'layer'
+        ? w.layers.map((l) => ({
+            id: l.id,
+            parentId:
+              l.parentLayerId && w.layers.some((x) => x.id === l.parentLayerId)
+                ? l.parentLayerId
+                : undefined,
+          }))
+        : w.regions
+            .filter((r) => r.layerId === scope)
+            .map((r) => ({
+              id: r.id,
+              parentId:
+                r.parentId && w.regions.some((x) => x.id === r.parentId && x.layerId === scope)
+                  ? r.parentId
+                  : undefined,
+            }));
+    const rev = [...items].reverse();
+    const out: { id: string; parentId: string | undefined }[] = [];
+    const walk = (pid: string | undefined) => {
+      for (const k of rev) {
+        if (k.parentId !== pid) continue;
+        out.push(k);
+        walk(k.id);
+      }
+    };
+    walk(undefined);
+    return out;
+  }
+
+  /** 世界数组把 self 移到 afterId 之后（组织模式的序调整） */
+  private relocateAfter(kind: 'layer' | 'region', selfId: string, afterId: string): void {
+    const w = this.world;
+    if (!w) return;
+    const arr = kind === 'layer' ? (w.layers as { id: string }[]) : (w.regions as { id: string }[]);
+    const from = arr.findIndex((x) => x.id === selfId);
+    if (from < 0) return;
+    const [item] = arr.splice(from, 1);
+    const to = arr.findIndex((x) => x.id === afterId);
+    arr.splice(to < 0 ? arr.length : to + 1, 0, item);
+  }
+
+  /**
+   * 缩进（组织模式）：挂到**视觉上一个元素**的链尾——上一个已有子元素则
+   * 「做它的子元素的子元素，如果还有依次往下」= 沿视觉第一个子下钻到链尾（防环）。
+   * 图层（parentLayerId）/元素（Region.parentId）通用；字段 + 数组序一条组合命令。
+   */
+  indentItem(id: string): void {
+    const w = this.world;
+    if (!w) return;
+    const isLayer = w.layers.some((l) => l.id === id);
+    const kind: 'layer' | 'region' = isLayer ? 'layer' : 'region';
+    const reg = isLayer ? null : w.regions.find((r) => r.id === id);
+    const scope = reg?.layerId;
+    const vis = this.visualItems(kind, scope);
+    const idx = vis.findIndex((x) => x.id === id);
+    if (idx <= 0) {
+      this.status = '已是第一个元素，无处缩进';
+      return;
+    }
+    const prev = vis[idx - 1];
+    // 链尾下钻：视觉第一个子，直到无子（防环：不许回到自己）
+    let tail = prev;
+    for (let guard = 0; guard < 10000; guard++) {
+      const kid = vis.find((x) => x.parentId === tail.id && x.id !== id);
+      if (!kid) break;
+      tail = kid;
+    }
+    if (tail.id === id) return;
+    const layersB = w.layers.map((l) => l.id);
+    const regionsB = w.regions.map((r) => r.id);
+    const children: EditCommand[] = [];
+    if (kind === 'layer') {
+      const l = w.layers.find((x) => x.id === id)!;
+      const beforeParent = l.parentLayerId;
+      l.parentLayerId = tail.id;
+      children.push(
+        new LayerFieldsCommand(
+          [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: tail.id } }],
+          '缩进',
+        ),
+      );
+      this.relocateAfter('layer', id, tail.id);
+      const layersA = w.layers.map((x) => x.id);
+      children.push(new LayersOrderCommand(layersB, layersA, '缩进'));
+      this.touchWorld();
+    } else if (reg) {
+      const beforeParent = reg.parentId;
+      reg.parentId = tail.id;
+      children.push(
+        new RegionFieldsCommand(
+          [{ id, before: { parentId: beforeParent }, after: { parentId: tail.id } }],
+          '缩进',
+        ),
+      );
+      this.relocateAfter('region', id, tail.id);
+      const regionsA = w.regions.map((x) => x.id);
+      children.push(new RegionsOrderCommand(regionsB, regionsA, '缩进'));
+      this.touchRegions();
+    } else return;
+    history.run(w, new CompositeCommand(children, '缩进'), { alreadyApplied: true });
+    this.status = '已缩进（Ctrl+Z 可撤销）';
+  }
+
+  /**
+   * 提升（缩进反向）：成为视觉上一个元素的同级并处其后；**上一个还有父元素则再次提升，
+   * 直到上一个没有父元素**（上溯到最老祖先 anchor → 自己升为根、数组排 anchor 之后）。
+   * 按用户字面解析（中间链式 / 根级多元素）——见设计稿标注，待复核。
+   */
+  unindentItem(id: string): void {
+    const w = this.world;
+    if (!w) return;
+    const isLayer = w.layers.some((l) => l.id === id);
+    const kind: 'layer' | 'region' = isLayer ? 'layer' : 'region';
+    const reg = isLayer ? null : w.regions.find((r) => r.id === id);
+    const scope = reg?.layerId;
+    const vis = this.visualItems(kind, scope);
+    const idx = vis.findIndex((x) => x.id === id);
+    if (idx <= 0) {
+      this.status = '已是第一个元素';
+      return;
+    }
+    const self = vis[idx];
+    if (!self.parentId) {
+      this.status = '已是顶层元素，无处提升';
+      return;
+    }
+    let prev = vis[idx - 1];
+    const parentOf = (pid: string | undefined) => (pid ? vis.find((x) => x.id === pid) : undefined);
+    let guard = 0;
+    while (prev.parentId && guard++ < 10000) {
+      const p = parentOf(prev.parentId);
+      if (!p) break;
+      prev = p;
+    }
+    const anchor = prev; // prev 的最老祖先（无父）——与之同级=根级；排其后
+    if (anchor.id === id) return;
+    const layersB = w.layers.map((l) => l.id);
+    const regionsB = w.regions.map((r) => r.id);
+    const children: EditCommand[] = [];
+    if (kind === 'layer') {
+      const l = w.layers.find((x) => x.id === id)!;
+      const beforeParent = l.parentLayerId;
+      l.parentLayerId = anchor.parentId;
+      children.push(
+        new LayerFieldsCommand(
+          [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: l.parentLayerId } }],
+          '提升',
+        ),
+      );
+      this.relocateAfter('layer', id, anchor.id);
+      const layersA = w.layers.map((x) => x.id);
+      children.push(new LayersOrderCommand(layersB, layersA, '提升'));
+      this.touchWorld();
+    } else if (reg) {
+      const beforeParent = reg.parentId;
+      reg.parentId = anchor.parentId;
+      children.push(
+        new RegionFieldsCommand(
+          [{ id, before: { parentId: beforeParent }, after: { parentId: reg.parentId } }],
+          '提升',
+        ),
+      );
+      this.relocateAfter('region', id, anchor.id);
+      const regionsA = w.regions.map((x) => x.id);
+      children.push(new RegionsOrderCommand(regionsB, regionsA, '提升'));
+      this.touchRegions();
+    } else return;
+    history.run(w, new CompositeCommand(children, '提升'), { alreadyApplied: true });
+    this.status = '已提升（Ctrl+Z 可撤销）';
+  }
+
+  /**
+   * 同父兄弟内上移/下移一层（dir=-1 上移）；图层/元素/路径通用。
+   * 1-b：layers/regions 数组序入栈可撤销（paths 序仍为直改——路径编辑剩余）。
+   */
   moveItemStep(id: string, dir: -1 | 1) {
+    if (!this.world) return;
+    const layersB = this.world.layers.map((l) => l.id);
+    const regionsB = this.world.regions.map((r) => r.id);
+    this.moveItemStepImpl(id, dir);
+    if (!this.world) return;
+    const layersA = this.world.layers.map((l) => l.id);
+    const regionsA = this.world.regions.map((r) => r.id);
+    if (layersB.join('') !== layersA.join('')) {
+      history.run(this.world, new LayersOrderCommand(layersB, layersA, '调整顺序'), {
+        alreadyApplied: true,
+      });
+    } else if (regionsB.join('') !== regionsA.join('')) {
+      history.run(this.world, new RegionsOrderCommand(regionsB, regionsA, '调整顺序'), {
+        alreadyApplied: true,
+      });
+    }
+  }
+
+  private moveItemStepImpl(id: string, dir: -1 | 1) {
     if (!this.world) return;
     // 图层：同父兄弟在 layers 数组中的顺序
     const layer = this.world.layers.find((l) => l.id === id);

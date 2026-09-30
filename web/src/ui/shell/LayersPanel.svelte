@@ -15,7 +15,8 @@
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
-  import { liftTransforms, insertIndex, insertPlan, measureSlot, SLOT, type FlatRow, type RowRect } from './liftDrag';
+  import { measureSlot } from './liftDrag';
+  import OrganizeRow from './OrganizeRow.svelte';
 
   let {
     world,
@@ -23,7 +24,6 @@
     newName = '',
     onSelect,
     onDrawLayer,
-    onDragLayer,
     onAddLayer,
     onNewName,
     onRandomName,
@@ -31,21 +31,20 @@
     onCopyLayer,
     onDeleteLayer,
     expandPanel,
+    taskMode = 'check',
+    onOrganize,
   }: {
     world: World | null;
     focusLayer?: string;
     newName?: string;
+    /** 工作区模式（组织 = 上移/下移/缩进/提升面板，替代已退役的拖动） */
+    taskMode?: 'check' | 'gen' | 'draw' | 'organize';
+    /** 组织四操作（App 转发 store） */
+    onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string) => void;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
     /** 选中（C1：单击只聚焦，不进绘制） */
     onDrawLayer?: (id: string) => void;
-    onDragLayer?: (
-      fromId: string,
-      hint:
-        | { kind: 'nest'; nestFirst?: boolean }
-        | { kind: 'gap'; afterId: string | null }
-        | { kind: 'root' },
-    ) => void;
     onAddLayer?: () => void;
     onNewName?: (v: string) => void;
     onRandomName?: () => void;
@@ -108,7 +107,6 @@
     return out;
   });
 
-  const flatRows = $derived(rows.map((r) => ({ id: r.id, parentId: r.parentId }) as FlatRow));
 
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -125,72 +123,18 @@
     menu = { x: e.clientX, y: e.clientY, items };
   }
 
-  // —— 抬起式拖动 ——
-  let dragId: string | null = $state(null);
-  let dragIndex = -1;
-  let lift = $state<{ x: number; y: number; name: string; emoji: string; visible: boolean } | null>(null);
-  let offsets = $state<number[]>([]);
   let listEl: HTMLElement | undefined = $state();
-  // 行内容（名称换行/改名）变化后统一行高：MutationObserver 稳定触发
+  // 行内容变化后统一行高（等高保留；拖动已退役——2026-09-30 组织模式替代）
   $effect(() => {
     const el = listEl;
     if (!el) return;
-    slot = measureSlot(el);
+    measureSlot(el);
     const mo = new MutationObserver(() => {
-      slot = measureSlot(el);
+      measureSlot(el);
     });
     mo.observe(el, { subtree: true, childList: true, characterData: true });
     return () => mo.disconnect();
   });
-
-  let rectCache: RowRect[] = [];
-  let dragReady = false;
-  let slot = SLOT;
-
-  async function onRowHold(id: string, start: { x: number; y: number }) {
-    dragIndex = rows.findIndex((r) => r.id === id);
-    if (dragIndex < 0) return;
-    slot = measureSlot(listEl);
-    dragId = id;
-    dragReady = false;
-    const row = rows[dragIndex];
-    lift = { x: start.x, y: start.y, name: row.meta.name, emoji: row.meta.emoji, visible: row.visible };
-    offsets = liftTransforms(rows.length, dragIndex, dragIndex, slot);
-    await tick();
-    // 拖动起点缓存行矩形：让位动画的 transform 不反馈进命中
-    rectCache = [];
-    let ci = 0;
-    for (const el of listEl?.querySelectorAll<HTMLElement>('li.cell') ?? []) {
-      const r = el.getBoundingClientRect();
-      rectCache.push({ idx: ci++, top: r.top, bottom: r.bottom });
-    }
-    dragReady = true;
-  }
-
-  function onRowMove(e: PointerEvent) {
-    if (!dragId || !dragReady) return;
-    lift = { x: e.clientX, y: e.clientY, name: lift!.name, emoji: lift!.emoji, visible: lift!.visible };
-    const k = insertIndex(rectCache, dragIndex, 0, e.clientY);
-    offsets = liftTransforms(rows.length, dragIndex, k, slot);
-  }
-
-  function onRowEnd(e: PointerEvent) {
-    if (dragId && dragReady && onDragLayer) {
-      const k = insertIndex(rectCache, dragIndex, 0, e.clientY);
-      const plan = insertPlan(flatRows, dragIndex, k);
-      if (plan.kind === 'nest-first') {
-        onDragLayer(dragId, { kind: 'nest', targetId: plan.targetId, nestFirst: true });
-      } else {
-        onDragLayer(dragId, { kind: 'gap', afterId: plan.afterId });
-      }
-    }
-    dragId = null;
-    dragIndex = -1;
-    lift = null;
-    offsets = [];
-    rectCache = [];
-    dragReady = false;
-  }
 
   function handleSelect(id: string) {
     if (focusLayer === id) {
@@ -231,33 +175,34 @@
         class="cell"
         class:open={focusLayer === row.id}
         data-row-id={row.id}
-        style="transform:translateY({offsets[i] ?? 0}px)"
+        style="padding-left:0"
       >
-        <!-- 第八轮：行按钮自身 = 把手（聚焦行原地展开，不另起 panel 行）；
-             显隐眼睛已移入检查模式展开区（InspectSection） -->
+        <!-- 第八轮：行按钮自身 = 把手（聚焦行原地展开）；显隐眼睛在检查模式展开区 -->
+        <!-- 第十轮：组织模式 = OrganizeRow（上移/下移/缩进/提升，替代拖动） -->
+        {#snippet rowOrg()}
+          <OrganizeRow
+            name={row.meta.name}
+            first={rows[0]?.id === row.id}
+            top={!row.parentId}
+            onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', row.id)}
+            onIndent={() => onOrganize?.('indent', row.id)}
+            onUnindent={() => onOrganize?.('unindent', row.id)}
+          />
+        {/snippet}
         <ItemButton
           logo={row.meta.emoji}
           name={row.meta.name}
           selected={focusLayer === row.id}
-          dragging={dragId === row.id}
           open={focusLayer === row.id}
-          content={focusLayer === row.id ? expandPanel : null}
+          content={focusLayer === row.id ? (taskMode === 'organize' ? rowOrg : expandPanel) : null}
           onClick={() => handleSelect(row.id)}
           onMenu={(e) => openMenu(e, row.id)}
-          onHold={(s) => onRowHold(id, s)}
-          onDragMove={onRowMove}
-          onDragEnd={onRowEnd}
         />
       </li>
     {/each}
       </ul>
     </div>
 
-  {#if lift && dragId}
-    <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
-      <ItemButton lift logo={lift.emoji} name={lift.name} />
-    </div>
-  {/if}
 
   {#if menu}
     <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
@@ -281,8 +226,7 @@
   }
   .create {
     flex: 0 0 auto;
-    padding: 6px 6px 4px;
-    border-bottom: 1px solid var(--panel-border);
+    padding: 4px 2px; /* 与列表同宽；第十轮：去分割线 */
   }
   /* 单列网格：一格 = 一个 ItemButton（与工作区列表同 padding/gap：2026-09-30 紧凑统一） */
   .grid {
@@ -290,7 +234,7 @@
     min-height: 0;
     list-style: none;
     margin: 0;
-    padding: 6px;
+    padding: 2px; /* 第十轮：边距 = 原 1/3（用户定） */
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;
@@ -305,14 +249,5 @@
   /* 第八轮：聚焦行原地展开（li 高度随把手内容自适应；等高机制只测头部） */
   .cell.open {
     height: auto;
-  }
-  .lift {
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: 200;
-    width: 200px;
-    pointer-events: none;
-    transition: transform 0.08s linear;
   }
 </style>

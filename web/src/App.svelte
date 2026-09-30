@@ -166,19 +166,13 @@
     });
   }
 
-  /** 拖拽：nest/gap/root 由编辑器统一处理（显示父子，无包含校验） */
-  function handleLayerDrag(
-    fromId: string,
-    hint:
-      | { kind: 'nest'; targetId: string; nestFirst?: boolean }
-      | { kind: 'gap'; afterId: string | null }
-      | { kind: 'root' },
-  ) {
-    editor.dragLayer(fromId, hint);
-  }
-
-  function handleRegionDrag(fromId: string, hint: import('./core/regionOps').DropHint) {
-    editor.dragRegion(fromId, hint);
+  /** 组织模式四操作（2026-09-30 拖动退役）：上移/下移方向按两面板既有菜单映射
+   *  （图层上移=-1、元素上移=+1——两者数组方向相反，各自验证过） */
+  function organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string) {
+    const isLayer = world?.layers.some((l) => l.id === id) ?? false;
+    if (action === 'indent') editor.indentItem(id);
+    else if (action === 'unindent') editor.unindentItem(id);
+    else editor.moveItemStep(id, action === 'up' ? (isLayer ? -1 : 1) : isLayer ? 1 : -1);
   }
 
   onMount(() => {
@@ -423,7 +417,8 @@
       // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐在检查模式展开区（第八轮）
       editor.focusLayerForDraw(id);
     }}
-    onDragLayer={handleLayerDrag}
+    onOrganize={organize}
+    taskMode={shell.wsMode}
     onAddLayer={() => editor.addLayer()}
     onNewName={(v) => (editor.newName = v)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
@@ -478,7 +473,7 @@
       );
     }}
     onNewName={(n) => (editor.newName = n)}
-    onRegionDrag={handleRegionDrag}
+    onOrganize={organize}
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
   />

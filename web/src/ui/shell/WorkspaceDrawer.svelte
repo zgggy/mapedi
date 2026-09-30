@@ -19,7 +19,8 @@
   import CreateRow from './CreateRow.svelte';
   import CreateBox from './CreateBox.svelte';
   import { ROW_EST, VIRTUAL_MIN, listWindow } from './virtualList';
-  import { liftTransforms, insertIndex, insertPlan, measureSlot, SLOT, type FlatRow, type RowRect } from './liftDrag';
+  import { measureSlot } from './liftDrag';
+  import OrganizeRow from './OrganizeRow.svelte';
 
   let {
     world,
@@ -38,7 +39,7 @@
     onCreateChild,
     onRandomName,
     onNewName,
-    onRegionDrag,
+    onOrganize,
     onMoveItem,
     onCopyItem,
     layerPanel,
@@ -53,7 +54,7 @@
     brushRadius?: number;
     newName?: string;
     /** 工作区三模式（2026-09-30 拍板：检查 / 生成 / 绘制；胶囊已上移至左栏顶） */
-    taskMode?: 'check' | 'gen' | 'draw';
+    taskMode?: 'check' | 'gen' | 'draw' | 'organize';
     onSelect: (id: string | null) => void;
     onDelete: (id: string) => void;
     /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字（仅绘制模式行内显示） */
@@ -63,7 +64,8 @@
     onCreateChild?: (parentId: string) => void;
     onRandomName?: () => void;
     onNewName?: (v: string) => void;
-    onRegionDrag?: (fromId: string, hint: import('../../core/regionOps').DropHint) => void;
+    /** 组织模式四操作（拖动已退役，2026-09-30） */
+    onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string) => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveItem?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
@@ -167,10 +169,6 @@
     walk(roots);
     return out;
   });
-
-  const flatRows = $derived(
-    visibleFlat.map((v) => ({ id: v.node.region.id, parentId: v.node.parentId }) as FlatRow),
-  );
 
   /** 单列网格的全部格：行（ItemButton）+ 展开时的建子行（CreateBox）+ 选中行后的模式展开区（panel） */
   const cells = $derived.by(() => {
@@ -312,107 +310,27 @@
     menu = { x: e.clientX, y: e.clientY, items };
   }
 
-  // —— 抬起式拖动 ——
-  let dragId: string | null = $state(null);
-  let dragIndex = -1;
-  let lift = $state<{ x: number; y: number; name: string; color: string } | null>(null);
-  let offsets = $state<number[]>([]);
-  // 行内容（名称换行/改名）变化后统一行高：MutationObserver 稳定触发
+  // 行内容（名称换行/改名）变化后统一行高：MutationObserver 稳定触发（等高保留；拖动已退役）
   $effect(() => {
     const el = listEl;
     if (!el) return;
-    slot = measureSlot(el);
+    measureSlot(el);
     const mo = new MutationObserver(() => {
-      slot = measureSlot(el);
+      measureSlot(el);
     });
     mo.observe(el, { subtree: true, childList: true, characterData: true });
     return () => mo.disconnect();
   });
 
-  let rectCache: RowRect[] = [];
-  let dragReady = false;
-  let slot = SLOT;
-
-  /** 拖动按格序：行与建子行都占格；可拖的只有行。 */
-  function slotsForDrag(): FlatRow[] {
-    return isFreeLayer
-      ? pathItems.map((p) => ({ id: p.id, parentId: null }))
-      : cells.map((c) => ({ id: c.node.region.id, parentId: c.node.parentId }));
-  }
-  /** 插入语义只看行：格下标 → 行序位（跳过建子行） */
-  function rowPosOf(cellIdx: number): number {
-    if (isFreeLayer) return cellIdx;
-    let n = 0;
-    for (let i = 0; i < cellIdx && i < cells.length; i++) if (cells[i].kind === 'row') n++;
-    return n;
-  }
-  const flatRowList = $derived(
-    isFreeLayer
-      ? pathItems.map((p) => ({ id: p.id, parentId: null }) as FlatRow)
-      : cells.filter((c) => c.kind === 'row').map((c) => ({ id: c.node.region.id, parentId: c.node.parentId }) as FlatRow),
-  );
-
-  async function onRowHold(id: string, start: { x: number; y: number }) {
-    const rows = slotsForDrag();
-    dragIndex = rows.findIndex((r) => r.id === id);
-    if (dragIndex < 0) return;
-    slot = measureSlot(listEl);
-    dragId = id;
-    dragReady = false;
-    const reg = world?.regions.find((x) => x.id === id);
-    const path = world?.paths?.find((x) => x.id === id);
-    lift = {
-      x: start.x,
-      y: start.y,
-      name: reg?.name ?? path?.name ?? id,
-      color: reg?.color ?? path?.color ?? '#888',
-    };
-    offsets = liftTransforms(rows.length, dragIndex, dragIndex, slot);
-    await tick();
-    // 拖动起点缓存行矩形（虚拟窗口之前的行由 windowStart 兜底）
-    rectCache = [];
-    let ci = windowStart();
-    for (const el of listEl?.querySelectorAll<HTMLElement>('li.cell') ?? []) {
-      const r = el.getBoundingClientRect();
-      rectCache.push({ idx: ci++, top: r.top, bottom: r.bottom });
+  // —— 组织模式（2026-09-30 第十轮：替代拖动）——
+  /** 视觉第一个元素（缩进无目标）与顶层判定（提升无目标）；路径无层级 → 两操作禁用 */
+  function organizeFlagsOf(id: string): { first: boolean; top: boolean } {
+    if (isFreeLayer) {
+      return { first: pathItems[0]?.id === id, top: true };
     }
-    dragReady = true;
-  }
-
-  function onRowMove(e: PointerEvent) {
-    if (!dragId || !dragReady || !lift) return;
-    lift = { x: e.clientX, y: e.clientY, name: lift.name, color: lift.color };
-    const rows = slotsForDrag();
-    const k = insertIndex(rectCache, dragIndex, windowStart(), e.clientY);
-    offsets = liftTransforms(rows.length, dragIndex, k, slot);
-  }
-
-  function onRowEnd(e: PointerEvent) {
-    const rows = slotsForDrag();
-    if (dragId && dragReady && onRegionDrag && !isFreeLayer) {
-      const k = insertIndex(rectCache, dragIndex, windowStart(), e.clientY);
-      // 列表 = 叠放反序：显示坐标映射回数组坐标（reverse）再规划插入位置
-      const arr = [...flatRowList].reverse();
-      const dArr = arr.length - 1 - rowPosOf(dragIndex);
-      const kArr = arr.length - rowPosOf(k);
-      onRegionDrag(dragId, insertPlan(arr, dArr, kArr));
-    }
-    dragId = null;
-    dragIndex = -1;
-    lift = null;
-    offsets = [];
-    rectCache = [];
-    dragReady = false;
-  }
-
-  /** 虚拟窗口首行绝对下标（窗口前的行必在指针上方） */
-  function windowStart(): number {
-    return (pathWin?.start ?? vwin?.start ?? 0) as number;
-  }
-
-
-  function offsetOf(i: number): number {
-    return offsets[i] ?? 0;
+    const first = visibleFlat[0]?.node.region.id === id;
+    const r = world?.regions.find((x) => x.id === id);
+    return { first: !!first, top: !r?.parentId };
   }
 </script>
 
@@ -474,7 +392,6 @@
           name={name}
           badge={badge}
           selected={selectedRegionId === id}
-          dragging={dragId === id}
           {open}
           content={body}
           onClick={() => {
@@ -482,9 +399,6 @@
             if (ia && taskMode === 'draw') onPaintValue?.(id, paintValueOf(id, ia));
           }}
           onMenu={(e) => openMenu(e, id)}
-          onHold={(s) => onRowHold(id, s)}
-          onDragMove={onRowMove}
-          onDragEnd={onRowEnd}
         >
           {#snippet control()}
             {#if ia && taskMode === 'draw'}
@@ -511,12 +425,22 @@
           class:open={c.kind === 'row' && selectedRegionId === id}
           data-row-id={c.kind === 'row' ? id : undefined}
           data-kind={c.kind === 'row' ? 'region' : 'create'}
-          style="transform:translateY({offsetOf(i)}px);padding-left:{n.depth * 14}px"
+          style="padding-left:{n.depth * 14}px"
         >
           {#if c.kind === 'row'}
             <!-- 第八轮：行按钮自身 = 把手（原地展开，不另起 panel 行） -->
             {#snippet rowBody()}
-              {#if taskMode === 'draw'}
+              {#if taskMode === 'organize'}
+                {@const flags = organizeFlagsOf(id)}
+                <OrganizeRow
+                  name={n.region.name}
+                  first={flags.first}
+                  top={flags.top}
+                  onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', id)}
+                  onIndent={() => onOrganize?.('indent', id)}
+                  onUnindent={() => onOrganize?.('unindent', id)}
+                />
+              {:else if taskMode === 'draw'}
                 <div class="mpanel">
                   {#if isFreeLayer}
                     <p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p>
@@ -588,7 +512,17 @@
           {#each pathWin ? pathSlice : pathItems as p, i (p.id)}
           <!-- 第八轮：路径行同款把手化（绘制态选中时原地展开曲线编辑提示） -->
           {#snippet pathBody()}
-            {#if taskMode === 'draw'}
+            {#if taskMode === 'organize'}
+              {@const flags = organizeFlagsOf(p.id)}
+              <OrganizeRow
+                name={p.name}
+                first={flags.first}
+                top={flags.top}
+                onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', p.id)}
+                onIndent={() => onOrganize?.('indent', p.id)}
+                onUnindent={() => onOrganize?.('unindent', p.id)}
+              />
+            {:else if taskMode === 'draw'}
               <div class="mpanel"><p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p></div>
             {/if}
           {/snippet}
@@ -597,7 +531,6 @@
             class:open={selectedRegionId === p.id}
             data-row-id={p.id}
             data-kind="path"
-            style="transform:translateY({offsetOf((pathWin?.start ?? 0) + i)}px)"
           >
             {@render itemBtn(
               p.id,
@@ -651,11 +584,6 @@
       {/if}
     </div>
 
-    {#if lift && dragId}
-      <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
-        <ItemButton lift logoColor={lift.color} name={lift.name} />
-      </div>
-    {/if}
 
     {#if menu}
       <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
@@ -681,8 +609,7 @@
   }
   .create {
     flex: 0 0 auto;
-    padding: 6px 6px 4px;
-    border-bottom: 1px solid var(--panel-border);
+    padding: 4px 2px; /* 与列表同宽；第十轮：去分割线 */
   }
   /* 搜索行（按钮态 + 展开态）：默认收起为 🔍 按钮 */
   .filter {
@@ -690,8 +617,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--panel-border);
+    padding: 4px 2px;
   }
   .filter input {
     flex: 1;
@@ -755,7 +681,7 @@
     scrollbar-width: none;
     list-style: none;
     margin: 0;
-    padding: 6px;
+    padding: 2px; /* 第十轮：边距 = 原 1/3（用户定） */
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;
@@ -818,16 +744,7 @@
     margin: 0;
     padding: 8px 10px;
     color: var(--text-dim);
-    font-size: 10px;
-  }
-  .lift {
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: 200;
-    width: 280px;
-    pointer-events: none;
-    transition: transform 0.08s linear;
+    font-size: 11px;
   }
 
   .hint {
