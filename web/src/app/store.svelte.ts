@@ -14,7 +14,7 @@ import {
   CreateRegionCommand,
   DeleteRegionCommand,
   HeightStrokeCommand,
-  PaintCellsCommand,
+  MultiRegionCommand,
   SetCenterCommand,
   history,
 } from '../core/history';
@@ -288,11 +288,11 @@ export class EditorStore {
 
   private paintDirty = false;
   private strokeRegionId: string | null = null;
-  private strokeRegionLayer: string | null = null;
+  /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即发现全部副作用，
+   *  含 replace 剥他人 / split 新建 / flood steal——undo 腐蚀修复的核心，2026-09-30 还债1-①） */
+  private strokeSnap: Map<string, number[]> | null = null;
   /** 提交后需定向失效的件前缀（渲染侧消费；守「全清/补丁」不变量） */
   private pendingPieceInvalidations: string[] = [];
-  private strokeAdd: number[] = [];
-  private strokeRm: number[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private saveEpoch = 0;
   private saveQueue: Promise<void> = Promise.resolve();
@@ -1315,9 +1315,12 @@ export class EditorStore {
     }
   }
 
-  paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): number[] | null {
-    if (!this.world || !this.draw.active) return null;
-    const resolved = resolveDrawTarget(this.world, this.draw);
+    paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): number[] | null {
+      if (!this.world || !this.draw.active) return null;
+      // 笔画开始：在 resolveDrawTarget **之前**拍快照——resolve 可能自动新建元素（行省），
+      // 新建也必须进 created 被撤销捕获
+      if (!this.paintDirty) this.beginStrokeSnap();
+      const resolved = resolveDrawTarget(this.world, this.draw);
     if (!resolved) return null;
     if (resolved === 'height') {
       return this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 ? 'right' : 'left');
@@ -1326,10 +1329,6 @@ export class EditorStore {
     const hits = cellsInBrush(this.world, lon, lat, this.draw.radiusDeg);
     if (!hits.length) return null;
     if (!this.paintDirty) {
-      this.strokeRegionId = resolved.region.id;
-      this.strokeRegionLayer = resolved.region.layerId;
-      this.strokeAdd = [];
-      this.strokeRm = [];
       this.paintDirty = true;
     }
     const lcfg = defaultLayerConfig(resolved.region.layerId);
@@ -1349,14 +1348,7 @@ export class EditorStore {
     });
     if (result.membershipChanges.length) {
       this.selectedRegionId = resolved.region.id;
-      // 记录本 stroke 的增减（撤销/重做 + 提交定向失效都靠它）
-      for (const ch of result.membershipChanges) {
-        if (ch.toElementId === resolved.region.id && !this.strokeAdd.includes(ch.cellId)) {
-          this.strokeAdd.push(ch.cellId);
-        } else if (ch.fromElementId === resolved.region.id && !this.strokeRm.includes(ch.cellId)) {
-          this.strokeRm.push(ch.cellId);
-        }
-      }
+      // 每元素增减不再单独采集：commit 走快照-diff（捕获全部副作用，含 replace/split/steal）
     }
     void placementAllows;
     void ctrl;
@@ -1372,8 +1364,6 @@ export class EditorStore {
     if (!hits.length) return null;
     if (!this.paintDirty) {
       this.strokeRegionId = '__height__';
-      this.strokeAdd = [];
-      this.strokeRm = [];
       this.paintDirty = true;
       this.heightStroke = [];
       this.heightTouched = new Set();
@@ -1423,7 +1413,7 @@ export class EditorStore {
       history.run(w, cmd, { alreadyApplied: true });
       this.heightStroke = null;
       this.strokeRegionId = null;
-      this.strokeRegionLayer = null;
+      this.strokeSnap = null;
       this.paintDirty = false;
       this.markHeightDirty(dirtyIds);
       this.flushHeightRegions(samples);
@@ -1431,45 +1421,79 @@ export class EditorStore {
       this.notify();
       return;
     }
-    const strokeDirty = [...this.strokeAdd, ...this.strokeRm];
-    if (this.world && this.strokeRegionId && (this.strokeAdd.length || this.strokeRm.length)) {
-      history.run(
-        this.world,
-        new PaintCellsCommand(this.strokeRegionId, this.strokeAdd, this.strokeRm, '绘制'),
-        { alreadyApplied: true },
-      );
-    }
-    const committedRegion = this.strokeRegionId;
-    const committedLayer = this.strokeRegionLayer;
+    // 成员笔画提交：快照-diff → 多元素补丁入栈（undo 腐蚀修复：replace/split/steal 副作用一并撤销）
+    const dirty = this.commitStrokeDiff('绘制');
     this.strokeRegionId = null;
-    this.strokeRegionLayer = null;
-    this.strokeAdd = [];
-    this.strokeRm = [];
     this.paintDirty = false;
-    // 归属提交：定向失效本区域件（指纹已废，「全清/补丁」二选一的不变量必须在这里兑现）
-    if (strokeDirty.length) {
+    // 归属提交：**每个被修改的 Region** 逐件定向失效（多元素副作用的件环同样必须补丁，
+    // 「全清/补丁」二选一的不变量在多元素语义下逐件兑现）
+    if (dirty.length) {
       this.touchRegionsIncremental();
-      if (committedLayer && committedRegion) {
-        this.pendingPieceInvalidations.push(`piece:${committedLayer}:${committedRegion}:`);
+      if (this.world) {
+        for (const id of dirty) {
+          const r = this.world.regions.find((x) => x.id === id);
+          if (r) this.pendingPieceInvalidations.push(`piece:${r.layerId}:${r.id}:`);
+        }
       }
     } else {
       this.touchRegions();
     }
   }
 
-  flood(cellId: number) {
-    if (!this.world || !this.draw.active) return;
-    const resolved = resolveDrawTarget(this.world, this.draw);
-    if (!resolved || resolved === 'height') return;
-    const hits = floodFillCells(this.world, cellId, true);
-    const before = new Set(resolved.region.cells);
-    const add = hits.filter((id) => !before.has(id));
-    addCellsToRegion(resolved.region, hits);
-    stealFromSiblings(this.world, resolved.region, hits);
-    if (add.length)
-      history.run(this.world, new PaintCellsCommand(resolved.region.id, add, [], '填充'), {
+  /** 笔画开始：全量 Region.cells 引用快照（写入皆 COW 换数组 → 引用比对即得副作用集） */
+  private beginStrokeSnap() {
+    this.strokeSnap = this.world ? new Map(this.world.regions.map((r) => [r.id, r.cells])) : null;
+  }
+
+  /**
+   * 笔画提交（快照-diff）：捕获本次笔画触碰的**所有** Region——目标、被 replace/steal
+   * 剥 cell 的旁者、splitPolicy/自动建新建的元素——→ MultiRegionCommand 入栈。
+   * 返回被修改的**已存在** Region id（新建元素无旧缓存条目，只需 touch 不需件失效）。
+   */
+  private commitStrokeDiff(label: string): string[] {
+    const snap = this.strokeSnap;
+    this.strokeSnap = null;
+    if (!this.world || !snap) return [];
+    const patches: { id: string; added: number[]; removed: number[] }[] = [];
+    const created: { id: string; region: Region }[] = [];
+    const modified: string[] = [];
+    for (const r of this.world.regions) {
+      const prev = snap.get(r.id);
+      if (prev === undefined) {
+        created.push({ id: r.id, region: r });
+        continue;
+      }
+      if (prev === r.cells) continue;
+      const s0 = new Set(prev);
+      const s1 = new Set(r.cells);
+      const added = r.cells.filter((c) => !s0.has(c));
+      const removed = [...s0].filter((c) => !s1.has(c));
+      if (added.length || removed.length) {
+        patches.push({ id: r.id, added, removed });
+        modified.push(r.id);
+      }
+    }
+    if (patches.length || created.length) {
+      history.run(this.world, new MultiRegionCommand({ patches, created }, label), {
         alreadyApplied: true,
       });
+    }
+    return modified;
+  }
+
+  flood(cellId: number) {
+    if (!this.world || !this.draw.active) return;
+    // 快照-diff（同笔画机制）：resolve 可能自动建元素、steal 会剥同层旁者——全部入补丁
+    this.beginStrokeSnap();
+    const resolved = resolveDrawTarget(this.world, this.draw);
+    if (!resolved || resolved === 'height') {
+      this.strokeSnap = null;
+      return;
+    }
+    const hits = floodFillCells(this.world, cellId, true);
+    addCellsToRegion(resolved.region, hits);
+    stealFromSiblings(this.world, resolved.region, hits);
+    this.commitStrokeDiff('填充');
     this.touchWorld();
     this.status = `洪水填充 ${hits.length} 地块`;
   }

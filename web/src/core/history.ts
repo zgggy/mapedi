@@ -106,6 +106,57 @@ export class PaintCellsCommand implements EditCommand {
   }
 }
 
+/**
+ * 多元素笔画补丁（undo 腐蚀修复，2026-09-30 还债步骤 1-①）。
+ * 一次笔画可能触碰多个 Region（replace 剥他人 cell / splitPolicy 新建拆分元素 /
+ * flood steal 同层互斥），单元素 PaintCellsCommand 会漏记副作用 → 撤销后
+ * 原归属元素永久丢 cell、拆分克隆残留。统一以「每元素增减 + 新建快照」入栈：
+ * 撤销一次 = 全部副作用一并还原；重做 = 提交时刻终态一并重建。
+ */
+export class MultiRegionCommand implements EditCommand {
+  constructor(
+    public spec: {
+      /** 已存在元素的 cells 增减（COW：应用时整表替换） */
+      patches: { id: string; added: number[]; removed: number[] }[];
+      /** 笔画中新建的元素（split/自动建），region = 提交时刻终态 */
+      created: { id: string; region: Region }[];
+    },
+    public label = '绘制',
+  ) {}
+
+  private static applyPatches(world: World, spec: MultiRegionCommand['spec'], dir: 1 | -1) {
+    for (const p of spec.patches) {
+      const r = world.regions.find((x) => x.id === p.id);
+      if (!r) continue;
+      const set = new Set(r.cells);
+      if (dir === 1) {
+        for (const c of p.added) set.add(c);
+        for (const c of p.removed) set.delete(c);
+      } else {
+        // revert：增减互换
+        for (const c of p.added) set.delete(c);
+        for (const c of p.removed) set.add(c);
+      }
+      r.cells = [...set];
+    }
+  }
+
+  apply(world: World): void {
+    MultiRegionCommand.applyPatches(world, this.spec, 1);
+    for (const c of this.spec.created) {
+      if (world.regions.some((x) => x.id === c.id)) continue;
+      world.regions.push({ ...c.region, cells: [...c.region.cells] });
+    }
+  }
+
+  revert(world: World): void {
+    for (const c of this.spec.created) {
+      world.regions = world.regions.filter((x) => x.id !== c.id);
+    }
+    MultiRegionCommand.applyPatches(world, this.spec, -1);
+  }
+}
+
 export class SetCenterCommand implements EditCommand {
   private prev: CellId | undefined;
   constructor(
