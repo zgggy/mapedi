@@ -316,6 +316,12 @@
 - 其下两区恒在：**图层区**（轻区头「📚 图层」+ 列表 + 聚焦行展开区，45% 限高内滚）、**元素区**（区头「工作区 · 层名 + undo/redo」+ 创建/搜索 + 列表 + 选中行展开区）。
 - 把手架构彻底退役：FoldHandle.svelte 物理删除、panels / onToggleExpand 开合链删除（两区不再开合）；WorkspaceDrawer 的 mtabs 行删除（胶囊替代）。
 
+**2026-09-30 第六轮（左栏最终形态，`e2ba164`）**——用户原话要点：胶囊-图层带收起-工作区带收起三块、胶囊与顶栏视图胶囊同一高度、删⊟、两面板框架一模一样（收起=一行/展开=自身成子面板/内容只在自己子面板内滚）、undo/redo=胶囊右侧两个圆钮（同 ⚙）、都展开各占一半、块间有间隔、按钮与把手段同一紧凑样式、统一框架：
+
+- **LeftRail 重写为三块**：toprow（胶囊 segMinW=46 + ⌒↶↷ 圆钮）+ 两 `.pane`（FoldHandle 把手段 + pane-body 子面板）；容器去框、框在各 pane 上以露出 8px 间隔；`flex:1` 实现"都开各半/一开占满/全关只剩行"；开合本地 state + `mapedi.ui.panel.*` 持久化，经 `onState` 回传 App（railState 驱动 C7 railW 与高度标注条件）。
+- **退役**：⊟ 整轨收起与左上圆钮、`shell.railOpen`/`persistRailOpen`、LayersPanel 的 header/胶囊/轻区头/expanded 链、WorkspaceDrawer 头部 undo/redo（留轻身份行）。
+- 实测：胶囊 y=10 与顶栏视图胶囊同高；两 pane 330/330；gap 8；收起 27px；内滚 contained；reload 持久化；console 零错误。
+
 ## 附录 B：开工前置
 
 - **等用户通知**（并发 AI 会话执行完在途操作）后方可开工，顺序 U1 → U2 → U3。
