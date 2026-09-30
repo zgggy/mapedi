@@ -87,13 +87,15 @@
     description?: string;
   }) {
     if (!region) return;
-    if (patch.name) region.name = patch.name;
-    if (patch.color && !region.parentId) region.color = patch.color;
-    if (patch.exclusiveColor !== undefined) region.exclusiveColor = patch.exclusiveColor || undefined;
-    if (patch.description !== undefined)
-      region.attributes = { ...region.attributes, description: patch.description };
-    editor.touchRegions();
-    editor.status = '已保存';
+    // 1-b：经字段快照执行器入栈（改名/描述/颜色可撤销）
+    editor.patchRegions('保存信息', () => {
+      if (patch.name) region.name = patch.name;
+      if (patch.color && !region.parentId) region.color = patch.color;
+      if (patch.exclusiveColor !== undefined) region.exclusiveColor = patch.exclusiveColor || undefined;
+      if (patch.description !== undefined)
+        region.attributes = { ...region.attributes, description: patch.description };
+    });
+    editor.status = '已保存（Ctrl+Z 可撤销）';
   }
 
   function catLabel(c: string) {
@@ -128,24 +130,30 @@
       allyIds={alliesOf(region)}
       onSetSuzerain={(sid) => {
         if (!world) return;
-        if (!setSuzerain(world, region.id, sid)) {
-          editor.status = '无法建立附庸（同层 / 禁止成环）';
-          return;
-        }
-        editor.touchRegions();
-        editor.status = sid ? '已设附庸' : '已解除附庸';
+        // 1-b：外交 attributes 变更经字段快照入栈（可撤销）；失败时无净变化=不入栈
+        let ok = false;
+        editor.patchRegions('外交 · 附庸', () => {
+          ok = setSuzerain(world, region.id, sid);
+        });
+        editor.status = ok
+          ? sid
+            ? '已设附庸（Ctrl+Z 可撤销）'
+            : '已解除附庸（Ctrl+Z 可撤销）'
+          : '无法建立附庸（同层 / 禁止成环）';
       }}
       onToggleEnemy={(oid) => {
         if (!world) return;
-        toggleEnemy(world, region.id, oid);
-        editor.touchRegions();
-        editor.status = '已更新敌对关系';
+        editor.patchRegions('外交 · 敌对', () => {
+          toggleEnemy(world, region.id, oid);
+        });
+        editor.status = '已更新敌对关系（Ctrl+Z 可撤销）';
       }}
       onToggleAlly={(oid) => {
         if (!world) return;
-        toggleAlly(world, region.id, oid);
-        editor.touchRegions();
-        editor.status = '已更新同盟关系';
+        editor.patchRegions('外交 · 同盟', () => {
+          toggleAlly(world, region.id, oid);
+        });
+        editor.status = '已更新同盟关系（Ctrl+Z 可撤销）';
       }}
       onSave={saveElement}
     />

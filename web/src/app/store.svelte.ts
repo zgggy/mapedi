@@ -15,6 +15,10 @@ import {
   DeleteRegionCommand,
   HeightStrokeCommand,
   MultiRegionCommand,
+  RegionFieldsCommand,
+  LayersVisibilityCommand,
+  LayerStyleCommand,
+  AddLayerCommand,
   SetCenterCommand,
   history,
 } from '../core/history';
@@ -910,13 +914,13 @@ export class EditorStore {
     this.status = '已吞并（Ctrl+Z 可撤销）';
   }
 
-  /** 添加自定义图层（可选名称，与工作区创建同一套 header） */
+  /** 添加自定义图层（可选名称，与工作区创建同一套 header）——1-b 命令化 */
   addLayer(name?: string) {
     if (!this.world) return;
     const n = this.world.layers.filter((l) => l.id.startsWith('custom-')).length + 1;
     const id = `custom-${Date.now().toString(36)}`;
     const label = (name ?? this.newName)?.trim() || `图层 ${n}`;
-    this.world.layers.push({
+    const layer = {
       id,
       name: label,
       kind: 'custom',
@@ -925,11 +929,13 @@ export class EditorStore {
       requireAdjacency: false,
       requireCenter: false,
       styleSetId: 'default',
-    });
+    } as World['layers'][number];
+    this.world.layers.push(layer);
+    history.run(this.world, new AddLayerCommand(layer), { alreadyApplied: true });
     this.newName = '';
     this.touchWorld();
     this.focusLayer = id;
-    this.status = `已添加图层「${label}」`;
+    this.status = `已添加图层「${label}」（Ctrl+Z 可撤销）`;
   }
 
   randomLayerName(): string {
@@ -962,17 +968,34 @@ export class EditorStore {
   setLayerStyle(id: string, patch: ElementStylePatch) {
     if (!this.world) return;
     const map = this.world.layerRenderConfig ?? new Map();
-    const cur = resolveLayerStyle(this.world, id);
+    const before = resolveLayerStyle(this.world, id);
     // 只叠局部 patch，不整份回写默认
-    const next = clampElementStyle(patchElementStyle(cur, patch));
+    const next = clampElementStyle(patchElementStyle(before, patch));
     map.set(id, next);
     this.world.layerRenderConfig = map;
+    // 1-b 样式命令化：before/after = 完整样式引用（拖滑块连发会 coalesce 吗——不 coalesce：
+    // 样式是离散 undo 步，逐次可撤；高频由 debounce 在 UI 层收敛）
+    history.run(this.world, new LayerStyleCommand(id, before, next, '显示参数'), {
+      alreadyApplied: true,
+    });
     this.touchRegions();
   }
 
   /** 显示开关：点击图层 box；最多 3 个颜色根树（父+子占 1 名额） */
   toggleLayerVisible(id: string) {
     if (!this.world) return;
+    // 1-b 显隐命令化：整批 id→visible 前后快照（3 树连动/父子链都收敛为一条命令）
+    const visIds = this.world.layers.map((l) => l.id);
+    const visBefore = this.world.layers.map((l) => l.visible);
+    const commitVis = () => {
+      if (!this.world) return;
+      const visAfter = this.world.layers.map((l) => l.visible);
+      if (visBefore.some((v, i) => v !== visAfter[i])) {
+        history.run(this.world, new LayersVisibilityCommand(visIds, visBefore, visAfter, '显隐'), {
+          alreadyApplied: true,
+        });
+      }
+    };
     const layers = this.world.layers;
     const layer = layers.find((l) => l.id === id);
     if (!layer) return;
@@ -1013,7 +1036,8 @@ export class EditorStore {
         }
         if (rootCount > 3) {
           layer.visible = false;
-          // 父链可能被点亮，保持原状即可（不回滚父，避免误关）
+          // 父链可能被点亮，保持原状即可（不回滚父，避免误关）——**净变化入栈**（否则撤销缺账）
+          commitVis();
           this.status = '最多同时显示 3 个图层树（父+子占 1 席）';
           this.notify();
           return;
@@ -1035,7 +1059,41 @@ export class EditorStore {
       }
       this.status = `隐藏「${layer.name || id}」`;
     }
+    commitVis();
     this.touchLayerView();
+  }
+
+  /**
+   * 字段快照执行器（1-b）：fn 前后对全部 Region 浅字段（name/color/exclusiveColor/
+   * attributes/hidden）快照 → diff → 单命令入栈。覆盖「core 直改字段」类操作
+   * （元素保存信息、外交 attributes 等）；cells 不在此域（成员变更走笔画快照-diff）。
+   */
+  patchRegions(label: string, fn: () => void): void {
+    if (!this.world) return;
+    const FIELDS = ['name', 'color', 'exclusiveColor', 'attributes', 'hidden'] as const;
+    type Snap = Record<string, unknown>;
+    const snap = () =>
+      new Map<string, Snap>(
+        this.world!.regions.map((r) => [
+          r.id,
+          Object.fromEntries(FIELDS.map((f) => [f, (r as unknown as Snap)[f]])),
+        ]),
+      );
+    const before = snap();
+    fn();
+    const after = snap();
+    const patches: { id: string; before: Partial<Region>; after: Partial<Region> }[] = [];
+    for (const [id, a] of after) {
+      const b = before.get(id);
+      if (!b) continue;
+      if (FIELDS.some((f) => b[f] !== a[f])) {
+        patches.push({ id, before: b as Partial<Region>, after: a as Partial<Region> });
+      }
+    }
+    if (patches.length) {
+      history.run(this.world, new RegionFieldsCommand(patches, label), { alreadyApplied: true });
+    }
+    this.touchRegions();
   }
 
   setLayerOpacity(id: string, opacity: number) {

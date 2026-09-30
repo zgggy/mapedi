@@ -331,6 +331,99 @@ export class PatchRegionsCommand implements EditCommand {
   }
 }
 
+/** —— 1-b 字段类命令化（2026-09-30，纯数据无闭包——顺带向 1-c 方向） —— */
+
+/**
+ * Region 浅字段补丁（改名/描述/颜色/外交 attributes/显隐等）：before/after 存**引用快照**
+ * （写入皆换新对象/数组 → 旧引用安全），多 region 一条命令。
+ */
+export class RegionFieldsCommand implements EditCommand {
+  constructor(
+    public patches: { id: string; before: Partial<Region>; after: Partial<Region> }[],
+    public label = '编辑',
+  ) {}
+
+  private static assign(world: World, patches: RegionFieldsCommand['patches'], dir: 1 | -1): void {
+    for (const p of patches) {
+      const r = world.regions.find((x) => x.id === p.id);
+      if (!r) continue;
+      Object.assign(r, dir === 1 ? p.after : p.before);
+    }
+  }
+
+  apply(world: World): void {
+    RegionFieldsCommand.assign(world, this.patches, 1);
+  }
+
+  revert(world: World): void {
+    RegionFieldsCommand.assign(world, this.patches, -1);
+  }
+}
+
+/** 图层可见性批量补丁（toggle 可能连动父子三树 → 整批 id→visible 快照最稳；15 层量级） */
+export class LayersVisibilityCommand implements EditCommand {
+  constructor(
+    public ids: string[],
+    public before: (boolean | undefined)[],
+    public after: (boolean | undefined)[],
+    public label = '显隐',
+  ) {}
+
+  private static assign(world: World, ids: string[], vals: (boolean | undefined)[]): void {
+    ids.forEach((id, i) => {
+      const l = world.layers.find((x) => x.id === id);
+      if (l) l.visible = vals[i];
+    });
+  }
+
+  apply(world: World): void {
+    LayersVisibilityCommand.assign(world, this.ids, this.after);
+  }
+
+  revert(world: World): void {
+    LayersVisibilityCommand.assign(world, this.ids, this.before);
+  }
+}
+
+/** 图层样式补丁（layerRenderConfig Map：before/after = 完整 ElementStyle 引用，set 覆盖） */
+export class LayerStyleCommand implements EditCommand {
+  constructor(
+    public layerId: string,
+    public before: unknown,
+    public after: unknown,
+    public label = '显示参数',
+  ) {}
+
+  private static set(world: World, id: string, style: unknown): void {
+    const map = world.layerRenderConfig ?? new Map();
+    if (style) map.set(id, style);
+    else map.delete(id);
+    world.layerRenderConfig = map;
+  }
+
+  apply(world: World): void {
+    LayerStyleCommand.set(world, this.layerId, this.after);
+  }
+
+  revert(world: World): void {
+    LayerStyleCommand.set(world, this.layerId, this.before);
+  }
+}
+
+/** 添加自定义图层（apply push / revert splice；纯数据） */
+export class AddLayerCommand implements EditCommand {
+  constructor(private layer: World['layers'][number], public label = '添加图层') {}
+
+  apply(world: World): void {
+    if (world.layers.some((l) => l.id === this.layer.id)) return;
+    world.layers.push({ ...this.layer });
+  }
+
+  revert(world: World): void {
+    world.layers = world.layers.filter((l) => l.id !== this.layer.id);
+  }
+}
+
 export class History {
   private stack: EditCommand[] = [];
   private redoStack: EditCommand[] = [];
