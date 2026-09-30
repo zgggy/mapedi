@@ -12,7 +12,6 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
   import ItemButton from './ItemButton.svelte';
-  import ExpandPanel from './ExpandPanel.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
@@ -23,7 +22,6 @@
     focusLayer = 'cells',
     newName = '',
     onSelect,
-    onToggleVisible,
     onDrawLayer,
     onDragLayer,
     onAddLayer,
@@ -39,8 +37,6 @@
     newName?: string;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
-    /** 眼睛图标：显隐 */
-    onToggleVisible?: (id: string) => void;
     /** 选中（C1：单击只聚焦，不进绘制） */
     onDrawLayer?: (id: string) => void;
     onDragLayer?: (
@@ -113,14 +109,6 @@
   });
 
   const flatRows = $derived(rows.map((r) => ({ id: r.id, parentId: r.parentId }) as FlatRow));
-
-  /** 行级展开区收起态（第七轮：header 点击=收起；换聚焦层自动重开——逻辑与元素侧一致） */
-  let collapsedFor = $state<string | null>(null);
-  $effect(() => {
-    // 聚焦层变化即视为新的展开（收起只对当次聚焦有效）
-    void focusLayer;
-    collapsedFor = null;
-  });
 
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -234,14 +222,21 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <ul class="grid" role="list" bind:this={listEl} onclick={onBlankClick}>
     {#each rows as row, i (row.id)}
-      <li class="cell" data-row-id={row.id} style="transform:translateY({offsets[i] ?? 0}px)">
+      <li
+        class="cell"
+        class:open={focusLayer === row.id}
+        data-row-id={row.id}
+        style="transform:translateY({offsets[i] ?? 0}px)"
+      >
+        <!-- 第八轮：行按钮自身 = 把手（聚焦行原地展开，不另起 panel 行）；
+             显隐眼睛已移入检查模式展开区（InspectSection） -->
         <ItemButton
-          visible={row.visible}
-          onEye={() => onToggleVisible?.(row.id)}
           logo={row.meta.emoji}
           name={row.meta.name}
           selected={focusLayer === row.id}
           dragging={dragId === row.id}
+          open={focusLayer === row.id}
+          content={focusLayer === row.id ? expandPanel : null}
           onClick={() => handleSelect(row.id)}
           onMenu={(e) => openMenu(e, row.id)}
           onHold={(s) => onRowHold(id, s)}
@@ -249,26 +244,13 @@
           onDragEnd={onRowEnd}
         />
       </li>
-      {#if focusLayer === row.id && expandPanel}
-        <li class="cell panel">
-          <!-- 行级展开区 = 同一 ExpandPanel 单体（第七轮：只换传参；点击 header 收起） -->
-          <ExpandPanel
-            icon={row.meta.emoji}
-            label={row.meta.name}
-            open={collapsedFor !== row.id}
-            onToggle={(v) => (collapsedFor = v ? null : row.id)}
-            title="收起该图层的展开区"
-            content={expandPanel}
-          />
-        </li>
-      {/if}
     {/each}
       </ul>
     </div>
 
   {#if lift && dragId}
     <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
-      <ItemButton lift visible={lift.visible} logo={lift.emoji} name={lift.name} />
+      <ItemButton lift logo={lift.emoji} name={lift.name} />
     </div>
   {/if}
 
@@ -315,10 +297,9 @@
     transition: transform 0.18s ease;
   }
   /* 模式展开区（panel 节点，可变高） */
-  .cell.panel {
+  /* 第八轮：聚焦行原地展开（li 高度随把手内容自适应；等高机制只测头部） */
+  .cell.open {
     height: auto;
-    margin-bottom: 4px;
-    padding-left: 0 !important;
   }
   .lift {
     position: fixed;

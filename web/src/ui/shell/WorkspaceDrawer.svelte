@@ -13,10 +13,8 @@
   import { rebuildHeightIntervalElements } from '../../core/layer/heightElements';
   import { childLayerIdOf } from '../../core/regionOps';
   import { diplomacyBadge } from '../../core/diplomacy';
-  import { defaultLayerVisible } from '../../core/displayCompose';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
-  import ExpandPanel from './ExpandPanel.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import CreateBox from './CreateBox.svelte';
@@ -43,7 +41,6 @@
     onRegionDrag,
     onMoveItem,
     onCopyItem,
-    onToggleHidden,
     layerPanel,
     elementPanel,
     mode = 'plane',
@@ -71,8 +68,6 @@
     onMoveItem?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
     onCopyItem?: (id: string) => void;
-    /** 右键菜单：显隐切换 */
-    onToggleHidden?: (id: string) => void;
     /** 图层树聚焦行下方的模式展开内容（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     layerPanel?: import('svelte').Snippet;
     /** 元素树选中行下方的模式展开内容（检查=InspectSection / 生成=元素级生成占位；绘制=本地绘制参数区） */
@@ -179,12 +174,9 @@
 
   /** 单列网格的全部格：行（ItemButton）+ 展开时的建子行（CreateBox）+ 选中行后的模式展开区（panel） */
   const cells = $derived.by(() => {
-    const acc: { kind: 'row' | 'create' | 'panel'; node: Node }[] = [];
+    const acc: { kind: 'row' | 'create'; node: Node }[] = [];
     for (const v of visibleFlat) {
       acc.push({ kind: 'row', node: v.node });
-      if (selectedRegionId && v.node.region.id === selectedRegionId) {
-        acc.push({ kind: 'panel', node: v.node });
-      }
       if (v.open && v.node.expandable) acc.push({ kind: 'create', node: v.node });
     }
     return acc;
@@ -245,11 +237,6 @@
     paintValues[id] = v;
     handleSelect(id);
     onPaintValue?.(id, v);
-  }
-
-  function layerVisibleOf(layerId: string): boolean {
-    const l = world?.layers.find((x) => x.id === layerId);
-    return l ? (l.visible ?? defaultLayerVisible(l)) : true;
   }
 
   function toggleExpand(id: string) {
@@ -474,17 +461,18 @@
         name: string,
         color: string,
         badge: string,
-        hidden: boolean,
         ia: { lo: number; hi: number; min: number } | null,
+        open: boolean,
+        body: import('svelte').Snippet | null,
       )}
         <ItemButton
-          visible={!hidden && layerVisibleOf(focusLayer)}
-          onEye={() => onToggleHidden?.(id)}
           logoColor={color}
           name={name}
           badge={badge}
           selected={selectedRegionId === id}
           dragging={dragId === id}
+          {open}
+          content={body}
           onClick={() => {
             handleSelect(id);
             if (ia && taskMode === 'draw') onPaintValue?.(id, paintValueOf(id, ia));
@@ -510,29 +498,20 @@
         </ItemButton>
       {/snippet}
 
-      {#snippet cellNode(c: { kind: 'row' | 'create' | 'panel'; node: Node }, i: number)}
+      {#snippet cellNode(c: { kind: 'row' | 'create'; node: Node }, i: number)}
         {@const n = c.node}
         {@const id = n.region.id}
         <li
           class="cell"
           class:create={c.kind === 'create'}
-          class:panel={c.kind === 'panel'}
+          class:open={c.kind === 'row' && selectedRegionId === id}
           data-row-id={c.kind === 'row' ? id : undefined}
-          data-kind={c.kind === 'row' ? 'region' : c.kind}
+          data-kind={c.kind === 'row' ? 'region' : 'create'}
           style="transform:translateY({offsetOf(i)}px);padding-left:{n.depth * 14}px"
         >
           {#if c.kind === 'row'}
-            {@render itemBtn(
-              id,
-              n.region.name,
-              n.region.color,
-              diploBadgeOf(n.region),
-              !!n.region.hidden,
-              intervalAttrs(n.region),
-            )}
-          {:else if c.kind === 'panel'}
-            <!-- 行级展开区 = 同一 ExpandPanel 单体（第七轮：只换传参；header 点击 = 收起 = 取消选中） -->
-            {#snippet panelBody()}
+            <!-- 第八轮：行按钮自身 = 把手（原地展开，不另起 panel 行） -->
+            {#snippet rowBody()}
               {#if taskMode === 'draw'}
                 <div class="mpanel">
                   {#if isFreeLayer}
@@ -562,15 +541,15 @@
                 {@render elementPanel()}
               {/if}
             {/snippet}
-            <ExpandPanel
-              label={n.region.name}
-              open
-              onToggle={(v) => {
-                if (!v) onSelect(null);
-              }}
-              title="收起该元素的展开区"
-              content={panelBody}
-            />
+            {@render itemBtn(
+              id,
+              n.region.name,
+              n.region.color,
+              diploBadgeOf(n.region),
+              intervalAttrs(n.region),
+              selectedRegionId === id,
+              selectedRegionId === id ? rowBody : null,
+            )}
           {:else}
             <div class="create-slot" class:pulse={createPulseParent === id}>
               <CreateBox
@@ -603,14 +582,29 @@
             <li class="v-pad" style="height:{pathWin.padTop}px" aria-hidden="true"></li>
           {/if}
           {#each pathWin ? pathSlice : pathItems as p, i (p.id)}
-            <li
-              class="cell"
-              data-row-id={p.id}
-              data-kind="path"
-              style="transform:translateY({offsetOf((pathWin?.start ?? 0) + i)}px)"
-            >
-              {@render itemBtn(p.id, p.name, p.color, '', !!p.hidden, null)}
-            </li>
+          <!-- 第八轮：路径行同款把手化（绘制态选中时原地展开曲线编辑提示） -->
+          {#snippet pathBody()}
+            {#if taskMode === 'draw'}
+              <div class="mpanel"><p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p></div>
+            {/if}
+          {/snippet}
+          <li
+            class="cell"
+            class:open={selectedRegionId === p.id}
+            data-row-id={p.id}
+            data-kind="path"
+            style="transform:translateY({offsetOf((pathWin?.start ?? 0) + i)}px)"
+          >
+            {@render itemBtn(
+              p.id,
+              p.name,
+              p.color,
+              '',
+              null,
+              selectedRegionId === p.id,
+              taskMode === 'draw' && selectedRegionId === p.id ? pathBody : null,
+            )}
+          </li>
           {/each}
           {#if pathWin}
             <li class="v-pad" style="height:{pathWin.padBottom}px" aria-hidden="true"></li>
@@ -655,7 +649,7 @@
 
     {#if lift && dragId}
       <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
-        <ItemButton lift visible logoColor={lift.color} name={lift.name} />
+        <ItemButton lift logoColor={lift.color} name={lift.name} />
       </div>
     {/if}
 
@@ -730,11 +724,9 @@
     text-align: center;
     padding: 3px 7px;
   }
-  /* 模式展开区（panel 节点，可变高） */
-  .cell.panel {
+  /* 第八轮：选中行原地展开（li 高度随把手内容自适应；等高机制只测头部） */
+  .cell.open {
     height: auto;
-    padding-top: 2px;
-    padding-bottom: 4px;
   }
   .mpanel {
     border: 1px solid var(--panel-border);

@@ -12,6 +12,7 @@
   import EntityInfoBody from './EntityInfoBody.svelte';
   import DisplayStylePanel from './DisplayStylePanel.svelte';
   import { editor } from '../../app/store.svelte';
+  import { defaultLayerVisible } from '../../core/displayCompose';
 
   let {
     world,
@@ -104,6 +105,18 @@
 </script>
 
 <div class="ins">
+  <!-- 显隐开关（第八轮拍板：眼睛从行按钮移入检查模式展开区；临时安置） -->
+  {#if kind === 'element' && region}
+    <button type="button" class="vis-toggle" onclick={() => editor.toggleItemHidden(region.id)}>
+      {region.hidden ? '🚫 已隐藏 · 点击显示' : '👁 显示中 · 点击隐藏'}
+    </button>
+  {:else if kind === 'layer' && layer}
+    <button type="button" class="vis-toggle" onclick={() => editor.toggleLayerVisible(layer.id)}>
+      {(layer.visible ?? defaultLayerVisible(layer))
+        ? '👁 图层显示中 · 点击隐藏'
+        : '🚫 图层已隐藏 · 点击显示'}
+    </button>
+  {/if}
   {#if kind === 'element' && region}
     <EntityInfoBody
       name={region.name}
@@ -201,6 +214,24 @@
   .ins {
     font-size: 12px;
     user-select: none;
+  }
+  /* 显隐开关（把手语言；第八轮：自行按钮移入） */
+  .vis-toggle {
+    display: block;
+    width: 100%;
+    margin: 6px 0 2px;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    padding: 5px 8px;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .vis-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text);
   }
   .sty {
     border-top: 1px solid var(--panel-border);

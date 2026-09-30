@@ -764,9 +764,14 @@ export class EditorStore {
     if (!this.world) return;
     const r = this.world.regions.find((x) => x.id === id);
     if (r) {
-      r.hidden = !r.hidden;
-      this.touchRegions();
-      this.status = r.hidden ? `已隐藏「${r.name}」` : `已显示「${r.name}」`;
+      // 1-b：元素显隐经字段快照入栈（可撤销）；path 分支仍为直改（1-b 剩余）
+      const wasHidden = !!r.hidden;
+      const name = r.name;
+      this.patchRegions(wasHidden ? '显示元素' : '隐藏元素', () => {
+        const cur = this.world!.regions.find((x) => x.id === id);
+        if (cur) cur.hidden = !cur.hidden;
+      });
+      this.status = wasHidden ? `已显示「${name}」（Ctrl+Z 可撤销）` : `已隐藏「${name}」（Ctrl+Z 可撤销）`;
       return;
     }
     const p = (this.world.paths ?? []).find((x) => x.id === id);

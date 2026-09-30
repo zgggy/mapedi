@@ -419,9 +419,8 @@
       }
       editor.selectLayerTop(id);
     }}
-    onToggleVisible={(id) => editor.toggleLayerVisible(id)}
     onDrawLayer={(id) => {
-      // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐只由眼睛开关（用户定）
+      // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐在检查模式展开区（第八轮）
       editor.focusLayerForDraw(id);
     }}
     onDragLayer={handleLayerDrag}
@@ -482,7 +481,6 @@
     onRegionDrag={handleRegionDrag}
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
-    onToggleHidden={(id) => editor.toggleItemHidden(id)}
   />
   {/snippet}
 

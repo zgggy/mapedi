@@ -1,15 +1,13 @@
 <script lang="ts">
   /**
-   * 统一行按钮：眼睛（显隐指示/切换）+ logo（图层 emoji / 元素色块）+ 名称 + 可选简介 + 可选控件。
-   * 所有 ItemButton 等高（40px），单列网格排布；名称换行不省略。
-   * 不可直接拖动：长按 → 背景进度条从左到右填满 → 解锁拖动（onHold / onDragMove / onDragEnd）；
-   * 右键 → onMenu 弹出具体操作。
+   * 行按钮（2026-09-30 第八轮：**把手化手风琴**）——外层 .iacc = 与图层/元素展开把手
+   * 一模一样的样式（圆角框/内边距/字号/悬停）；头部 button 行自身可展开（open+content
+   * 原地长出内容，不在行下另起一块）；**眼睛已移入检查模式展开区**（InspectSection）。
+   * 等高机制按头部 .txt 测量（展开内容不参与）；长按拖动/右键/选中语义不变。
    */
   import type { Snippet } from 'svelte';
 
   let {
-    visible = true,
-    onEye = undefined,
     logo = '',
     logoColor = '',
     name = '',
@@ -19,6 +17,8 @@
     dragging = false,
     lift = false,
     holdMs = 600,
+    open = false,
+    content,
     onClick,
     onDblclick,
     onMenu,
@@ -27,10 +27,6 @@
     onDragEnd,
     control,
   }: {
-    /** 显隐状态：睁眼 = 显示，闭眼 = 隐藏 */
-    visible?: boolean;
-    /** 提供则眼睛可点击切换；缺省仅指示 */
-    onEye?: () => void;
     /** 图层 logo（emoji） */
     logo?: string;
     /** 元素 logo（颜色块） */
@@ -46,6 +42,10 @@
     /** 抬起中的浮动件（整个按钮跟指针） */
     lift?: boolean;
     holdMs?: number;
+    /** 本行展开态（选中/聚焦驱动；open 时原地长出 content） */
+    open?: boolean;
+    /** 展开内容（检查/生成/绘制模式区；缺省 = 纯行不可展开） */
+    content?: Snippet;
     onClick?: (e: MouseEvent) => void;
     onDblclick?: () => void;
     /** 右键菜单（坐标 + 目标） */
@@ -121,12 +121,11 @@
   }
 </script>
 
+<div class="iacc" class:open={open && !!content} class:selected class:dragging class:lift>
 <button
   type="button"
   class="ibtn"
-  class:sel={selected}
   class:dragging
-  class:lift
   class:hold={holding}
   style="--hold-ms:{holdMs}ms"
   onclick={handleClick}
@@ -145,26 +144,6 @@
   }}
 >
   <span class="hold-fill" aria-hidden="true"></span>
-  {#if onEye}
-    <span
-      class="eye no-drag"
-      class:closed={!visible}
-      role="button"
-      tabindex="-1"
-      title={visible ? '隐藏' : '显示'}
-      onclick={(e) => {
-        e.stopPropagation();
-        onEye();
-      }}
-      onpointerdown={(e) => e.stopPropagation()}
-      ondblclick={(e) => e.stopPropagation()}
-      oncontextmenu={(e) => e.stopPropagation()}
-    ><span class="eyeglyph">👁</span></span>
-  {:else}
-    <span class="eye no-drag" class:closed={!visible} title={visible ? '显示中' : '已隐藏'}>
-      <span class="eyeglyph">👁</span>
-    </span>
-  {/if}
   {#if logoColor}
     <span class="logo swatch" style="background:{logoColor}"></span>
   {:else if logo}
@@ -190,43 +169,71 @@
       {@render control()}
     </span>
   {/if}
+  {#if content}
+    <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+  {/if}
 </button>
+{#if open && content}
+  <div class="ibtn-body">{@render content()}</div>
+{/if}
+</div>
 
 <style>
+  /* 把手同款外壳（第八轮：与图层/元素展开把手一模一样的样式语言）：
+     圆角 12 框 / 透明深底 / 悬停微亮 / 选中金边；阴影不逐行（面板级才有） */
+  .iacc {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    background: rgba(16, 19, 26, 0.94);
+    overflow: hidden;
+    user-select: none;
+  }
+  .iacc:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .iacc.selected {
+    border-color: #f0c36a;
+    box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
+  }
+  .iacc.open {
+    background: rgba(16, 19, 26, 0.94);
+  }
+  /* 被拿起来：整行（含框）隐藏，浮动件表示 */
+  .iacc.dragging {
+    visibility: hidden;
+  }
   .ibtn {
     position: relative;
     width: 100%;
     min-width: 0;
-    /* 等高：由列表统一测量设定（容纳最长名称换行） */
+    /* 等高：由列表统一测量设定（按头部 .txt，展开内容不参与） */
     height: var(--ibtn-h, 40px);
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 6px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
+    padding: 5px 8px; /* 把手同款内边距 */
+    border: 0;
+    border-radius: 12px 12px 0 0;
+    background: transparent;
     color: inherit;
     cursor: pointer;
     text-align: left;
-    font: inherit;
+    font-size: 11px;
     overflow: hidden;
     touch-action: none;
     user-select: none;
   }
+  .iacc.open .ibtn {
+    border-bottom: 1px solid var(--panel-border);
+  }
   .ibtn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
   }
-  .ibtn.sel {
-    border-color: #f0c36a;
-    box-shadow: 0 0 0 1px rgba(240, 195, 106, 0.35);
-  }
-  /* 被拿起来：原位留空槽（整钮由浮动件表示） */
-  .ibtn.dragging {
-    visibility: hidden;
-  }
-  /* 抬起中的浮动件：整钮跟指针 */
-  .ibtn.lift {
+  /* 抬起中的浮动件：整行（iacc）跟指针 */
+  .iacc.lift {
     position: fixed;
     z-index: 200;
     width: var(--lift-w, 240px);
@@ -234,6 +241,20 @@
     border-color: rgba(240, 195, 106, 0.7);
     opacity: 0.95;
     pointer-events: none;
+  }
+  /* 展开箭头（把手语言） */
+  .caret {
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--text-dim);
+    padding-left: 2px;
+  }
+  /* 行内展开区（原地长出，非行下另起） */
+  .ibtn-body {
+    border-top: 1px solid var(--panel-border);
+    padding: 6px 8px;
+    font-size: 11px;
+    user-select: text;
   }
   .hold-fill {
     position: absolute;
@@ -246,32 +267,6 @@
   .ibtn.hold .hold-fill {
     width: 100%;
     transition: width var(--hold-ms) linear;
-  }
-  .eye {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border: none;
-    border-radius: 5px;
-    background: transparent;
-    cursor: pointer;
-    padding: 0;
-  }
-  .eye:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  .eyeglyph {
-    font-size: 12px;
-    line-height: 1;
-    display: inline-block;
-    transition: transform 0.15s ease;
-  }
-  .eye.closed .eyeglyph {
-    transform: scaleY(0.28);
-    opacity: 0.55;
   }
   .logo.em {
     flex: 0 0 auto;
