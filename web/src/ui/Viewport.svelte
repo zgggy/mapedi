@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
@@ -59,6 +59,7 @@
     canPaint = false,
     brushRadiusDeg = 1.5,
     highlightRegionId = null,
+    railW = 0,
     roadSegments = [] as { a: number; b: number; pa: LonLat; pb: LonLat }[],
     projection = 'mercator' as ProjectionId,
     projParams,
@@ -82,6 +83,8 @@
     canPaint?: boolean;
     brushRadiusDeg?: number;
     highlightRegionId?: string | null;
+    /** C7 有效视口：左轨遮挡宽度（0 = 无轨/已收起）；选中露出按此避让 */
+    railW?: number;
     roadSegments?: { a: number; b: number; pa: LonLat; pb: LonLat }[];
     projection?: ProjectionId;
     projParams?: ProjectionParams;
@@ -134,6 +137,78 @@
   });
   /** C1 反选：左键按下点（会话外），抬起位移 <4px 才触发 onpick */
   let pickDown: { x: number; y: number } | null = null;
+
+  // —— C7 有效视口（设计稿 §7 / U3）：选中元素落在遮挡区（左轨/底栏）→ 相机平移露出 ——
+  // 仅在 highlightRegionId 变化时判定（untrack 隔离 cam/world 依赖，tween 不回调本 effect）
+  let revealRaf = 0;
+  function tweenReveal(tx: number, ty: number) {
+    cancelAnimationFrame(revealRaf);
+    const fx = cam.x;
+    const fy = cam.y;
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 180);
+      const e = 1 - (1 - k) ** 3; // easeOutCubic
+      cam.x = fx + (tx - fx) * e;
+      cam.y = fy + (ty - fy) * e;
+      requestRender(); // 渲染是命令式驱动：只改 cam 不会自动重绘
+      if (k < 1) revealRaf = requestAnimationFrame(step);
+    };
+    revealRaf = requestAnimationFrame(step);
+  }
+  function revealSelection(id: string | null) {
+    if (!id || !world || !viewportRoot) return;
+    if (drawActive) return; // 绘制会话中相机突移会打断笔画（目标由用户当前手势决定，无需露出）
+    const wpx = viewportRoot.clientWidth;
+    const hpx = viewportRoot.clientHeight;
+    if (wpx < 80 || hpx < 80) return;
+    // 目标中心（投影空间）：region = pcache 质心均值；path = 控制点投影均值
+    let x = 0;
+    let y = 0;
+    let n = 0;
+    const path = world.paths?.find((p) => p.id === id);
+    if (path?.points?.length) {
+      const pp = projParamsOr();
+      for (const ll of path.points) {
+        const c = project(ll, projection, pp);
+        x += c.x;
+        y += c.y;
+        n++;
+      }
+    } else {
+      const r = world.regions.find((q) => q.id === id);
+      if (!r?.cells.length) return;
+      const pc = getProjCache(world, projection, projParamsOr());
+      for (const cid of r.cells) {
+        x += pc.centers[cid * 2];
+        y += pc.centers[cid * 2 + 1];
+        n++;
+      }
+    }
+    if (!n) return;
+    x /= n;
+    y /= n;
+    const drawDx = contentOffsetAt(projection, y, contentOffsetX);
+    const sx = worldToScreenX(x, cam, wpx, drawDx);
+    const sy = worldToScreenY(y, cam, hpx);
+    // 可见区 = 减去左轨（railW）与底部状态栏
+    const L = railW + 16;
+    const R = wpx - 8;
+    const T = 8;
+    const B = hpx - 48;
+    if (sx >= L && sx <= R && sy >= T && sy <= B) return;
+    // 反解相机：sx = (x + drawDx - cam.x) * scale + w/2；sy = -(y - cam.y) * scale + h/2
+    // 只修正越界维度，未遮挡的维度不动（避免多余平移）
+    let tx = cam.x;
+    let ty = cam.y;
+    if (sx < L || sx > R) tx = x + drawDx - ((L + R) / 2 - wpx / 2) / cam.scale;
+    if (sy < T || sy > B) ty = y + ((T + B) / 2 - hpx / 2) / cam.scale;
+    if (tx !== cam.x || ty !== cam.y) tweenReveal(tx, ty);
+  }
+  $effect(() => {
+    const id = highlightRegionId;
+    untrack(() => revealSelection(id));
+  });
   /** 路/航/河：正在绘制的路径控制点 */
   let pathDraft = $state<LonLat[] | null>(null);
   /** 正在拖动的控制点索引 */
@@ -846,6 +921,7 @@
     window.addEventListener('keyup', up);
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(revealRaf);
       ro.disconnect();
       if (dprMq && dprHandler) dprMq.removeEventListener('change', dprHandler);
       canvas.removeEventListener('contextmenu', stopCtx);
@@ -892,7 +968,7 @@
 
 </script>
 
-<div class="viewport-root" class:draw={drawActive && !pathEdit} class:path-edit={pathEdit}>
+<div class="viewport-root" bind:this={viewportRoot} class:draw={drawActive && !pathEdit} class:path-edit={pathEdit}>
   <!-- GL 直绘层：bg/cellsMesh/元素三通道，最底（GL 唯一后端） -->
   <canvas class="gl" bind:this={glCanvas}></canvas>
   {#if mapGlFailed}

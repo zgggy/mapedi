@@ -20,8 +20,13 @@
     seedInput = '1',
     densityInput = 100000,
     shape = null as WorldShape | null,
+    layerId = 'height',
+    layerName = '',
+    layerParams = null as Record<string, number | string | boolean> | null,
     onGenerate,
     onShape,
+    onRegen,
+    onParam,
     onOpenStyle,
   }: {
     generating?: boolean;
@@ -30,13 +35,41 @@
     seedInput?: string;
     densityInput?: number;
     shape?: WorldShape | null;
+    /** 焦点层：height = 整世界生成；有 profile 的层 = 单层再生成（U3-a）；无 profile = 把手禁用 */
+    layerId?: string;
+    layerName?: string;
+    /** 该层 profile 参数（editor.profiles 单源；height 走 shape 走专属面板） */
+    layerParams?: Record<string, number | string | boolean> | null;
     onGenerate: (seed: number, n: number) => void;
     onShape?: (key: keyof WorldShape, value: number | string | boolean) => void;
+    /** 单层再生成（store.regenLayer）：替换该层现有元素 */
+    onRegen?: (layerId: string) => void;
+    /** 单层参数写回（store.setProfileParam，已含草稿防抖持久化） */
+    onParam?: (key: string, value: number | string | boolean) => void;
     /** 层设置把手 → 与行右键菜单「显示参数…」同一个卡片（§4 单源） */
     onOpenStyle?: (x: number, y: number) => void;
   } = $props();
 
   const HOLD_MS = 900;
+  const isHeight = $derived(layerId === 'height');
+  /** 无生成配置的层（cells 网格 / 自定义层 / 路径层走各自语义）→ 把手禁用 */
+  const canGen = $derived(isHeight || (layerParams !== null && Object.keys(layerParams).length > 0));
+
+  /** 非 height 层参数 key 的人话标签（未列出的 key 按原样显示） */
+  const PARAM_LABELS: Record<string, string> = {
+    count: '元素数',
+    fromLayerCount: '聚合源元素数',
+    allowOcean: '允许海上元素',
+    method: '生成方法',
+    scope: '生成范围',
+    pattern: '生成形态',
+    coreSelector: '核心选择',
+    fromLayerId: '源图层',
+  };
+  const PARAM_RANGE: Record<string, { min: number; max: number }> = {
+    count: { min: 1, max: 60 },
+    fromLayerCount: { min: 1, max: 20 },
+  };
 
   const LAND_TIERS: { label: string; v: number }[] = [
     { label: '小', v: 0.08 },
@@ -52,7 +85,8 @@
 
   function fire() {
     if (generating) return;
-    onGenerate(Number(seedInput) || 1, densityInput);
+    if (isHeight) onGenerate(Number(seedInput) || 1, densityInput);
+    else onRegen?.(layerId);
   }
   function genDown() {
     if (generating) return;
@@ -90,7 +124,12 @@
       class="handle"
       class:open={genOpen}
       class:filling
-      title="单击展开参数 · 长按直接生成"
+      disabled={!canGen}
+      title={canGen
+        ? isHeight
+          ? '单击展开参数 · 长按直接生成世界'
+          : `单击展开参数 · 长按重新生成「${layerName}」（替换该层现有元素）`
+        : '该层无生成配置'}
       onpointerdown={genDown}
       onpointerup={genUp}
       onpointerleave={genCancel}
@@ -120,41 +159,89 @@
 
   {#if genOpen}
     <div class="panel">
-      <div class="row">
-        <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
-          <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
-        </label>
-        <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
-        <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 生成</button>
-      </div>
-      {#if shape && onShape}
+      {#if isHeight}
         <div class="row">
-          <label class="sm">大陆占比
-            <span class="tiered">
-              {#each LAND_TIERS as t}
-                <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
-              {/each}
-            </span>
+          <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
+            <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
           </label>
-          <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
+          <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
+          <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 生成</button>
         </div>
+        {#if shape && onShape}
+          <div class="row">
+            <label class="sm">大陆占比
+              <span class="tiered">
+                {#each LAND_TIERS as t}
+                  <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
+                {/each}
+              </span>
+            </label>
+            <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
+          </div>
+          <div class="row">
+            <label class="sm">大陆尺度 <CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度（越大大陆越少越大）" width={90} onInput={(v) => onShape('continentScale', v)} /></label>
+            <label class="sm">海岸破碎 <CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎度（域扭曲）" width={90} onInput={(v) => onShape('coastBreak', v)} /></label>
+            <label class="sm">山脉 <CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={90} onInput={(v) => onShape('mountain', v)} /></label>
+          </div>
+          <div class="row">
+            <label class="sm">细节 <CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={90} onInput={(v) => onShape('detail', v)} /></label>
+            <label class="sm">海床 <CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={90} onInput={(v) => onShape('seaRugged', v)} /></label>
+            <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={90} onInput={(v) => onShape('flatness', v)} /></label>
+          </div>
+          <div class="row">
+            <label class="sm">低纬倾向 <CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬大陆倾向" width={90} onInput={(v) => onShape('latBias', v)} /></label>
+            <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
+          </div>
+        {/if}
+        {#if generating}
+          <div class="prog"><div class="pfill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
+        {/if}
+      {:else}
+        <!-- U3-a：非 height 层 = 单层再生成（genConfigFromParams 单源消费 profile params） -->
         <div class="row">
-          <label class="sm">大陆尺度 <CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度（越大大陆越少越大）" width={90} onInput={(v) => onShape('continentScale', v)} /></label>
-          <label class="sm">海岸破碎 <CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎度（域扭曲）" width={90} onInput={(v) => onShape('coastBreak', v)} /></label>
-          <label class="sm">山脉 <CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={90} onInput={(v) => onShape('mountain', v)} /></label>
+          <span class="title">重新生成「{layerName}」</span>
+          {#if layerParams && onParam}
+            {#each Object.entries(layerParams) as [k, v] (k)}
+              {#if typeof v === 'boolean'}
+                <label class="sm"
+                  ><input
+                    type="checkbox"
+                    checked={v}
+                    onchange={(e) => onParam(k, e.currentTarget.checked)}
+                  /> {PARAM_LABELS[k] ?? k}</label
+                >
+              {:else if typeof v === 'number'}
+                <label class="sm"
+                  >{PARAM_LABELS[k] ?? k}
+                  <input
+                    type="number"
+                    min={PARAM_RANGE[k]?.min ?? 0}
+                    max={PARAM_RANGE[k]?.max ?? 10000}
+                    value={v}
+                    onchange={(e) => {
+                      const r = PARAM_RANGE[k];
+                      const n = Number(e.currentTarget.value);
+                      if (!Number.isNaN(n)) {
+                        onParam(k, r ? Math.max(r.min, Math.min(r.max, n)) : n);
+                      }
+                    }}
+                  /></label
+                >
+              {:else}
+                <label class="sm"
+                  >{PARAM_LABELS[k] ?? k}
+                  <input value={String(v)} onchange={(e) => onParam(k, e.currentTarget.value)} /></label
+                >
+              {/if}
+            {/each}
+            <button type="button" class="primary" onclick={fire}>↻ 重新生成</button>
+          {:else}
+            <span class="hint">该层无生成配置</span>
+          {/if}
         </div>
-        <div class="row">
-          <label class="sm">细节 <CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={90} onInput={(v) => onShape('detail', v)} /></label>
-          <label class="sm">海床 <CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={90} onInput={(v) => onShape('seaRugged', v)} /></label>
-          <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={90} onInput={(v) => onShape('flatness', v)} /></label>
-        </div>
-        <div class="row">
-          <label class="sm">低纬倾向 <CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬大陆倾向" width={90} onInput={(v) => onShape('latBias', v)} /></label>
-          <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
-        </div>
-      {/if}
-      {#if generating}
-        <div class="prog"><div class="pfill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
+        {#if layerParams && onParam}
+          <div class="hint">将替换「{layerName}」现有元素（需命令重构落地后方可撤销）</div>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -285,6 +372,20 @@
   .tiered button.active {
     background: var(--accent, #c9a24a);
     color: #1a1408;
+  }
+  .title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text, #ddd);
+  }
+  .hint {
+    font-size: 10px;
+    color: var(--text-dim, #888);
+    padding: 2px 0;
+  }
+  .handle:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
   .prog {
     position: relative;

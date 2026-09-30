@@ -126,6 +126,52 @@ const ui = $state({
   rev: 0,
 });
 
+// —— 生成参数草稿持久化（U3-b，设计稿 §3.3：localStorage mapedi.ui.gen.*）——
+// 跨刷新保留种子/地块数/各层生成参数；500ms 防抖（胶囊滑动 onInput 连发避免逐帧 stringify）。
+// try/catch = 外部存储尽力而为（隐私模式/配额满时降级为不持久，非掩盖根因）。
+const GEN_DRAFT_KEY = 'mapedi.ui.gen';
+function loadGenDraft() {
+  try {
+    const raw = localStorage.getItem(GEN_DRAFT_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw) as {
+      seedInput?: string;
+      densityInput?: number;
+      profiles?: { layerId: string; params: Record<string, number | string | boolean> }[];
+    };
+    if (typeof d.seedInput === 'string' && d.seedInput) ui.seedInput = d.seedInput;
+    if (typeof d.densityInput === 'number' && d.densityInput > 0) ui.densityInput = d.densityInput;
+    if (Array.isArray(d.profiles)) {
+      for (const saved of d.profiles) {
+        const p = ui.profiles.find((x) => x.layerId === saved.layerId);
+        if (p && saved.params) p.params = { ...p.params, ...saved.params };
+      }
+    }
+  } catch {
+    /* 草稿损坏 → 用默认值 */
+  }
+}
+let genDraftTimer: ReturnType<typeof setTimeout> | null = null;
+function saveGenDraftSoon() {
+  if (genDraftTimer) clearTimeout(genDraftTimer);
+  genDraftTimer = setTimeout(() => {
+    genDraftTimer = null;
+    try {
+      localStorage.setItem(
+        GEN_DRAFT_KEY,
+        JSON.stringify({
+          seedInput: ui.seedInput,
+          densityInput: ui.densityInput,
+          profiles: ui.profiles.map((p) => ({ layerId: p.layerId, params: p.params })),
+        }),
+      );
+    } catch {
+      /* 存储不可用 → 放弃本次持久化 */
+    }
+  }, 500);
+}
+loadGenDraft();
+
 export class EditorStore {
   get rev() { return ui.rev; }
   get projectEpoch() { return ui.projectEpoch; }
@@ -164,9 +210,9 @@ export class EditorStore {
   get genStep() { return ui.genStep; }
   set genStep(v: string) { ui.genStep = v; }
   get seedInput() { return ui.seedInput; }
-  set seedInput(v: string) { ui.seedInput = v; }
+  set seedInput(v: string) { ui.seedInput = v; saveGenDraftSoon(); }
   get densityInput() { return ui.densityInput; }
-  set densityInput(v: number) { ui.densityInput = v; }
+  set densityInput(v: number) { ui.densityInput = v; saveGenDraftSoon(); }
   get densityUnlocked() { return ui.densityUnlocked; }
   set densityUnlocked(v: boolean) { ui.densityUnlocked = v; }
   get focusLayer() { return ui.focusLayer; }
@@ -558,6 +604,7 @@ export class EditorStore {
     this.profiles = this.profiles.map((p) =>
       p.layerId === layerId ? { ...p, params: { ...p.params, [key]: value } } : p,
     );
+    saveGenDraftSoon();
   }
 
   /** height profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_WORLD_SHAPE） */

@@ -277,6 +277,7 @@
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
           workspaceOpen={shell.railOpen}
+          railW={shell.railOpen ? shell.leftW : 0}
           highlightRegionId={draw.active
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}
@@ -427,7 +428,12 @@
         seedInput={editor.seedInput}
         densityInput={editor.densityInput}
         shape={editor.worldShape}
+        layerId={focusLayer}
+        layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
+        layerParams={focusLayer === 'height' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
         onShape={(k, v) => editor.setProfileParam('height', k, v)}
+        onRegen={(id) => editor.regenLayer(id)}
+        onParam={(k, v) => editor.setProfileParam(focusLayer, k, v)}
         onGenerate={(s, n) => {
           bootError = '';
           // 重新生成完成 → 进入球面展示（用户定）
