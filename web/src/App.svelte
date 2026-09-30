@@ -7,7 +7,8 @@
   import { editor } from './app/store.svelte';
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
-  import ViewPanel from './ui/shell/ViewPanel.svelte';
+  import ProjectPanel from './ui/shell/ProjectPanel.svelte';
+  import { clearViewMemory } from './ui/viewMemory';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
   import LayerInfoPanel from './ui/shell/LayerInfoPanel.svelte';
@@ -27,25 +28,26 @@
   let globeSpin = $state(false);
   let projParams = $state(defaultProjParams());
   let fps = $state(0);
+  /** 首启渐现/预热中（Viewport 上报）：只在平面模式存在（球面无预热阶段） */
+  let preparing = $state(false);
   let zoomScale = $state(1);
   let viewFade = $state(1);
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
   let styleLayerId = $state<string | null>(null);
 
-  /** 同级面板：Dock 图标切换；黄框 = 打开 */
+  /** 同级面板：Dock 图标切换；黄框 = 打开。视图面板已退役入顶栏（U1） */
   let panels = $state({
     layers: true,
     workspace: false,
     layerInfo: false,
     style: false,
     elementInfo: false,
-    view: false,
   });
 
   const dockItems = $derived([
-    { id: 'project', icon: '🗃', title: '项目', open: shell.projectOpen },
-    { id: 'view', icon: '🎛️', title: '视图', open: panels.view },
+    // 「项目」面板只剩生成（文件节已迁顶栏世界名菜单）——U2 迁入左轨后随 Dock 一并退役
+    { id: 'project', icon: '🎲', title: '生成', open: shell.projectOpen },
     { id: 'layers', icon: '📚', title: '图层', open: panels.layers },
     { id: 'workspace', icon: '🗂', title: '工作区', open: panels.workspace },
     { id: 'layerInfo', icon: 'ℹ', title: '图层信息', open: panels.layerInfo },
@@ -154,6 +156,9 @@
     if (!editor.projectEpoch) return;
     expandedIds = new Set();
     hover = null;
+    // 换世界：旧世界的取景不得带到新世界（双模式相机记忆的清空时机）
+    clearViewMemory();
+    preparing = true;
   });
 
   $effect(() => {
@@ -191,6 +196,7 @@
           onhover={(h) =>
             (hover = h ? { ...h, elementIds: editor.regionIdsOfCell(h.cellId) } : null)}
           onzoom={(z) => (zoomScale = z)}
+          onwarm={(done) => (preparing = !done)}
           onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
           onradius={(v) => {
             editor.draw = { ...editor.draw, radiusDeg: v };
@@ -220,14 +226,54 @@
   {/if}
 
   <TopBar
+    viewMode={shell.viewMode}
+    onSwitchView={switchView}
+    worldName={world?.meta.name || (world?.meta ? `世界 ${world.meta.seed}` : '未命名世界')}
+    autosaveAt={editor.autosaveAt}
+    onRename={(n) => editor.renameWorld(n)}
+    onExport={(k) => {
+      if (k === 'json') editor.exportJson();
+      else if (k === 'gz') editor.exportGz();
+      else if (k === 'png') {
+        if (exportCanvas && shell.viewMode === 'view-2d') editor.exportPng(exportCanvas);
+        else editor.status = '请切换到平面视图导出 PNG';
+      } else if (k === 'svg') editor.exportSvg?.();
+    }}
+    onImport={async (k, f) => {
+      if (k === 'json') {
+        await editor.importProjectFile(f);
+        if (editor.status.startsWith('已导入')) bootError = '';
+      }
+    }}
+    onClearCache={() => editor.clearAutosave()}
+    {styleId}
+    onStyle={(s) => (styleId = s)}
+    projection={projection}
+    onProjection={(p) => (projection = p as import('./core/project/projections').ProjectionId)}
+    globeShowAxis={globeAxis}
+    globeShowEcliptic={globeEcliptic}
+    globeSpin={globeSpin}
+    globeTilt={editor.climateDraft.axialTiltDeg}
+    globeRotHours={editor.climateDraft.rotationHours}
+    onGlobeShowAxis={(v) => (globeAxis = v)}
+    onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
+    onGlobeSpin={(v) => (globeSpin = v)}
+    onGlobeTilt={(v) => {
+      editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
+    }}
+    onGlobeRotHours={(v) => {
+      editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
+    }}
+  />
+
+  <!-- 生成面板（原项目面板拆出；文件节已迁顶栏）；U2 迁入左轨后退役 -->
+  <ProjectPanel
     bind:open={shell.projectOpen}
-    mapName={world?.meta ? `世界 ${world.meta.seed}` : '未命名世界'}
     generating={editor.generating}
     genProgress={editor.genProgress}
     genStep={editor.genStep}
     seedInput={editor.seedInput}
     densityInput={editor.densityInput}
-    autosaveAt={editor.autosaveAt}
     shape={editor.worldShape}
     onShape={(k, v) => editor.setProfileParam('height', k, v)}
     onGenerate={(s, n) => {
@@ -237,45 +283,6 @@
         switchView('view-globe');
         return r;
       });
-    }}
-    onExport={(k) => {
-      if (k === 'json') editor.exportProject?.();
-      else if (k === 'png') {
-        if (exportCanvas && shell.viewMode === 'view-2d') editor.exportPng(exportCanvas);
-        else editor.status = '请切换到平面视图导出 PNG';
-      }
-      else if (k === 'svg') editor.exportSvg?.();
-    }}
-    onImport={async (k, f) => {
-      if (k === 'json') {
-        await editor.importProjectFile(f);
-        if (editor.status.startsWith('已导入')) bootError = '';
-      }
-    }}
-    onClearCache={() => editor.clearAutosave()}
-  />
-
-  <ViewPanel
-    bind:open={panels.view}
-    viewMode={shell.viewMode}
-    {styleId}
-    globeShowAxis={globeAxis}
-    globeShowEcliptic={globeEcliptic}
-    globeSpin={globeSpin}
-    {projection}
-    onProjection={(p) => (projection = p as import('./core/project/projections').ProjectionId)}
-    globeTilt={editor.climateDraft.axialTiltDeg}
-    globeRotHours={editor.climateDraft.rotationHours}
-    onSwitchView={switchView}
-    onStyle={(s) => (styleId = s)}
-    onGlobeShowAxis={(v) => (globeAxis = v)}
-    onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
-    onGlobeSpin={(v) => (globeSpin = v)}
-    onGlobeTilt={(v) => {
-      editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
-    }}
-    onGlobeRotHours={(v) => {
-      editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
     }}
   />
 
@@ -461,7 +468,16 @@
     }}
   />
 
-  <StatusBar {hover} {status} {fps} zoom={zoomScale} />
+  <StatusBar
+    {hover}
+    {status}
+    error={bootError}
+    {fps}
+    zoom={zoomScale}
+    {preparing}
+    mode={shell.viewMode}
+    autosaveAt={editor.autosaveAt}
+  />
 
   <DisplayStylePanel
     open={panels.style}

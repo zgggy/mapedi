@@ -1559,12 +1559,35 @@ export class EditorStore {
     }
   }
 
-  async exportProject() {
+  /** 导出纯 .mapedi.json（顶栏世界名菜单；.gz 是另一项，见 exportGz） */
+  async exportJson() {
     if (!this.world) return;
-    const { exportProjectGz, exportProjectFile } = await import('../persist/storage');
+    const { exportProjectFile } = await import('../persist/storage');
+    exportProjectFile(this.world);
+    this.status = '已导出 .mapedi.json';
+  }
+
+  /** 导出 .mapedi.json.gz */
+  async exportGz() {
+    if (!this.world) return;
+    const { exportProjectGz } = await import('../persist/storage');
     const ok = await exportProjectGz(this.world).catch(() => false);
-    if (!ok) exportProjectFile(this.world);
-    this.status = ok ? '已导出 .gz' : '已导出项目';
+    this.status = ok ? '已导出 .gz' : '导出 .gz 失败——请改用 .mapedi.json';
+  }
+
+  /**
+   * 世界改名（设计稿 D2）：只写 meta，不碰几何/归属缓存。
+   * **必须显式 scheduleAutosave**——现有保存只被 `cells.length`/`regions.length` 变化触发，
+   * 纯 meta 改动不会自动存盘（ROADMAP 已登记该缺陷）。
+   */
+  renameWorld(name: string) {
+    if (!this.world) return;
+    const v = name.trim();
+    if (!v || v === this.world.meta.name) return;
+    this.world.meta.name = v;
+    this.touchView();
+    this.scheduleAutosave();
+    this.status = `已改名为「${v}」`;
   }
 
   async exportPng(canvas: HTMLCanvasElement | null) {

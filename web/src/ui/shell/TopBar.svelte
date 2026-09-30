@@ -1,210 +1,260 @@
 <script lang="ts">
-  import CapsuleSlider from './CapsuleSlider.svelte';
-  import PanelShell from './PanelShell.svelte';
-  import type { WorldShape } from '../../core/layer/genTypes';
-  import { HARD_MAX_DENSITY } from '../../core/world';
+  /**
+   * 顶栏（设计稿 §2）：三组悬浮件——模式胶囊（居中）· 世界名菜单 · ⚙ 视图设置。
+   * 常驻、不随面板开合变化；所有弹出层挂 body 级（§4 portal），不被面板 overflow 截断。
+   */
+  import ModeCapsule from './ModeCapsule.svelte';
+  import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
+  import ViewSettingsPopover from './ViewSettingsPopover.svelte';
+  import type { ViewMode } from './shell';
 
   let {
-    open = $bindable(false),
-    mapName = '未命名世界',
-    generating = false,
-    genProgress = 0,
-    genStep = '',
-    seedInput = '1',
-    densityInput = 100000,
+    viewMode = 'view-globe',
+    onSwitchView,
+    worldName = '未命名世界',
     autosaveAt = '',
-    shape = null as WorldShape | null,
-    onGenerate,
     onExport,
     onImport,
     onClearCache,
-    onShape,
+    onRename,
+    projection = 'robinson',
+    onProjection,
+    styleId = 'dark',
+    onStyle,
+    globeShowAxis = true,
+    globeShowEcliptic = true,
+    globeSpin = false,
+    globeTilt = 23.4,
+    globeRotHours = 24,
+    onGlobeShowAxis,
+    onGlobeShowEcliptic,
+    onGlobeSpin,
+    onGlobeTilt,
+    onGlobeRotHours,
   }: {
-    open?: boolean;
-    mapName?: string;
-    generating?: boolean;
-    genProgress?: number;
-    genStep?: string;
-    seedInput?: string;
-    densityInput?: number;
+    viewMode?: ViewMode;
+    onSwitchView: (m: ViewMode) => void;
+    worldName?: string;
     autosaveAt?: string;
-    shape?: WorldShape | null;
-    onGenerate: (seed: number, n: number) => void;
-    onExport: (kind: string) => void;
+    onExport: (kind: 'json' | 'gz' | 'png' | 'svg') => void;
     onImport: (kind: string, file: File) => void;
     onClearCache: () => void;
-    onShape?: (key: keyof WorldShape, value: number | string | boolean) => void;
+    onRename: (name: string) => void;
+    projection?: string;
+    onProjection?: (p: string) => void;
+    styleId?: string;
+    onStyle?: (s: string) => void;
+    globeShowAxis?: boolean;
+    globeShowEcliptic?: boolean;
+    globeSpin?: boolean;
+    globeTilt?: number;
+    globeRotHours?: number;
+    onGlobeShowAxis?: (v: boolean) => void;
+    onGlobeShowEcliptic?: (v: boolean) => void;
+    onGlobeSpin?: (v: boolean) => void;
+    onGlobeTilt?: (v: number) => void;
+    onGlobeRotHours?: (v: number) => void;
   } = $props();
 
-  /** 期望大陆占比档位（小/中/大/特大 → 陆地占比） */
-  const LAND_TIERS: { label: string; v: number }[] = [
-    { label: '小', v: 0.08 },
-    { label: '中', v: 0.15 },
-    { label: '大', v: 0.25 },
-    { label: '特大', v: 0.4 },
-  ];
+  // —— 世界名：单击开菜单 / 双击改名（D2）——
+  // 双击 = 两次 click + dblclick：用短延迟区分，避免菜单闪一下又关。
+  let menuPos = $state<{ x: number; y: number } | null>(null);
+  let gearOpen = $state(false);
+  let renaming = $state(false);
+  let draft = $state('');
+  let nameBtn: HTMLButtonElement | undefined = $state();
+  let fileInput: HTMLInputElement | undefined = $state();
+  let clickTimer: ReturnType<typeof setTimeout> | null = null;
 
+  function onNameClick() {
+    if (renaming) return;
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return; // 双击的第二次 click：不排队菜单
+    }
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      const r = nameBtn?.getBoundingClientRect();
+      if (!r) return;
+      gearOpen = false;
+      menuPos = { x: Math.min(r.left, window.innerWidth - 240), y: r.bottom + 6 };
+    }, 180);
+  }
+  function onNameDblClick() {
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+    menuPos = null;
+    gearOpen = false;
+    draft = worldName;
+    renaming = true;
+    queueMicrotask(() => {
+      document.getElementById('world-name-input')?.focus();
+      (document.getElementById('world-name-input') as HTMLInputElement | null)?.select();
+    });
+  }
+  function commitRename() {
+    if (!renaming) return;
+    renaming = false;
+    const v = draft.trim();
+    if (v && v !== worldName) onRename(v);
+  }
+  function cancelRename() {
+    renaming = false;
+    draft = worldName;
+  }
+
+  const menuItems = $derived<MenuItem[]>([
+    ...(autosaveAt ? [{ id: 'autosave', label: `自动保存 ${autosaveAt}`, disabled: true }] : []),
+    { id: 'json', label: '导出 .mapedi.json', action: () => onExport('json') },
+    { id: 'gz', label: '导出 .mapedi.json.gz', action: () => onExport('gz') },
+    { id: 'png', label: '导出 PNG', action: () => onExport('png') },
+    { id: 'svg', label: '导出 SVG', action: () => onExport('svg') },
+    { id: 'import', label: '导入…', action: () => fileInput?.click() },
+    { id: 'clear', label: '清除自动存档', danger: true, action: () => onClearCache() },
+  ]);
 </script>
 
-<PanelShell title="项目 · {mapName}" icon="🗃" {open} side="float" width={320} x={420} y={56} onCollapse={() => (open = false)}>
-  <div class="body">
-    <p class="dim" style="margin:0 0 6px">自动保存 {autosaveAt || '…'}</p>
-          <section>
-            <h3>生成</h3>
-            <div class="row">
-              <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
-                <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
-              </label>
-              <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
-              <button type="button" class="primary" disabled={generating} onclick={() => onGenerate(Number(seedInput) || 1, densityInput)}>🎲 生成</button>
-            </div>
-            {#if shape && onShape}
-              <div class="row">
-                <label class="sm">大陆占比
-                  <span class="tiered">
-                    {#each LAND_TIERS as t}
-                      <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
-                    {/each}
-                  </span>
-                </label>
-                <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
-              </div>
-              <div class="row">
-                <label class="sm">大陆尺度 <CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度（越大大陆越少越大）" width={90} onInput={(v) => onShape('continentScale', v)} /></label>
-                <label class="sm">海岸破碎 <CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎度（域扭曲）" width={90} onInput={(v) => onShape('coastBreak', v)} /></label>
-                <label class="sm">山脉 <CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={90} onInput={(v) => onShape('mountain', v)} /></label>
-              </div>
-              <div class="row">
-                <label class="sm">细节 <CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={90} onInput={(v) => onShape('detail', v)} /></label>
-                <label class="sm">海床 <CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={90} onInput={(v) => onShape('seaRugged', v)} /></label>
-                <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={90} onInput={(v) => onShape('flatness', v)} /></label>
-              </div>
-              <div class="row">
-                <label class="sm">低纬倾向 <CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬大陆倾向" width={90} onInput={(v) => onShape('latBias', v)} /></label>
-                <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
-              </div>
-            {/if}
-            {#if generating}
-              <div class="prog"><div class="fill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
-            {/if}
-          </section>
-          <section>
-            <h3>项目</h3>
-            <div class="row">
-              <button type="button" onclick={() => onExport('json')}>导出</button>
-              <button type="button" onclick={() => onExport('png')}>PNG</button>
-              <button type="button" onclick={() => onExport('svg')}>SVG</button>
-              <label class="file">导入<input type="file" accept=".json,.gz,.mapedi.json.gz" onchange={(e) => { const f = e.currentTarget.files?.[0]; if (f) onImport('json', f); }} /></label>
-              <button type="button" onclick={onClearCache}>清自动存档</button>
-            </div>
-          </section>
+<!-- 模式胶囊：顶栏居中悬浮 -->
+<div class="center">
+  <ModeCapsule value={viewMode} onChange={onSwitchView} />
+</div>
+
+<!-- 世界名 + 视图设置：右端 -->
+<div class="right">
+  <div class="name-wrap">
+    {#if renaming}
+      <input
+        id="world-name-input"
+        class="name-input"
+        bind:value={draft}
+        onblur={commitRename}
+        onkeydown={(e) => {
+          if (e.key === 'Enter') commitRename();
+          else if (e.key === 'Escape') cancelRename();
+        }}
+      />
+    {:else}
+      <button
+        type="button"
+        class="name"
+        bind:this={nameBtn}
+        title="单击菜单 · 双击改名"
+        onclick={onNameClick}
+        ondblclick={onNameDblClick}
+      >
+        🗂 {worldName} ▾
+      </button>
+    {/if}
   </div>
-</PanelShell>
+
+  <div class="gear-wrap">
+    <button
+      type="button"
+      class="gear"
+      aria-label="视图设置"
+      aria-expanded={gearOpen}
+      onclick={() => {
+        gearOpen = !gearOpen;
+        menuPos = null;
+      }}
+    >⚙</button>
+    <ViewSettingsPopover
+      open={gearOpen}
+      onClose={() => (gearOpen = false)}
+      {viewMode}
+      {projection}
+      {onProjection}
+      {styleId}
+      {onStyle}
+      {globeShowAxis}
+      {globeShowEcliptic}
+      {globeSpin}
+      {globeTilt}
+      {globeRotHours}
+      {onGlobeShowAxis}
+      {onGlobeShowEcliptic}
+      {onGlobeSpin}
+      {onGlobeTilt}
+      {onGlobeRotHours}
+    />
+  </div>
+</div>
+
+{#if menuPos}
+  <ContextMenu x={menuPos.x} y={menuPos.y} items={menuItems} onClose={() => (menuPos = null)} />
+{/if}
+
+<input
+  bind:this={fileInput}
+  type="file"
+  accept=".json,.gz,.mapedi.json,.mapedi.json.gz"
+  style="position:fixed;left:-9999px"
+  onchange={(e) => {
+    const f = e.currentTarget.files?.[0];
+    if (f) onImport('json', f);
+    e.currentTarget.value = '';
+  }}
+/>
 
 <style>
-  .top > * {
+  .center {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
     pointer-events: auto;
   }
-  /* 触发区比显示条更大 */
-  /* 显示条：更窄；底色与 panel 相同；边框与其它 panel 一致 */
-  .pill-hit:hover .pill {
-    background: rgba(18, 20, 26, 0.98);
-  }
-  .head .name {
-    font-weight: 600;
-  }
-  .head .dim {
-    color: var(--text-dim);
-    font-size: 11px;
-  }
-  .body .dim {
-    color: var(--text-dim);
-    font-size: 10px;
-    margin: 4px 0 0;
-  }
-  .globe-params {
-    align-items: center;
-  }
-  .tiered {
-    display: inline-flex;
-    gap: 2px;
-    margin-left: 4px;
-  }
-  .tiered button {
-    padding: 1px 7px;
-    font-size: 11px;
-    border: 1px solid var(--border, #333);
-    background: transparent;
-    color: var(--text, #ddd);
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .tiered button.active {
-    background: var(--accent, #c9a24a);
-    color: #1a1408;
-    border-color: var(--accent, #c9a24a);
-  }
-  .body {
-    padding: 0 12px 10px;
-    border-top: 1px solid var(--panel-border);
-    max-height: 40vh;
-    overflow: auto;
-  }
-  section {
-    margin-top: 8px;
-  }
-  h3 {
-    margin: 0 0 4px;
-    font-size: 11px;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    text-align: center;
-  }
-  .row {
+  .right {
+    position: fixed;
+    top: 10px;
+    right: 14px;
+    z-index: 60;
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
-    align-items: center;
-    justify-content: center;
+    pointer-events: auto;
   }
-  .row label {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  .name,
+  .name-input {
+    height: 26px;
+    padding: 0 12px;
+    border-radius: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(10, 12, 18, 0.82);
+    color: var(--text, #ddd);
     font-size: 12px;
-  }
-  .row input[type='number'],
-  .row input:not([type]) {
-    width: 72px;
-  }
-  .row .sm input[type='range'] {
-    width: 80px;
-  }
-  .primary {
-    background: rgba(196, 123, 58, 0.4);
-  }
-  .prog {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 4px;
-    font-size: 11px;
-    color: var(--text-dim);
-    justify-content: center;
-  }
-  .prog .fill {
-    height: 4px;
-    background: #3d9a6a;
-    flex: 1;
-  }
-  .file {
+    line-height: 24px;
     cursor: pointer;
-    padding: 4px 8px;
-    border: 1px dashed var(--panel-border);
-    font-size: 12px;
+    outline: none;
   }
-  .file input {
-    display: none;
+  .name:hover {
+    background: rgba(18, 20, 26, 0.96);
+  }
+  .name-input {
+    width: 180px;
+    cursor: text;
+    border-color: rgba(240, 195, 106, 0.7);
+  }
+  .gear {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(10, 12, 18, 0.82);
+    color: var(--text, #ddd);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .gear:hover {
+    background: rgba(18, 20, 26, 0.96);
+  }
+  .gear-wrap {
+    position: relative;
   }
 </style>

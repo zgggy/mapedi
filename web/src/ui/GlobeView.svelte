@@ -13,6 +13,7 @@
   import { composeShownPieces, isLayerShown } from '../core/displayCompose';
   import { catmullRomPolyline } from '../core/paths';
   import { syncHomeFromClimate, type StarSystem } from '../core/astro';
+  import { viewMemory } from './viewMemory';
 
   let {
     world,
@@ -301,6 +302,13 @@
     controls.maxDistance = 6;
     controls.enablePan = false;
     controls.target.set(0, 0, 0);
+    // 相机记忆（设计稿 §2.1-2）：球面姿态与平面相机互不覆盖
+    if (viewMemory.globe) {
+      const g = viewMemory.globe;
+      camera.position.set(g.pos[0], g.pos[1], g.pos[2]);
+      controls.target.set(g.target[0], g.target[1], g.target[2]);
+      controls.update();
+    }
     // 光照塑形：让高度凸起可读（平行光 + 弱补光）
     const sun = new THREE.DirectionalLight(0xffffff, 1.15);
     sun.position.set(2.2, 1.6, 2.6);
@@ -345,6 +353,12 @@
       cancelAnimationFrame(anim);
       clearTimeout(rebuildTimer);
       ro.disconnect();
+      const p = camera.position;
+      const t = controls.target;
+      viewMemory.globe = {
+        pos: [p.x, p.y, p.z],
+        target: [t.x, t.y, t.z],
+      };
       controls.dispose();
       renderer.dispose();
     };

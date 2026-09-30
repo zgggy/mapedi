@@ -49,6 +49,7 @@
   import { resolveLayerStyle } from '../core/layer/config';
   import { editor } from '../app/store.svelte';
   import { MapGlRenderer } from '../render/gl/mapRenderer';
+  import { viewMemory } from './viewMemory';
 
   let {
     world,
@@ -65,6 +66,7 @@
     workspaceOpen = false,
     onhover,
     onzoom,
+    onwarm,
     onpaint,
     onradius,
     onstrokeend,
@@ -88,6 +90,8 @@
     onhover?: (info: HoverInfo | null) => void;
     /** 缩放级别（cam.scale / 默认 180）→ 状态栏显示 */
     onzoom?: (zoom: number) => void;
+    /** 首启渐现/预热状态（true = 已完成）：状态栏据此显示「预热中…」而非误导性的低帧率 */
+    onwarm?: (done: boolean) => void;
     /** 渲染后端：gpu = GL 直绘（bg/cellsMesh/元素三通道，相机 uniform 逐帧直绘） */
     onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => number[] | null;
     onradius?: (v: number) => void;
@@ -105,7 +109,8 @@
   let glCanvas: HTMLCanvasElement;
   let overlay: HTMLCanvasElement;
   let viewportRoot: HTMLDivElement;
-  let cam: Camera = $state(defaultCamera());
+  // 相机记忆（设计稿 §2.1-2）：两个视图互斥挂载，切走即卸载 → 视角存组件外的模块单例
+  let cam: Camera = $state(viewMemory.plane?.cam ?? defaultCamera());
   let hoverId: number | null = $state(null);
   let panning = false;
   let painting = false;
@@ -113,9 +118,14 @@
   let spaceDown = false;
   let lastX = 0;
   let lastY = 0;
-  /** 右键拖动：地图内容相对于矩形的偏移 */
-  let contentOffsetX = $state(0);
+  /** 右键拖动：地图内容相对于矩形的偏移（右键拖动 = 构图摆放，与中键改相机是两个概念，C2） */
+  let contentOffsetX = $state(viewMemory.plane?.contentOffsetX ?? 0);
   let panningMode: 'cam' | 'content' | null = null;
+
+  // 每次相机/内容偏移变化即回写（视图卸载前的最后一次回写即记忆）
+  $effect(() => {
+    viewMemory.plane = { cam, contentOffsetX };
+  });
   /** 路/航/河：正在绘制的路径控制点 */
   let pathDraft = $state<LonLat[] | null>(null);
   /** 正在拖动的控制点索引 */
@@ -644,9 +654,15 @@
   let warmDone = false;
   function scheduleWarm() {
     warmDone = false;
+    onwarm?.(false);
     clearTimeout(warmTimer);
     warmTimer = setTimeout(() => {
-      if (!canvas || !world.cells.length) return;
+      if (!canvas || !world.cells.length) {
+        // 没有可预热的内容 = 不在预热（否则状态栏会永远停在「预热中…」）
+        warmDone = true;
+        onwarm?.(true);
+        return;
+      }
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       const dpr = window.devicePixelRatio || 1;
@@ -670,6 +686,7 @@
         (pieces) => gl?.prime(pieces),
         () => {
           warmDone = true;
+          onwarm?.(true);
           requestRender();
         },
       );

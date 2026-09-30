@@ -161,6 +161,12 @@ export interface WorldMeta {
   cellCount: number;
   formatVersion: number;
   createdAt: number;
+  /**
+   * 世界名（顶栏双击改名，2026-09-30 D2）。可选：旧档/新世界可无——
+   * UI 回退显示 `世界 {seed}`。序列化与反序列化都是 `{...world.meta}` 展开，
+   * 加字段自动往返，无需改管线。
+   */
+  name?: string;
 }
 
 /** 行星/气候参数（可调，影响环境/植物/动物生成） */

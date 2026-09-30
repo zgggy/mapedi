@@ -1,33 +1,68 @@
 <script lang="ts">
+  /**
+   * 状态栏三分区（设计稿 §5）：
+   *   [ 上下文提示 / 操作反馈 / 错误(红) ] [ 悬停数据 ] [ 模式 · 缩放 · FPS · 已存时间 ]
+   *  左：随事件变化            中：悬停才显示      右：固定仪表
+   */
+  import type { ViewMode } from './shell';
+
   let {
     hover = null,
     status = '',
+    error = '',
     fps = 0,
     zoom = 1,
+    preparing = false,
+    mode = 'view-globe',
+    autosaveAt = '',
   }: {
     hover?: { cellId: number; lon: number; lat: number; height: number; elementIds?: string[] } | null;
     status?: string;
+    /** 结构化错误（启动/导入失败等）：红色显示，优先于普通状态 */
+    error?: string;
     fps?: number;
     /** 缩放级别（相对默认视野的倍率） */
     zoom?: number;
-    /** 渲染后端标识（gpu / canvas） */
+    /** 首启渐现/预热中：不显示会误导的低帧率 */
+    preparing?: boolean;
+    mode?: ViewMode;
+    autosaveAt?: string;
   } = $props();
+
+  const modeLabel = $derived(mode === 'view-2d' ? '✏️ 平面' : '🌐 球面');
 </script>
 
 <div class="pill">
-  {#if hover}
-    <span>#{hover.cellId}</span>
-    <span>{hover.lon.toFixed(1)}°,{hover.lat.toFixed(1)}°</span>
-    <span class="h">高度 {hover.height.toFixed(3)}</span>
-    <span class="dim">{hover.height > 0 ? '陆地' : hover.height === 0 ? '海平面' : '海洋'}</span>
-    {#if hover.elementIds?.length}
-      <span class="el" title={hover.elementIds.join(' ')}>🧩 {hover.elementIds.join(' ')}</span>
+  <!-- 左：上下文 / 反馈 / 错误 -->
+  <span class="zone left" class:err={!!error}>{error || status}</span>
+
+  <!-- 中：悬停数据 -->
+  <span class="zone mid">
+    {#if hover}
+      <span>#{hover.cellId}</span>
+      <span>{hover.lon.toFixed(1)}°,{hover.lat.toFixed(1)}°</span>
+      <span class="h">高度 {hover.height.toFixed(3)}</span>
+      <span class="dim">{hover.height > 0 ? '陆地' : hover.height === 0 ? '海平面' : '海洋'}</span>
+      {#if hover.elementIds?.length}
+        <span class="el" title={hover.elementIds.join(' ')}>🧩 {hover.elementIds.join(' ')}</span>
+      {/if}
     {/if}
-  {/if}
-  <span class="st">{status}</span>
-  <span class="be gpu">GPU</span>
-  <span class="dim">×{zoom.toFixed(2)}</span>
-  <span class="fps">{fps}</span>
+  </span>
+
+  <!-- 右：固定仪表 -->
+  <span class="zone right">
+    <span class="be mode">{modeLabel}</span>
+    <span class="dim">×{zoom.toFixed(2)}</span>
+    {#if preparing && mode === 'view-2d'}
+      <span class="be warm">预热中…</span>
+    {:else}
+      <span class="fps">{fps} FPS</span>
+    {/if}
+    {#if autosaveAt}
+      <span class="be saved" title="自动保存时间">已存 {autosaveAt}</span>
+    {/if}
+    <span class="be gpu">GPU</span>
+  </span>
 </div>
 
 <style>
@@ -38,7 +73,7 @@
     transform: translateX(-50%);
     z-index: 55;
     display: flex;
-    gap: 10px;
+    gap: 12px;
     align-items: center;
     height: 26px;
     padding: 0 14px;
@@ -46,16 +81,38 @@
     background: rgba(10, 12, 18, 0.85);
     border: 1px solid var(--panel-border);
     border-radius: 13px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
-  .st {
-    flex: 1;
+  .zone {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .left {
+    flex: 0 1 auto;
+    max-width: 34vw;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 40vw;
+    color: var(--text-dim);
+  }
+  .left.err {
+    color: #f0a0a0;
+    font-weight: 600;
+  }
+  .mid {
+    flex: 1 1 auto;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .right {
+    flex: 0 0 auto;
+    justify-content: flex-end;
   }
   .el {
-    max-width: 22vw;
+    max-width: 20vw;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -63,13 +120,24 @@
     opacity: 0.9;
   }
   .be {
-    opacity: 0.75;
+    opacity: 0.8;
     font-size: 11px;
   }
-  .be.gpu {
+  .be.gpu,
+  .be.mode {
     color: var(--accent, #7ec8ff);
   }
+  .be.warm {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .be.saved {
+    color: var(--text-dim);
+  }
   .fps {
+    color: var(--text-dim);
+  }
+  .dim {
     color: var(--text-dim);
   }
 </style>
