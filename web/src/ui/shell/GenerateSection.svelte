@@ -1,15 +1,18 @@
 <script lang="ts">
   /**
-   * 段4 低频折叠区（设计稿 §3.3 / C8）：`[生成 ▾]` + `[层设置 ▾]` 两条把手。
+   * 段4 低频折叠区（C8 / 2026-09-30 重排）：`[生成 ▾]` + `[显示 ▾]` 两条把手（FoldHandle 单源样式）。
    *
-   * **生成把手 = 长按进度（D5，2026-09-29 拍板）**：
-   * - **单击** = 展开/收起参数子面板（轨内嵌，非浮窗）
-   * - **按住** = 进度从左到右填满 → 满格**直接触发生成**（当前参数）；松手未满 = 取消
-   * - 无确认对话框；键盘 Enter = 触发生成（a11y 等价路径）
+   * **生成 = 针对焦点层的三层语义（2026-09-30 需求）**：
+   * - cells 地块层 → 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
+   * - height 高度层 → 「生成高度图」：只重跑地形 + 海陆删旧建新（onRegen('height')）
+   * - 其他有 profile 的层 → 单层再生成（onRegen(layerId)；count 等 params 类型化控件）
+   * - 路径类/无 profile → 把手禁用（生成方法待设计）
+   * **显示把手** = 与行右键菜单「显示参数…」同一卡片（§4 单源，锚在把手处）。
    *
-   * 内容自原项目面板「生成」节整体迁入（U2 分期修订：生成入口不许有空窗）。
+   * 把手 = FoldHandle（D5 长按语义：单击开合 · 长按 900ms 满格直接触发 · 未满松手=开合）。
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
+  import FoldHandle from './FoldHandle.svelte';
   import type { WorldShape } from '../../core/layer/genTypes';
   import { HARD_MAX_DENSITY } from '../../core/world';
 
@@ -28,6 +31,8 @@
     onRegen,
     onParam,
     onOpenStyle,
+    styleOpen = false,
+    mode = 'plane',
   }: {
     generating?: boolean;
     genProgress?: number;
@@ -35,25 +40,34 @@
     seedInput?: string;
     densityInput?: number;
     shape?: WorldShape | null;
-    /** 焦点层：height = 整世界生成；有 profile 的层 = 单层再生成（U3-a）；无 profile = 把手禁用 */
+    /** 焦点层：cells=重新撒点；height=生成高度图；有 profile 的层=单层再生成；其余禁用 */
     layerId?: string;
     layerName?: string;
-    /** 该层 profile 参数（editor.profiles 单源；height 走 shape 走专属面板） */
+    /** 该层 profile 参数（editor.profiles 单源） */
     layerParams?: Record<string, number | string | boolean> | null;
+    /** 整世界重建（仅 cells 层走此入口） */
     onGenerate: (seed: number, n: number) => void;
     onShape?: (key: keyof WorldShape, value: number | string | boolean) => void;
-    /** 单层再生成（store.regenLayer）：替换该层现有元素 */
+    /** 单层再生成（store.regenLayer；height 会连带删旧建新海陆） */
     onRegen?: (layerId: string) => void;
     /** 单层参数写回（store.setProfileParam，已含草稿防抖持久化） */
     onParam?: (key: string, value: number | string | boolean) => void;
-    /** 层设置把手 → 与行右键菜单「显示参数…」同一个卡片（§4 单源） */
+    /** 显示把手 → 与行右键菜单「显示参数…」同一个卡片（§4 单源） */
     onOpenStyle?: (x: number, y: number) => void;
+    styleOpen?: boolean;
+    /** globe = 球面纯展示：隐藏生成把手（只留显示把手） */
+    mode?: 'plane' | 'globe';
   } = $props();
 
   const HOLD_MS = 900;
+  const isCells = $derived(layerId === 'cells');
   const isHeight = $derived(layerId === 'height');
-  /** 无生成配置的层（cells 网格 / 自定义层 / 路径层走各自语义）→ 把手禁用 */
-  const canGen = $derived(isHeight || (layerParams !== null && Object.keys(layerParams).length > 0));
+  const isPath = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
+  /** 生成把手可用性：cells/height 恒可用；其他层需有 profile params（路径类待设计=禁用） */
+  const canGen = $derived(isCells || isHeight || (layerParams !== null && Object.keys(layerParams).length > 0));
+  const genLabel = $derived(
+    isCells ? '重新撒点' : isHeight ? '生成高度图' : isPath ? '生成（待设计）' : `生成「${layerName}」`,
+  );
 
   /** 非 height 层参数 key 的人话标签（未列出的 key 按原样显示） */
   const PARAM_LABELS: Record<string, string> = {
@@ -71,107 +85,63 @@
     fromLayerCount: { min: 1, max: 20 },
   };
 
-  const LAND_TIERS: { label: string; v: number }[] = [
-    { label: '小', v: 0.08 },
-    { label: '中', v: 0.15 },
-    { label: '大', v: 0.25 },
-    { label: '特大', v: 0.4 },
-  ];
-
   let genOpen = $state(false);
-  let filling = $state(false);
-  let filled = $state(false);
-  let holdTimer: ReturnType<typeof setTimeout> | null = null;
 
   function fire() {
-    if (generating) return;
-    if (isHeight) onGenerate(Number(seedInput) || 1, densityInput);
+    if (generating || !canGen || mode !== 'plane') return;
+    if (isCells) onGenerate(Number(seedInput) || 1, densityInput);
     else onRegen?.(layerId);
-  }
-  function genDown() {
-    if (generating) return;
-    filling = true;
-    filled = false;
-    holdTimer = setTimeout(() => {
-      filled = true;
-    }, HOLD_MS);
-  }
-  function genUp() {
-    if (holdTimer) {
-      clearTimeout(holdTimer);
-      holdTimer = null;
-    }
-    const didFill = filled;
-    filling = false;
-    filled = false;
-    if (didFill) fire();
-    else genOpen = !genOpen;
-  }
-  function genCancel() {
-    if (holdTimer) {
-      clearTimeout(holdTimer);
-      holdTimer = null;
-    }
-    filling = false;
-    filled = false;
   }
 </script>
 
 <div class="wrap">
   <div class="handles">
-    <button
-      type="button"
-      class="handle"
-      class:open={genOpen}
-      class:filling
-      disabled={!canGen}
-      title={canGen
-        ? isHeight
-          ? '单击展开参数 · 长按直接生成世界'
-          : `单击展开参数 · 长按重新生成「${layerName}」（替换该层现有元素）`
-        : '该层无生成配置'}
-      onpointerdown={genDown}
-      onpointerup={genUp}
-      onpointerleave={genCancel}
-      onpointercancel={genCancel}
-      oncontextmenu={(e) => e.preventDefault()}
-      onkeydown={(e) => {
-        // 键盘可达（a11y 等价路径）：Enter = 触发生成；空格 = 展开/收起参数
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          fire();
-        } else if (e.key === ' ') {
-          e.preventDefault();
-          genOpen = !genOpen;
-        }
-      }}
-    >
-      <span class="fill" style="transition-duration:{HOLD_MS}ms"></span>
-      <span class="lb">🎲 生成 {genOpen ? '▾' : '▸'}</span>
-    </button>
-    <button
-      type="button"
-      class="handle"
+    {#if mode === 'plane'}
+      <FoldHandle
+        icon="🎲"
+        label={genLabel}
+        title={canGen
+          ? isCells
+            ? '单击展开参数 · 长按重新撒点（重建整个世界）'
+            : isHeight
+              ? '单击展开参数 · 长按重跑地形（海陆删旧建新）'
+              : `单击展开参数 · 长按重新生成「${layerName}」（替换该层现有元素）`
+          : isPath
+            ? '该层生成方法待设计（不以 cell 为单元）'
+            : '该层无生成配置'}
+        open={genOpen}
+        onToggle={(v) => (genOpen = v)}
+        disabled={!canGen}
+        holdMs={HOLD_MS}
+        onFire={fire}
+      />
+    {/if}
+    <FoldHandle
+      icon="🎨"
+      label="显示"
       title="该层显示参数（与行右键菜单同一卡片）"
-      onclick={(e) => onOpenStyle?.(e.clientX, e.clientY)}
-    >🎨 层设置 ▸</button>
+      open={styleOpen}
+      onToggle={(_v, e) => onOpenStyle?.(e.clientX, e.clientY)}
+    />
   </div>
 
-  {#if genOpen}
+  {#if genOpen && canGen}
     <div class="panel">
-      {#if isHeight}
+      {#if isCells}
+        <!-- 地块层 = 重新撒点（原「总生成」语义归位到地块层） -->
         <div class="row">
           <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
             <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
           </label>
           <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
-          <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 生成</button>
+          <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 重新撒点</button>
         </div>
+        <div class="hint">撒点将重建整个世界（高度、海陆及所有图层元素）</div>
         {#if shape && onShape}
           <div class="row">
             <label class="sm">大陆占比
               <span class="tiered">
-                {#each LAND_TIERS as t}
+                {#each [{ label: '小', v: 0.08 }, { label: '中', v: 0.15 }, { label: '大', v: 0.25 }, { label: '特大', v: 0.4 }] as t}
                   <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
                 {/each}
               </span>
@@ -193,11 +163,41 @@
             <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
           </div>
         {/if}
-        {#if generating}
-          <div class="prog"><div class="pfill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
+      {:else if isHeight}
+        <!-- 高度层 = 生成高度图（同参重跑；海陆元素随之删旧建新） -->
+        <div class="row">
+          <span class="title">生成高度图「{layerName}」</span>
+          <button type="button" class="primary" disabled={generating} onclick={fire}>⛰️ 生成高度图</button>
+        </div>
+        <div class="hint">按下方地形参数重跑地形（种子不变 = 同参同果）；海陆元素删旧建新</div>
+        {#if shape && onShape}
+          <div class="row">
+            <label class="sm">大陆占比
+              <span class="tiered">
+                {#each [{ label: '小', v: 0.08 }, { label: '中', v: 0.15 }, { label: '大', v: 0.25 }, { label: '特大', v: 0.4 }] as t}
+                  <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
+                {/each}
+              </span>
+            </label>
+            <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
+          </div>
+          <div class="row">
+            <label class="sm">大陆尺度 <CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度（越大大陆越少越大）" width={90} onInput={(v) => onShape('continentScale', v)} /></label>
+            <label class="sm">海岸破碎 <CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎度（域扭曲）" width={90} onInput={(v) => onShape('coastBreak', v)} /></label>
+            <label class="sm">山脉 <CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={90} onInput={(v) => onShape('mountain', v)} /></label>
+          </div>
+          <div class="row">
+            <label class="sm">细节 <CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={90} onInput={(v) => onShape('detail', v)} /></label>
+            <label class="sm">海床 <CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={90} onInput={(v) => onShape('seaRugged', v)} /></label>
+            <label class="sm">平整 <CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率（越大地面越贴海平面）" width={90} onInput={(v) => onShape('flatness', v)} /></label>
+          </div>
+          <div class="row">
+            <label class="sm">低纬倾向 <CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬大陆倾向" width={90} onInput={(v) => onShape('latBias', v)} /></label>
+            <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
+          </div>
         {/if}
       {:else}
-        <!-- U3-a：非 height 层 = 单层再生成（genConfigFromParams 单源消费 profile params） -->
+        <!-- 其他有 profile 的层 = 单层再生成（genConfigFromParams 单源消费 profile params） -->
         <div class="row">
           <span class="title">重新生成「{layerName}」</span>
           {#if layerParams && onParam}
@@ -243,6 +243,9 @@
           <div class="hint">将替换「{layerName}」现有元素（需命令重构落地后方可撤销）</div>
         {/if}
       {/if}
+      {#if generating && isCells}
+        <div class="prog"><div class="pfill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -250,52 +253,12 @@
 <style>
   .wrap {
     flex: 0 0 auto;
-    border-top: 1px solid var(--panel-border);
   }
   .handles {
     display: flex;
-    gap: 6px;
+    flex-direction: column;
+    gap: 4px;
     padding: 6px 8px;
-  }
-  .handle {
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    border: 1px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text, #ddd);
-    border-radius: 8px;
-    padding: 5px 8px;
-    font-size: 11px;
-    line-height: 1.2;
-    cursor: pointer;
-    user-select: none;
-    touch-action: none;
-  }
-  .handle:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  .handle.open {
-    border-color: rgba(240, 195, 106, 0.5);
-  }
-  /* 长按进度（D5）：满格 = 触发生成 */
-  .fill {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 0;
-    background: linear-gradient(90deg, rgba(240, 195, 106, 0.75), rgba(216, 164, 82, 0.9));
-    /* 时长由行内 style 给（HOLD_MS）；非 filling 时回到 0 */
-    transition: width 0s linear;
-    pointer-events: none;
-  }
-  .filling .fill {
-    width: 100%;
-  }
-  .lb {
-    position: relative;
-    z-index: 1;
   }
   .panel {
     padding: 2px 8px 8px;
@@ -353,6 +316,16 @@
   .row button.dice {
     padding: 3px 6px;
   }
+  .title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text, #ddd);
+  }
+  .hint {
+    font-size: 10px;
+    color: var(--text-dim, #888);
+    padding: 2px 0;
+  }
   .tiered {
     display: inline-flex;
     border: 1px solid var(--border, #333);
@@ -372,20 +345,6 @@
   .tiered button.active {
     background: var(--accent, #c9a24a);
     color: #1a1408;
-  }
-  .title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text, #ddd);
-  }
-  .hint {
-    font-size: 10px;
-    color: var(--text-dim, #888);
-    padding: 2px 0;
-  }
-  .handle:disabled {
-    opacity: 0.45;
-    cursor: default;
   }
   .prog {
     position: relative;

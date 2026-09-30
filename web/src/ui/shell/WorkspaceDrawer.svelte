@@ -16,6 +16,7 @@
   import { defaultLayerVisible } from '../../core/displayCompose';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
+  import FoldHandle from './FoldHandle.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import CreateBox from './CreateBox.svelte';
@@ -50,6 +51,7 @@
     onRedo,
     onOpenPanel,
     lowFreq,
+    mode = 'plane',
   }: {
     world: World | null;
     focusLayer?: string;
@@ -88,12 +90,23 @@
       x: number,
       y: number,
     ) => void;
-    /** 段4 低频折叠区（C8：生成把手 / 层设置把手），内容由调用方提供 */
+    /** 段4 低频折叠区（C8：生成把手 / 显示把手），内容由调用方提供 */
     lowFreq?: import('svelte').Snippet;
+    /** globe = 球面纯展示：隐藏绘制把手与创建行（图层显隐/列表/显示仍可用） */
+    mode?: 'plane' | 'globe';
   } = $props();
 
-  /** 元素名过滤（C4：打字即过滤本层元素列表） */
+  /** 元素名过滤（C4）：默认收起为 🔍 按钮，点击展开搜索框（2026-09-30 需求） */
   let filter = $state('');
+  let searchOpen = $state(false);
+  let searchEl: HTMLInputElement | undefined = $state();
+  function toggleSearch() {
+    searchOpen = !searchOpen;
+    if (searchOpen) queueMicrotask(() => searchEl?.focus());
+    else filter = '';
+  }
+  /** 绘制把手（2026-09-30 四把手重排）：工具带收进把手，默认展开 */
+  let drawOpen = $state(true);
 
   const meta = $derived(LAYER_META[focusLayer]);
   const isHeight = $derived(focusLayer === 'height');
@@ -468,53 +481,64 @@
       <span class="nm">工作区 · {hd.title}</span>
     </header>
     <div class="ws" onclick={onBlankClick}>
-      <!-- 段1 工具带（C8 最高优先；C3 按「与实际功能相关」清算：weight 删、fill/center 死值删） -->
-      <div class="tools">
-        <div class="tool-row">
-          <button
-            type="button"
-            class="tool"
-            class:on={!drawActive}
-            onclick={() => {
-              if (drawActive) onDrawMode?.();
-            }}>选择</button
-          >
-          <button
-            type="button"
-            class="tool"
-            class:on={drawActive}
-            onclick={() => {
-              if (!drawActive) onDrawMode?.();
-            }}>绘制 B</button
-          >
-          {#if drawTool === 'road'}
-            <span class="chip" title="道路工具（路/航河层专用）">道路</span>
-          {/if}
-          <button type="button" class="tool icon" title="撤销 (Ctrl+Z)" onclick={() => onUndo?.()}>↶</button>
-          <button type="button" class="tool icon" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
-        </div>
-        <div class="tool-row">
-          <label class="field inline">
-            <span>笔刷</span>
-            <CapsuleSlider
-              min={0.3}
-              max={8}
-              step={0.1}
-              value={brushRadius}
-              label="笔刷宽度"
-              width={140}
-              onInput={(v) => onRadius?.(v)}
-            />
-            <span class="dim">{brushRadius.toFixed(1)}°</span>
-          </label>
-        </div>
-        {#if drawActive}
-          <p class="dim hint">{isHeight ? '左键刷选定值 · 右键擦除 · 空白点击 / Esc 退出' : '左键加地块 · Shift 移除 · Esc 退出'}</p>
+      <!-- 段1 绘制把手（2026-09-30 四把手重排；样式 = FoldHandle 单源）：工具带收进把手，默认展开 -->
+      {#if mode === 'plane'}
+        <FoldHandle
+          icon="✏️"
+          label="绘制"
+          open={drawOpen}
+          onToggle={(v) => (drawOpen = v)}
+          title={drawActive ? 'Esc 退出绘制会话' : '选择 / 笔刷工具与笔刷尺寸'}
+        />
+        {#if drawOpen}
+          <div class="tools">
+            <div class="tool-row">
+              <button
+                type="button"
+                class="tool"
+                class:on={!drawActive}
+                onclick={() => {
+                  if (drawActive) onDrawMode?.();
+                }}>选择</button
+              >
+              <button
+                type="button"
+                class="tool"
+                class:on={drawActive}
+                onclick={() => {
+                  if (!drawActive) onDrawMode?.();
+                }}>绘制 B</button
+              >
+              {#if drawTool === 'road'}
+                <span class="chip" title="道路工具（路/航河层专用）">道路</span>
+              {/if}
+              <button type="button" class="tool icon" title="撤销 (Ctrl+Z)" onclick={() => onUndo?.()}>↶</button>
+              <button type="button" class="tool icon" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
+            </div>
+            <div class="tool-row">
+              <label class="field inline">
+                <span>笔刷</span>
+                <CapsuleSlider
+                  min={0.3}
+                  max={8}
+                  step={0.1}
+                  value={brushRadius}
+                  label="笔刷宽度"
+                  width={140}
+                  onInput={(v) => onRadius?.(v)}
+                />
+                <span class="dim">{brushRadius.toFixed(1)}°</span>
+              </label>
+            </div>
+            {#if drawActive}
+              <p class="dim hint">{isHeight ? '左键刷选定值 · 右键擦除 · 空白点击 / Esc 退出' : '左键加地块 · Shift 移除 · Esc 退出'}</p>
+            {/if}
+          </div>
         {/if}
-      </div>
+      {/if}
 
-      <!-- 段2 新增元素 + 过滤框（C4） -->
-      {#if !isHeight}
+      <!-- 段2 新增元素（仅平面编辑模式） + 搜索按钮（默认收起，点击展开输入框） -->
+      {#if mode === 'plane' && !isHeight}
         <div class="create">
           <CreateRow
             placeholder="新元素"
@@ -526,12 +550,23 @@
         </div>
       {/if}
       <div class="filter">
-        <input
-          type="search"
-          placeholder="🔍 过滤元素…"
-          value={filter}
-          oninput={(e) => (filter = e.currentTarget.value)}
-        />
+        {#if searchOpen}
+          <input
+            type="search"
+            placeholder="搜索元素…"
+            bind:this={searchEl}
+            bind:value={filter}
+            onkeydown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                toggleSearch();
+              }
+            }}
+          />
+          <button type="button" class="search-x" title="收起搜索" onclick={toggleSearch}>✕</button>
+        {:else}
+          <button type="button" class="search-open" onclick={toggleSearch}>🔍 搜索元素</button>
+        {/if}
       </div>
 
       {#snippet itemBtn(
@@ -734,27 +769,52 @@
   }
   .create {
     flex: 0 0 auto;
-    padding: 8px 8px 4px;
+    padding: 6px 6px 4px;
     border-bottom: 1px solid var(--panel-border);
   }
-  /* 过滤框（C4）：打字即过滤本层元素 */
+  /* 搜索行（按钮态 + 展开态）：默认收起为 🔍 按钮 */
   .filter {
     flex: 0 0 auto;
-    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
     border-bottom: 1px solid var(--panel-border);
   }
   .filter input {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     background: rgba(0, 0, 0, 0.35);
     color: var(--text, #ddd);
     border: 1px solid var(--panel-border);
     border-radius: 7px;
-    padding: 4px 8px;
+    padding: 3px 8px;
     font-size: 11px;
   }
   .filter input:focus {
     outline: none;
     border-color: rgba(240, 195, 106, 0.6);
+  }
+  .search-open,
+  .search-x {
+    flex: 1;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    border: 1px solid var(--panel-border);
+    border-radius: 7px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .search-open:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: var(--text);
+  }
+  .search-x {
+    flex: 0 0 auto;
+    text-align: center;
+    padding: 3px 7px;
   }
   /* 工具带的只读状态徽标（如道路层的「道路」工具） */
   .chip {
@@ -776,8 +836,8 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    padding: 8px;
+    gap: 6px;
+    padding: 6px 8px;
   }
   .field.inline {
     display: flex;
@@ -787,7 +847,8 @@
     font-size: 11px;
     margin: 0;
   }
-  /* 单列网格：一格 = 一个 ItemButton；元素列表 = 工作区段的 flex-1 内滚区（§3.1） */
+  /* 单列网格：一格 = 一个 ItemButton；元素列表 = 工作区段的 flex-1 内滚区（§3.1）
+     padding/gap 与图层列表一致（2026-09-30 紧凑统一） */
   .grid {
     flex: 1;
     min-height: 0;
@@ -795,7 +856,7 @@
     scrollbar-width: none;
     list-style: none;
     margin: 0;
-    padding: 8px;
+    padding: 6px;
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;

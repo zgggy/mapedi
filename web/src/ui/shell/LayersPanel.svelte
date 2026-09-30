@@ -12,6 +12,7 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
   import ItemButton from './ItemButton.svelte';
+  import FoldHandle from './FoldHandle.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
@@ -251,18 +252,22 @@
 <div class="sec-root">
   <header class="hd">
     <button type="button" class="collapse" title="收起面板" aria-label="收起面板" onclick={() => onCollapse?.()}>⊟</button>
-    {#if expanded}
-      <span class="ico">📚</span>
-      <span class="nm">图层</span>
-    {:else}
-      <span class="ico">{focusRow?.meta.emoji ?? '📚'}</span>
-      <span class="nm">{focusRow?.meta.name ?? '图层'}</span>
-      <span class="eye" title={focusRow?.visible ? '该层已显示' : '该层已隐藏'}>{focusRow?.visible ? '👁' : '🚫'}</span>
-      <span class="cnt">{focusCount}</span>
-    {/if}
-    <button type="button" class="exp" onclick={() => onToggleExpand?.()}>
-      {expanded ? '收起' : '展开'}
-    </button>
+    <!-- 图层子面板把手（2026-09-30 四把手重排：样式与其他把手单源） -->
+    <FoldHandle
+      grow
+      icon={focusRow?.meta.emoji ?? '📚'}
+      label="图层"
+      open={expanded}
+      onToggle={() => onToggleExpand?.()}
+      title={expanded ? '收起图层列表' : '展开图层列表'}
+    >
+      {#snippet right()}
+        {#if !expanded}
+          <span class="eye" title={focusRow?.visible ? '该层已显示' : '该层已隐藏'}>{focusRow?.visible ? '👁' : '🚫'}</span>
+          <span class="cnt">{focusCount}</span>
+        {/if}
+      {/snippet}
+    </FoldHandle>
   </header>
   {#if expanded}
     <div class="body">
@@ -340,19 +345,6 @@
   .collapse:hover {
     background: rgba(255, 255, 255, 0.12);
   }
-  .ico {
-    font-size: 12px;
-    line-height: 1;
-  }
-  .nm {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 600;
-    font-size: 12px;
-  }
   .eye {
     font-size: 11px;
     opacity: 0.85;
@@ -361,21 +353,6 @@
     font-size: 10px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
-  }
-  .exp {
-    flex: 0 0 auto;
-    border: 1px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-dim);
-    border-radius: 7px;
-    padding: 3px 8px;
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 1;
-  }
-  .exp:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: var(--text);
   }
   /* 展开体：由左轨段负责滚动（§3.1 双滚动模型），这里只撑满 */
   .body {
@@ -386,16 +363,16 @@
   }
   .create {
     flex: 0 0 auto;
-    padding: 8px 8px 4px;
+    padding: 6px 6px 4px;
     border-bottom: 1px solid var(--panel-border);
   }
-  /* 单列网格：一格 = 一个 ItemButton */
+  /* 单列网格：一格 = 一个 ItemButton（与工作区列表同 padding/gap：2026-09-30 紧凑统一） */
   .grid {
     flex: 1;
     min-height: 0;
     list-style: none;
     margin: 0;
-    padding: 8px;
+    padding: 6px;
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;

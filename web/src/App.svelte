@@ -8,7 +8,6 @@
   import { initialShell, type ShellState, type ViewMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
   import GenerateSection from './ui/shell/GenerateSection.svelte';
-  import PlanetParams from './ui/shell/PlanetParams.svelte';
   import LeftRail from './ui/shell/LeftRail.svelte';
   import { persistRailOpen } from './ui/shell/shell';
   import { clearViewMemory } from './ui/viewMemory';
@@ -356,6 +355,20 @@
     onStyle={(s) => (styleId = s)}
     projection={projection}
     onProjection={(p) => (projection = p as import('./core/project/projections').ProjectionId)}
+    globeShowAxis={globeAxis}
+    globeShowEcliptic={globeEcliptic}
+    globeSpin={globeSpin}
+    globeTilt={editor.climateDraft.axialTiltDeg}
+    globeRotHours={editor.climateDraft.rotationHours}
+    onGlobeShowAxis={(v) => (globeAxis = v)}
+    onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
+    onGlobeSpin={(v) => (globeSpin = v)}
+    onGlobeTilt={(v) => {
+      editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
+    }}
+    onGlobeRotHours={(v) => {
+      editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
+    }}
   />
 
   {#snippet layersSn()}
@@ -399,28 +412,10 @@
   {/snippet}
 
   {#snippet wsSn()}
-
-  {#if shell.viewMode === 'view-globe'}
-    <!-- D3：球面 = 工作区整体换成「星球」参数区（无工具带/生成/元素列表） -->
-    <PlanetParams
-      globeShowAxis={globeAxis}
-      globeShowEcliptic={globeEcliptic}
-      globeSpin={globeSpin}
-      globeTilt={editor.climateDraft.axialTiltDeg}
-      globeRotHours={editor.climateDraft.rotationHours}
-      onGlobeShowAxis={(v) => (globeAxis = v)}
-      onGlobeShowEcliptic={(v) => (globeEcliptic = v)}
-      onGlobeSpin={(v) => (globeSpin = v)}
-      onGlobeTilt={(v) => {
-        editor.climateDraft = { ...editor.climateDraft, axialTiltDeg: v };
-      }}
-      onGlobeRotHours={(v) => {
-        editor.climateDraft = { ...editor.climateDraft, rotationHours: v };
-      }}
-    />
-  {:else}
+  <!-- 2026-09-30：星球参数回迁顶栏 ⚙ 面板（3d/2d 按模式互斥显示）——
+       工作区不再分叉：球面 = 图层+列表+显示（隐藏绘制/创建），平面 = 四把手全量 -->
     {#snippet generate()}
-      <!-- 段4 低频折叠区：生成把手（D5 长按进度）+ 层设置把手（§4 单源卡片） -->
+      <!-- 段4 低频折叠区：生成把手（D5 长按进度）+ 显示把手（§4 单源卡片） -->
       <GenerateSection
         generating={editor.generating}
         genProgress={editor.genProgress}
@@ -431,6 +426,7 @@
         layerId={focusLayer}
         layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
         layerParams={focusLayer === 'height' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
+        mode={shell.viewMode === 'view-globe' ? 'globe' : 'plane'}
         onShape={(k, v) => editor.setProfileParam('height', k, v)}
         onRegen={(id) => editor.regenLayer(id)}
         onParam={(k, v) => editor.setProfileParam(focusLayer, k, v)}
@@ -450,6 +446,7 @@
     {focusLayer}
     {selectedRegionId}
     {newName}
+    mode={shell.viewMode === 'view-globe' ? 'globe' : 'plane'}
     bind:expandedIds
     drawActive={draw.active}
     brushRadius={draw.radiusDeg}
@@ -516,7 +513,6 @@
     onToggleHidden={(id) => editor.toggleItemHidden(id)}
     lowFreq={generate}
   />
-  {/if}
   {/snippet}
 
   {#if shell.railOpen}

@@ -21,6 +21,16 @@
     onProjection,
     styleId = 'dark',
     onStyle,
+    globeShowAxis = true,
+    globeShowEcliptic = true,
+    globeSpin = false,
+    globeTilt = 23.4,
+    globeRotHours = 24,
+    onGlobeShowAxis,
+    onGlobeShowEcliptic,
+    onGlobeSpin,
+    onGlobeTilt,
+    onGlobeRotHours,
   }: {
     viewMode?: ViewMode;
     onSwitchView: (m: ViewMode) => void;
@@ -34,6 +44,16 @@
     onProjection?: (p: string) => void;
     styleId?: string;
     onStyle?: (s: string) => void;
+    globeShowAxis?: boolean;
+    globeShowEcliptic?: boolean;
+    globeSpin?: boolean;
+    globeTilt?: number;
+    globeRotHours?: number;
+    onGlobeShowAxis?: (v: boolean) => void;
+    onGlobeShowEcliptic?: (v: boolean) => void;
+    onGlobeSpin?: (v: boolean) => void;
+    onGlobeTilt?: (v: number) => void;
+    onGlobeRotHours?: (v: number) => void;
   } = $props();
 
   // —— 世界名：单击开菜单 / 双击改名（D2）——
@@ -97,12 +117,43 @@
   ]);
 </script>
 
-<!-- 模式胶囊：顶栏居中悬浮 -->
+<!-- 模式胶囊 + 视图设置：顶栏居中悬浮（2026-09-30：⚙ 移到切换显示右侧） -->
 <div class="center">
   <ModeCapsule value={viewMode} onChange={onSwitchView} />
+  <div class="gear-wrap">
+    <button
+      type="button"
+      class="gear"
+      aria-label="视图设置"
+      aria-expanded={gearOpen}
+      onclick={() => {
+        gearOpen = !gearOpen;
+        menuPos = null;
+      }}
+    >⚙</button>
+    <ViewSettingsPopover
+      open={gearOpen}
+      onClose={() => (gearOpen = false)}
+      {viewMode}
+      {projection}
+      {onProjection}
+      {styleId}
+      {onStyle}
+      {globeShowAxis}
+      {globeShowEcliptic}
+      {globeSpin}
+      {globeTilt}
+      {globeRotHours}
+      {onGlobeShowAxis}
+      {onGlobeShowEcliptic}
+      {onGlobeSpin}
+      {onGlobeTilt}
+      {onGlobeRotHours}
+    />
+  </div>
 </div>
 
-<!-- 世界名 + 视图设置：右端 -->
+<!-- 世界名：右端 -->
 <div class="right">
   <div class="name-wrap">
     {#if renaming}
@@ -129,28 +180,6 @@
       </button>
     {/if}
   </div>
-
-  <div class="gear-wrap">
-    <button
-      type="button"
-      class="gear"
-      aria-label="视图设置"
-      aria-expanded={gearOpen}
-      onclick={() => {
-        gearOpen = !gearOpen;
-        menuPos = null;
-      }}
-    >⚙</button>
-    <ViewSettingsPopover
-      open={gearOpen}
-      onClose={() => (gearOpen = false)}
-      {viewMode}
-      {projection}
-      {onProjection}
-      {styleId}
-      {onStyle}
-    />
-  </div>
 </div>
 
 {#if menuPos}
@@ -176,6 +205,9 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     pointer-events: auto;
   }
   .right {

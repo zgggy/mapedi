@@ -196,12 +196,13 @@
   .ibtn {
     position: relative;
     width: 100%;
+    min-width: 0;
     /* 等高：由列表统一测量设定（容纳最长名称换行） */
     height: var(--ibtn-h, 40px);
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 8px;
+    gap: 6px;
+    padding: 0 6px;
     border: 1px solid transparent;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.04);

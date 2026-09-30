@@ -590,6 +590,11 @@ export class EditorStore {
       params ? { [layerId]: params } : undefined,
       enabled,
     );
+    if (layerId === 'height') {
+      // 「生成高度图 = 删除海陆图层[元素]」（2026-09-30 用户语义）：地形重跑后旧海陆
+      // 划分失效 → 删旧建新（rebuildLandSeaRegions 全量重建派生元素）
+      rebuildLandSeaRegions(this.world);
+    }
     this.touchWorld();
     if (layerId === 'height') {
       // 高度重生成后默认显示并聚焦高度层（与整世界生成同规则）
