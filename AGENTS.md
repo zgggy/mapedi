@@ -63,7 +63,7 @@
 |------|------|
 | **Cell.polygon** | 几何唯一真相（网格、球面、拾取、sharedEdges 只能由此派生） |
 | **Region.cells** | 归属唯一真相（父 `cells` 必须已物化子并集；禁止运行时第二套 union） |
-| **DisplayPiece.cellIds** | 显示切片 ⊆ region.cells；与 Region **同一** cellSet 求环 |
+| **DisplayPiece.cellIds** | 显示归属：一般 = 显示切片 ⊆ region.cells；**区间型（高度档）= 累积 h ≥ lo（直接 ∪ 更高），数据仍精确档**（2026-09-30 用户改契约）；环 = 与 **dp.cellIds 同一** cellSet（单源派生 `displayCellsOfInterval`，件环 Δ 同谓词） |
 | **元素边界** | 过 **边中点** 的 Hermite；**不是** cell 贴角多边形 |
 | **填充** | 边界内 evenodd；**禁止** per-cell 语义填色 |
 | **中空** | 本层不填色、不铺底色；下层透出 |

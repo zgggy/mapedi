@@ -6,6 +6,7 @@
  */
 import type { CellId, LayerDef, Region, World } from './types';
 import { dataRev } from './rev';
+import { displayCellsOfInterval } from './layer/heightElements';
 
 export const VIRTUAL_PARENT = '—';
 
@@ -346,9 +347,15 @@ function composeShownPiecesUncached(
     const ancestorRegionLists = ancIds.map((pid) => regionsWithCells(world, pid));
 
     for (const reg of regions) {
-      const ownCells = reg.cells;
+      // 区间型元素（高度档）：显示归属 = 累积（直接 ∪ 更高，h ≥ lo，2026-09-30 用户定）。
+      // 数据仍是精确档；单源派生 = displayCellsOfInterval（件环 Δ 补丁同一谓词）。
+      const ownCells =
+        reg.attributes?.kind === 'interval' ? displayCellsOfInterval(world, reg) : reg.cells;
       if (!ownCells.length) continue;
-      const slices = splitRegionForDisplay(reg, ancestorRegionLists);
+      const slices = splitRegionForDisplay(
+        ownCells === reg.cells ? reg : { ...reg, cells: ownCells },
+        ancestorRegionLists,
+      );
       for (const [sliceIndex, s] of slices.entries()) {
         if (!s.cells.length) continue;
         out.push({

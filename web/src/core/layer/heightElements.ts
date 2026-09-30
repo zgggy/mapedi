@@ -1,16 +1,36 @@
 /**
- * 高度区间元素：固定 12 档，**嵌套重叠 = 等高线**。
+ * 高度区间元素：固定 12 档，**两套真相各司其职**：
  *
- * 归属（海陆同一规则，不反向）：
- *   cell.height ≥ 区间.lo  ⇒  该 cell ∈ 此区间元素
- *   即：**低区间自动包含更高的 cell**（顶峰 ⊂ 高山 ⊂ … ⊂ 深海）
+ * - **数据**（Region.cells）= 精确档（lo ≤ h ≤ hi，互不相交）：归属真相、拾取、
+ *   标签落点、工作区计数。
+ * - **显示**（DisplayPiece.cellIds）= **累积**（cell.height ≥ lo ⇒ 显示包含）：
+ *   低档托住所有更高的 cell（顶峰 ⊂ 高山 ⊂ … ⊂ 深海 = 等高线嵌套）。隐藏低档
+ *   不漏底、拼缝露的是下档色而不是背景——直接档渲染不满足此语义（2026-09-30 用户定）。
+ *
+ * 单源谓词 = `cellInInterval`（h ≥ lo，不看 hi）；显示派生 = `displayCellsOfInterval`，
+ * 件环 Δ 补丁（`updateHeightIntervalElements` 返回值）用同一谓词——改一处必改另一处。
  */
 import type { CellId, Region, World } from '../types';
 import { HEIGHT_INTERVALS } from './heightIntervals';
 
-/** cell 是否落在区间元素内（低区间含高 cell） */
+/** cell 是否落在区间元素**显示**集内（低区间含高 cell，不看 hi） */
 export function cellInInterval(h: number, lo: number, _hi: number): boolean {
   return Math.round(h) >= lo;
+}
+
+/**
+ * 显示归属（累积）：直接档 ∪ 所有更高的 cell（h ≥ lo）。
+ * 非区间元素（无 lo）原样返回 region.cells。
+ * 与 `updateHeightIntervalElements` 的 Δ 谓词同一真相。
+ */
+export function displayCellsOfInterval(world: World, region: Region): CellId[] {
+  const lo = region.attributes?.lo;
+  if (typeof lo !== 'number') return region.cells;
+  const out: CellId[] = [];
+  for (const c of world.cells) {
+    if (cellInInterval(c.height, lo, Number.POSITIVE_INFINITY)) out.push(c.id);
+  }
+  return out;
 }
 
 /**
@@ -18,8 +38,9 @@ export function cellInInterval(h: number, lo: number, _hi: number): boolean {
  * 不调用 computeRelationships（大重叠只记 count）。
  */
 export function rebuildHeightIntervalElements(world: World): Region[] {
-  // **精确档**（lo ≤ h ≤ hi，互不相交）：区间可见色 = 该档色，与行叠放顺序无关；
-  // 嵌套累积（h≥lo）会让可见色取决于叠放序且产生全图巨件，已废。
+  // 数据 = **精确档**（lo ≤ h ≤ hi，互不相交）：归属真相不随叠放序变，全图巨件
+  // 也不进 region.cells。**显示**侧的累积（h ≥ lo）在 displayCellsOfInterval 派生，
+  // 不回写这里（两套真相各司其职，见文件头）。
   const cellsPer: CellId[][] = HEIGHT_INTERVALS.map(() => []);
   for (const c of world.cells) {
     const h = Math.round(c.height);
@@ -98,7 +119,8 @@ export function heightIntervalRegions(world: World): Region[] {
 
 /**
  * 增量更新高度区间：只动被改 cell 所属的区间，不全量重扫。
- * 每个区间是**精确档**（lo ≤ h ≤ hi）；cell 在 old→new 间迁移时离开旧档、进入新档。
+ * 数据 = **精确档**（lo ≤ h ≤ hi，迁移离开旧档、进入新档）；
+ * 返回 Δ = **显示累积集**的增减（见 updateHeightIntervalElements）。
  */
 export interface HeightIntervalDelta {
   layerId: string;
@@ -108,7 +130,10 @@ export interface HeightIntervalDelta {
 }
 
 /**
- * 增量更新区间归属；返回每区增减（二期：供件环补丁）。
+ * 增量更新区间归属（双真相同步维护）：
+ * - **数据**（region.cells）：精确档成员迁移（lo ≤ h ≤ hi，互不相交）。
+ * - **返回 Δ = 显示累积集增减**（h ≥ lo，与 `displayCellsOfInterval` 同谓词）——
+ *   件环缓存的内容是显示集；用精确档 Δ 打补丁会与显示派生分叉（只改一半的坑）。
  * h0 = 上次区间更新后的高度（调用方维护基线），h1 = 当前高度——多次触碰同一 cell 必须
  * 用「上次基线→当前」的净差，否则来回涂改会漏归属。
  */
@@ -135,18 +160,19 @@ export function updateHeightIntervalElements(
     if (h0 === h1) continue;
     for (let i = 0; i < 12; i++) {
       const iv = HEIGHT_INTERVALS[i];
-      const inOld = h0 >= iv.lo && h0 <= iv.hi;
-      const inNew = h1 >= iv.lo && h1 <= iv.hi;
       const el = byLo.get(iv.lo);
       if (!el) continue;
       const o = outOf(el);
-      if (inOld && !inNew) {
-        el.cells = el.cells.filter((id) => id !== s.id);
-        o.removed.push(s.id);
-      } else if (!inOld && inNew) {
-        el.cells.push(s.id);
-        o.added.push(s.id);
-      }
+      // 数据真相：精确档迁移
+      const inOld = h0 >= iv.lo && h0 <= iv.hi;
+      const inNew = h1 >= iv.lo && h1 <= iv.hi;
+      if (inOld && !inNew) el.cells = el.cells.filter((id) => id !== s.id);
+      else if (!inOld && inNew) el.cells.push(s.id);
+      // 显示真相：累积 h ≥ lo（件环 Δ 补丁与显示派生同一谓词）
+      const cOld = cellInInterval(h0, iv.lo, iv.hi);
+      const cNew = cellInInterval(h1, iv.lo, iv.hi);
+      if (cOld && !cNew) o.removed.push(s.id);
+      else if (!cOld && cNew) o.added.push(s.id);
     }
   }
   return out.filter((d) => d.added.length || d.removed.length);
