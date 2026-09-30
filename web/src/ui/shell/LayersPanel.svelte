@@ -12,8 +12,6 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
   import ItemButton from './ItemButton.svelte';
-  import ModeCapsule from './ModeCapsule.svelte';
-  import { WS_MODE_ITEMS } from './shell';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
@@ -21,7 +19,6 @@
 
   let {
     world,
-    expanded = true,
     focusLayer = 'cells',
     newName = '',
     onSelect,
@@ -31,25 +28,14 @@
     onAddLayer,
     onNewName,
     onRandomName,
-    onCollapse,
     onMoveLayer,
     onCopyLayer,
     onDeleteLayer,
     expandPanel,
-    taskMode = 'check',
-    globeLocked = false,
-    onTaskMode,
   }: {
     world: World | null;
-    /** 图层子面板展开态（三模式后恒 true；保留 prop 以兼容空态渲染） */
-    expanded?: boolean;
     focusLayer?: string;
     newName?: string;
-    /** 工作区三模式（2026-09-30 终稿：胶囊位于原图层 header 位） */
-    taskMode?: 'check' | 'gen' | 'draw';
-    /** 球面锁定：仅检查档可用 */
-    globeLocked?: boolean;
-    onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
     /** 眼睛图标：显隐 */
@@ -66,8 +52,6 @@
     onAddLayer?: () => void;
     onNewName?: (v: string) => void;
     onRandomName?: () => void;
-    /** header ⊟：收起整条左轨 */
-    onCollapse?: () => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
@@ -226,20 +210,8 @@
 </script>
 
 <div class="sec-root">
-  <header class="hd">
-    <!-- 2026-09-30 终稿：原图层把手位 = 工作区三模式胶囊（检查/生成/绘制） -->
-    <ModeCapsule
-      value={taskMode}
-      onChange={(v) => onTaskMode?.(v as 'check' | 'gen' | 'draw')}
-      items={WS_MODE_ITEMS}
-      ariaLabel="工作区模式"
-      segMinW={0}
-      disabledWhen={(id) => globeLocked && id !== 'check'}
-    />
-    <button type="button" class="collapse" title="收起面板" aria-label="收起面板" onclick={() => onCollapse?.()}>⊟</button>
-  </header>
-  {#if expanded}
-    <div class="sect">📚 图层</div>
+  <!-- 2026-09-30 第六轮终稿：header/胶囊/轻区头已上移或退役——本组件 = 纯图层列表
+       （收起/展开把手由 LeftRail 的面板框架承担） -->
     <div class="body">
       <div class="create">
     <CreateRow
@@ -268,13 +240,12 @@
           onDragEnd={onRowEnd}
         />
       </li>
-      {#if focusLayer === row.id && expandPanel && expanded}
+      {#if focusLayer === row.id && expandPanel}
         <li class="cell panel">{@render expandPanel()}</li>
       {/if}
     {/each}
       </ul>
     </div>
-  {/if}
 
   {#if lift && dragId}
     <div class="lift" style="transform:translate({lift.x + 12}px,{lift.y - 20}px)">
@@ -295,41 +266,6 @@
     flex: 1;
   }
   /* header = 设计稿 §3.1 的一行：[⊟] 当前层/图层 [展开|收起] */
-  .hd {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 30px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--panel-border);
-    flex: 0 0 auto;
-  }
-  .collapse {
-    flex: 0 0 auto;
-    border: 1px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 7px;
-    padding: 3px 7px;
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
-  }
-  .collapse:hover {
-    background: rgba(255, 255, 255, 0.12);
-  }
-  .collapse {
-    margin-left: auto;
-  }
-  /* 图层轻区头（2026-09-30 终稿：图层/元素两区域，区头只做标识不开合） */
-  .sect {
-    flex: 0 0 auto;
-    padding: 5px 8px 3px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    color: var(--text-dim);
-    border-bottom: 1px solid var(--panel-border);
-  }
   /* 展开体：由左轨段负责滚动（§3.1 双滚动模型），这里只撑满 */
   .body {
     display: flex;

@@ -10,7 +10,6 @@
   import GenerateSection from './ui/shell/GenerateSection.svelte';
   import InspectSection from './ui/shell/InspectSection.svelte';
   import LeftRail from './ui/shell/LeftRail.svelte';
-  import { persistRailOpen } from './ui/shell/shell';
   import { clearViewMemory } from './ui/viewMemory';
   import { isLayerShown } from './core/displayCompose';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
@@ -33,6 +32,8 @@
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
   // panels 状态已退役（2026-09-30 终稿：图层区恒在，开合把手架构随三模式胶囊化取消）
+  /** 左栏两面板开合（LeftRail 回传）：驱动 C7 遮挡宽与高度标注显示条件 */
+  let railState = $state({ layersOpen: true, wsOpen: true });
 
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
@@ -268,8 +269,8 @@
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
-          workspaceOpen={shell.railOpen}
-          railW={shell.railOpen ? shell.leftW : 0}
+          workspaceOpen={railState.wsOpen}
+          railW={railState.layersOpen || railState.wsOpen ? shell.leftW : 0}
           highlightRegionId={draw.active
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}
@@ -408,12 +409,8 @@
   {#snippet layersSn()}
 
   <LayersPanel
-    expanded
     {world}
     {focusLayer}
-    taskMode={shell.wsMode}
-    globeLocked={shell.viewMode === 'view-globe'}
-    onTaskMode={setWsMode}
     newName={editor.newName}
     onSelect={(id) => {
       if (!id) {
@@ -431,10 +428,6 @@
     onAddLayer={() => editor.addLayer()}
     onNewName={(v) => (editor.newName = v)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
-    onCollapse={() => {
-      shell.railOpen = false;
-      persistRailOpen(false);
-    }}
     expandPanel={layerExpand}
     onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyLayer={(id) => editor.copyItem(id)}
@@ -458,8 +451,6 @@
     drawActive={draw.active}
     brushRadius={draw.radiusDeg}
     onSelect={selectElement}
-    onUndo={() => editor.undo()}
-    onRedo={() => editor.redo()}
     onDelete={(id) => {
       editor.selectedRegionId = id;
       editor.deleteSelected();
@@ -495,20 +486,18 @@
   />
   {/snippet}
 
-  {#if shell.railOpen}
-    <LeftRail width={shell.leftW} layers={layersSn} workspace={wsSn} />
-  {:else}
-    <!-- §3.5 收起整轨 → 左上角独立圆钮 -->
-    <button
-      type="button"
-      class="rail-open"
-      title="展开左轨"
-      onclick={() => {
-        shell.railOpen = true;
-        persistRailOpen(true);
-      }}
-    >🗂</button>
-  {/if}
+  <!-- 2026-09-30 第六轮终稿：左栏三块框架恒渲染（⊟ 整轨收起已删） -->
+  <LeftRail
+    width={shell.leftW}
+    layers={layersSn}
+    workspace={wsSn}
+    taskMode={shell.wsMode}
+    globeLocked={shell.viewMode === 'view-globe'}
+    onTaskMode={setWsMode}
+    onUndo={() => editor.undo()}
+    onRedo={() => editor.redo()}
+    onState={(s) => (railState = s)}
+  />
 
   <StatusBar
     {hover}
@@ -557,24 +546,5 @@
   .err {
     color: #f0a0a0;
     z-index: 99;
-  }
-  /* 左轨收起后的左上角圆钮（设计稿 §3.5） */
-  .rail-open {
-    position: fixed;
-    left: 8px;
-    top: 10px;
-    z-index: 60;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    border-radius: 15px;
-    font-size: 14px;
-    line-height: 1;
-    background: rgba(16, 19, 26, 0.94);
-    border: 1px solid var(--panel-border);
-    cursor: pointer;
-  }
-  .rail-open:hover {
-    background: rgba(30, 34, 44, 0.98);
   }
 </style>

@@ -43,8 +43,6 @@
     onMoveItem,
     onCopyItem,
     onToggleHidden,
-    onUndo,
-    onRedo,
     layerPanel,
     elementPanel,
     mode = 'plane',
@@ -74,9 +72,6 @@
     onCopyItem?: (id: string) => void;
     /** 右键菜单：显隐切换 */
     onToggleHidden?: (id: string) => void;
-    /** 工具带 undo/redo（D1′：接现有 editor.undo/redo，不造新能力） */
-    onUndo?: () => void;
-    onRedo?: () => void;
     /** 图层树聚焦行下方的模式展开内容（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     layerPanel?: import('svelte').Snippet;
     /** 元素树选中行下方的模式展开内容（检查=InspectSection / 生成=元素级生成占位；绘制=本地绘制参数区） */
@@ -450,8 +445,7 @@
     <header class="hd">
       <span class="ico">{hd.icon}</span>
       <span class="nm">工作区 · {hd.title}</span>
-      <button type="button" class="ur" title="撤销 (Ctrl+Z)" onclick={() => onUndo?.()}>↶</button>
-      <button type="button" class="ur" title="重做 (Ctrl+Y)" onclick={() => onRedo?.()}>↷</button>
+      <!-- undo/redo 已移左栏顶行（模式胶囊右侧，2026-09-30 第六轮） -->
     </header>
 
     <!-- 三模式已上移至左栏顶胶囊（2026-09-30 终稿：原图层 header 位）；工作区头 = 元素区域身份 -->
@@ -760,22 +754,6 @@
     flex: 0 0 auto;
     text-align: center;
     padding: 3px 7px;
-  }
-  /* 头部右端 undo/redo 小钮 */
-  .ur {
-    flex: 0 0 auto;
-    border: 1px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-dim);
-    border-radius: 6px;
-    padding: 2px 7px;
-    font-size: 12px;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .ur:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: var(--text);
   }
   /* 模式展开区（panel 节点，可变高） */
   .cell.panel {
