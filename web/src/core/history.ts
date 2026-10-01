@@ -53,26 +53,6 @@ export class HeightCellsCommand implements EditCommand {
   }
 }
 
-/** 高度笔刷命令：apply/revert 后触发增量 rebuild / touch */
-export class HeightStrokeCommand extends HeightCellsCommand {
-  afterApply?: () => void;
-  afterRevert?: () => void;
-  apply(world: World): void {
-    super.apply(world);
-    this.afterApply?.();
-  }
-  revert(world: World): void {
-    super.revert(world);
-    this.afterRevert?.();
-  }
-  coalesce(next: EditCommand): boolean {
-    if (!(next instanceof HeightStrokeCommand) && !(next instanceof HeightCellsCommand)) {
-      return false;
-    }
-    return HeightCellsCommand.prototype.coalesce.call(this, next);
-  }
-}
-
 function findRegion(world: World, id: RegionId): Region | undefined {
   return world.regions.find((r) => r.id === id);
 }
@@ -315,23 +295,6 @@ export class CreateRegionCommand implements EditCommand {
 
   revert(world: World): void {
     world.regions = world.regions.filter((r) => r.id !== this.region.id);
-  }
-}
-
-/** 粗粒度 fallback：仅克隆给定 regionIds（避免全图）；revert 时 COW 复用引用 */
-export class PatchRegionsCommand implements EditCommand {
-  private before: Region[] = [];
-  constructor(
-    private capture: () => Region[],
-    private restore: (regions: Region[]) => void,
-    public label = '编辑',
-  ) {}
-  apply(): void {
-    this.before = this.capture();
-  }
-  revert(): void {
-    // COW：restore 接收引用；后续编辑替换 cells 引用即可，无需再拷贝数组
-    this.restore(this.before.map(restoreRegionCOW));
   }
 }
 
@@ -617,20 +580,22 @@ export class History {
     this.redoStack.length = 0;
   }
 
-  undo(world: World): boolean {
+  /** 撤销一步，返回被撤销的命令（null=无可撤销）——调用方据命令类型分发副作用（1-c：命令本体不再持闭包） */
+  undo(world: World): EditCommand | null {
     const cmd = this.stack.pop();
-    if (!cmd) return false;
+    if (!cmd) return null;
     cmd.revert(world);
     this.redoStack.push(cmd);
-    return true;
+    return cmd;
   }
 
-  redo(world: World): boolean {
+  /** 重做一步，返回被重做的命令（null=无可重做） */
+  redo(world: World): EditCommand | null {
     const cmd = this.redoStack.pop();
-    if (!cmd) return false;
+    if (!cmd) return null;
     cmd.apply(world);
     this.stack.push(cmd);
-    return true;
+    return cmd;
   }
 
   clear(): void {

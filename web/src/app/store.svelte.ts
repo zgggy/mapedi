@@ -13,7 +13,7 @@ import {
   AnnexCommand,
   CreateRegionCommand,
   DeleteRegionCommand,
-  HeightStrokeCommand,
+  HeightCellsCommand,
   MultiRegionCommand,
   RegionFieldsCommand,
   PathsCommand,
@@ -25,6 +25,7 @@ import {
   LayersOrderCommand,
   LayerFieldsCommand,
   SetCenterCommand,
+  type EditCommand,
   history,
 } from '../core/history';
 import { setRegionColor } from '../core/regionOps';
@@ -849,7 +850,9 @@ export class EditorStore {
 
   undo() {
     if (!this.world) return;
-    if (history.undo(this.world)) {
+    const cmd = history.undo(this.world);
+    if (cmd) {
+      this.historyEffect(cmd, 'revert');
       this.touchWorld();
       // 不清空选中：多步撤销时保持上下文
       this.status = `已撤销（剩余 ${history.depth} 步可撤销）`;
@@ -858,9 +861,31 @@ export class EditorStore {
 
   redo() {
     if (!this.world) return;
-    if (history.redo(this.world)) {
+    const cmd = history.redo(this.world);
+    if (cmd) {
+      this.historyEffect(cmd, 'apply');
       this.touchWorld();
       this.status = '已重做';
+    }
+  }
+
+  /**
+   * 1-c 命令纯数据化的副作用分发：undo/redo 后按**命令类型**执行增量失效/派生
+   * （原 HeightStrokeCommand 闭包 afterApply/afterRevert 的去处——命令本体只持数据，
+   * 失效管线归 store）。高度笔画必须走 flushHeightRegions：区间/landsea 归属是
+   * 派生数据，数据回滚后不重算 = 归属过期（不只是显示问题）。
+   */
+  private historyEffect(cmd: EditCommand, dir: 'apply' | 'revert'): void {
+    if (!(cmd instanceof HeightCellsCommand)) return;
+    const samples = cmd.samples;
+    if (!samples.length) return;
+    this.markHeightDirty(samples.map((s) => s.id));
+    if (dir === 'apply') {
+      this.flushHeightRegions(samples);
+      this.touchHeight(false);
+    } else {
+      this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })));
+      this.touchHeight(true);
     }
   }
 
@@ -1694,18 +1719,9 @@ export class EditorStore {
       }));
       const w = this.world!;
       const dirtyIds = samples.map((s) => s.id);
-      const cmd = new HeightStrokeCommand(samples, '高度笔刷');
-      const topoChanged = heightTopologyChanged(samples);
-      cmd.afterApply = () => {
-        this.markHeightDirty(dirtyIds);
-        this.flushHeightRegions(samples);
-        this.touchHeight(false);
-      };
-      cmd.afterRevert = () => {
-        this.markHeightDirty(dirtyIds);
-        this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })));
-        this.touchHeight(true);
-      };
+      // 1-c：命令纯数据（只有 samples+label）；undo/redo 后的失效副作用由
+      // historyEffect 按命令类型分发，不再作为闭包存进命令。
+      const cmd = new HeightCellsCommand(samples, '高度笔刷');
       history.run(w, cmd, { alreadyApplied: true });
       this.heightStroke = null;
       this.strokeRegionId = null;

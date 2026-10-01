@@ -26,16 +26,17 @@ describe('history multi-step undo', () => {
     expect(region.cells.length).toBe(3);
     expect(h.depth).toBe(3);
 
-    expect(h.undo(w)).toBe(true);
+    // undo/redo 返回被执行的命令（1-c 纯数据契约），null = 空栈
+    expect(h.undo(w)).toBeTruthy();
     expect(region.cells.length).toBe(2);
-    expect(h.undo(w)).toBe(true);
+    expect(h.undo(w)).toBeTruthy();
     expect(region.cells.length).toBe(1);
-    expect(h.undo(w)).toBe(true);
+    expect(h.undo(w)).toBeTruthy();
     expect(region.cells.length).toBe(0);
-    expect(h.undo(w)).toBe(false);
+    expect(h.undo(w)).toBeNull();
     expect(h.depth).toBe(0);
 
-    expect(h.redo(w)).toBe(true);
+    expect(h.redo(w)).toBeTruthy();
     expect(region.cells.length).toBe(1);
   });
 });

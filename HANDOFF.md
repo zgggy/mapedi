@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第十八轮 1-b 收尾批（接 `43ff5d1` 路径包）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第十九轮 1-c 批。**
 
 ## 先读
 
@@ -16,7 +16,15 @@
 
 用户九点：① 缩进无视觉效果→button 内最左侧短竖线 ② 缩进/提升顺序乱（未变成上一个图层的子图层）③ 元素面板无缩进/提升两钮 ④ 展开后为空→直接不能展开 ⑤ ul 与 panel 左右间距再小 ⑥ 图层/元素列表不能滚动（连续三轮）⑦ 结构定稿（创建行文本框兼搜索+🎲+加，拉满同 button 宽；两面板同构；独立搜索行退役）⑧ 任何模式 button 上无操作控件，滑块只在高度元素展开内容 ⑨ （隐含）检查/绘制模式展开各含一个高度滑块。
 
-## 当前状态（第十八轮完成并提交（git log 头）；在案提交：`8bdec59` 基线 → `03a7756` 渲染批 → `43ff5d1` 1-b 路径包 → 第十八轮 1-b 收尾）
+## 当前状态（第十九轮完成并提交（git log 头）；在案提交：`8bdec59` 基线 → `03a7756` 渲染批 → `43ff5d1` 1-b 路径包 → `04edb7c` 1-b 收尾 → 第十九轮 1-c）
+
+- **✓ 第十九轮（2026-10-01，还债 1-c 命令纯数据化——步骤 1 三子项全清）**：
+  - **删**：`PatchRegionsCommand`（死码零引用——store.patchRegions 实产 `RegionFieldsCommand`）；`HeightStrokeCommand`（afterApply/afterRevert 闭包）合并入纯数据 `HeightCellsCommand`；连带删 commitStroke 死变量 `topoChanged`。
+  - **分发**：`History.undo/redo` 改返回**被执命令或 null**；store 新增私有 `historyEffect(cmd, dir)`——高度笔画 undo→`flushHeightRegions(交换样本)+touchHeight(true)`、redo→`flushHeightRegions(原样本)+touchHeight(false)`（**区间/landsea 归属=派生数据，不重算=归属过期**，这是必须分发而不是只 touchWorld 的原因）；非高度命令零副作用直通。
+  - **契约变化**：undo/redo 返回 boolean→`EditCommand|null`；`tests/historyMulti` 5 断言适配（toBe(true/false)→toBeTruthy/toBeNull，业务规则未变）。
+  - **验收**：高度笔画（顶峰 61 三笔）画→撤销→重做——cell 高度/海陆旗/区域成员**逐位回滚**（hD=oD=rD=0，重做对 s1 全 0）；常规建层撤销 15→16→15→16；console/overlay 零错；tsc/svelte-check 0。
+  - **stash A/B 法证预存**：`git stash` 回旧码跑同流程，undo cD=8792/分区等价/redo 全 0 **与新码逐位相同** → `continentId` 标签+region 数组序漂移是**预存行为**（分区等价、真值精确），已登记 ROADMAP 已知问题表；新旧码行为保持。
+  - **1-c 边界（诚实记录）**：JSON round-trip 残余=快照类命令载荷含 Set/Map（历史面板会话内运行不需序列化，持久化时补编解码）。
 
 - **✓ 第十八轮（2026-10-01，1-b 收尾：复制/删除命令化 + 拖拽死码清理，浏览器全链验收）**：
   - **命令化**：`copyItem` 层支 → `history.run(world, new AddLayerCommand(copy,'复制图层'))`、元素支 → `new CreateRegionCommand(copy,'复制元素', idx+1)`（**新增 `at` 参数**：复制插原位之后）；`deleteItem` 层支 → 新 **`DeleteLayerCommand`**（ctor 快照层定义+其 regions（cells/Set/Map 深拷贝）+renderCfg；apply=删、revert=全量恢复；`alreadyApplied:true` 执行后入栈）。
@@ -68,9 +76,9 @@
 
 ## 遗留清单（按优先级）
 
-1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓（本批）；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域随 1-c 核对）。
-2. **1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在——**历史面板的唯一前置**，= 下一包。
-3. 还债步骤 **2 ✓ / 3 ✓ / 6 ◐**（2026-10-01 已完，见 ROADMAP_REFACTOR）、**步骤 4** cellClimate 真相归位（P0 未动）、步骤 5 拆分、步骤 7 大扫除。
+1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
+2. ~~1-c~~ **已收口（第十九轮）**：闭包清零、undo/redo 返回命令+store 类型分发；残余=Set/Map 载荷 JSON 编解码（历史面板持久化时补）+ 高度撤销 continentId 标签漂移（预存已登记）。
+3. 还债步骤 **1 ✓(内容全清) / 2 ✓ / 3 ✓ / 6 ◐**、**下一包 = 步骤 4 cellClimate 真相归位（P0）**、步骤 5 拆分、步骤 7 大扫除（顺带判 climate/astro 孤儿）。
 4. ~~两面板创建行共用 newName~~ **已拆**（第十二轮：各面板局部 text 独立过滤）；全局 newName 现只服务子级 CreateBox。
 5. 同类 stale 潜力点按 view 快照模式逐步收编（DisplayStylePanel 内部直读 style 的模板等——见 ROADMAP_REFACTOR 已知问题表）。
 6. **专属色/外交 = UI 已删、数据层 legacy 保留**：`Region.exclusiveColor`、`core/diplomacy.ts`、piece 传递与 regionOps 自动填充仍在（无 UI 入口）——若要"概念彻底消失"需动渲染/序列化，待用户拍板再清。
@@ -109,5 +117,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 1-c 命令纯数据化**（`PatchRegionsCommand`/`HeightStrokeCommand` 闭包 → 纯数据；历史面板唯一前置）→ 之后：步骤 4 cellClimate（P0）→ 步骤 5 store/Viewport 拆分 → 步骤 7 大扫除（顺带判 climate/astro 孤儿）。
+- **默认下一包 = 还债步骤 4 cellClimate 真相归位（P0，二选一：倾向 A 真缓存=序列化不存/加载按需重算）**→ 步骤 5 store/Viewport 拆分 → 步骤 7 大扫除（顺带判 climate/astro 孤儿）。历史面板（1-c 前置已清）等用户点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。
