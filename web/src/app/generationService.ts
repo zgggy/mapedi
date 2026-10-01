@@ -196,48 +196,5 @@ export class GenerationService {
     };
   }
 
-  /** 生成预设 */
-  applyGenPreset(name: string): void {
-    const next = this.ctx.profiles.map((p) => ({ ...p, params: { ...p.params } }));
-    const set = (id: string, params: Record<string, number | string | boolean>, on = true) => {
-      const p = next.find((x) => x.layerId === id);
-      if (p) {
-        p.enabled = on;
-        p.params = { ...p.params, ...params };
-      }
-    };
-    switch (name) {
-      case '群岛':
-        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentScale: 0.25, coastBreak: 0.85, mountain: 0.6, detail: 0.7, latBias: 0.7 });
-        set('country', { count: 12, fromLayerCount: 2, allowOcean: true });
-        set('province', { count: 24 });
-        break;
-      case '海国世界':
-        set('country', { allowOcean: true });
-        set('culture', { allowOcean: true });
-        break;
-      case '高原世界':
-        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentScale: 0.75, coastBreak: 0.35, mountain: 0.55, detail: 0.35, latBias: 0.35 });
-        set('culture', { coreSelector: 'highElevation' });
-        break;
-      case '默认大陆':
-      default:
-        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentScale: 0.5, coastBreak: 0.55, mountain: 0.7, detail: 0.5, latBias: 0.55 });
-        set('country', { count: 8, fromLayerCount: 3, allowOcean: false });
-        set('province', { count: 15 });
-        set('culture', { allowOcean: false });
-        break;
-    }
-    this.ctx.setProfiles(next);
-    this.ctx.setStatus(`已套用预设：${name}`);
-    this.ctx.notify();
-  }
 
-  toggleProfile(layerId: string): void {
-    this.ctx.setProfiles(
-      this.ctx.profiles.map((p) =>
-        p.layerId === layerId ? { ...p, enabled: !p.enabled } : p,
-      ),
-    );
-  }
 }

@@ -1,8 +1,6 @@
-import type { LayerRenderConfig, Region } from '../core/types';
-import { defaultLayerRenderConfig } from '../core/types';
+import type { Region } from '../core/types';
 import { deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { installProjCache, type ProjCache } from '../render/projCache';
-import { invalidateCellIndex } from '../core/index/cellIndex';
 import { invalidateCellGraph } from '../core/index/cellGraph';
 import { invalidateViewIndex } from '../render/viewIndex';
 import { history } from '../core/history';
@@ -13,26 +11,18 @@ import { DrawController } from './drawController';
 import { CommandService } from './commandService';
 import { createRng } from '../core/rng';
 import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
-import { computeClimate } from '../core/climate';
-import { generateBiomes } from '../core/biomes';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { loadWorldAsync } from '../core/generate/runGenerate';
-import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
-import { unifiedGenerate } from '../core/generate/unified';
-import { genConfigFromParams } from '../core/layer';
+import { defaultStarSystem } from '../core/astro';
 import type { ElementStyle, ElementStylePatch } from '../core/layer/style';
-import { generateRoads, generateRoutes } from '../core/generate/networks';
-import { generateRivers } from '../core/rivers';
-import { applyHeightmapFile } from '../core/heightmap';
 // ValidatorPanel 已按 D4=B 归档删除（2026-09-29）：core/validate.ts 与
 // tests/validate.test.ts 保留为业务规则载体；还债步骤 1 后以「自动校验 + toast」
 // 形态回归（规则清单见设计稿附录 A）。
 import { defaultClimate, type ClimateParams, type LonLat, type World } from '../core/types';
 import { idbLoad } from '../persist/storage';
-import { SOFT_MAX_DENSITY } from '../core/world';
 import { defaultProfiles, type GenerationProfile } from '../core/generate/profile';
 import type { WorldShape } from '../core/layer/genTypes';
 
@@ -411,7 +401,6 @@ export class EditorStore {
     this.measureB = null;
     this.climateDraft = { ...world.climate };
     invalidatePickCache();
-    invalidateCellIndex();
     invalidateCellGraph();
     invalidateViewIndex();
     this.touchWorld();
@@ -471,14 +460,6 @@ export class EditorStore {
   }
 
   /** 生成预设 */
-  applyGenPreset(name: string) {
-    this.gen.applyGenPreset(name);
-  }
-
-  toggleProfile(layerId: string) {
-    this.gen.toggleProfile(layerId);
-  }
-
   scheduleAutosave() {
     this.autosave.schedule();
   }
@@ -602,14 +583,6 @@ export class EditorStore {
     this.cmds.createRegion(layerId, parentId);
   }
 
-  renameSelected() {
-    this.cmds.renameSelected();
-  }
-
-  recolorSelected() {
-    this.cmds.recolorSelected();
-  }
-
   /** 单击选中：只改选中态；填充/边界按选中层 */
   selectLayerTop(id: string) {
     this.focusLayer = id;
@@ -700,70 +673,6 @@ export class EditorStore {
 
   roadSegments() {
     return this.drawCtl.roadSegments();
-  }
-
-  roadBreaks() {
-    return this.drawCtl.roadBreaks();
-  }
-
-  applyNature() {
-    if (!this.world) return;
-    this.world.climate = { ...this.climateDraft };
-    if (this.world.astro) {
-      this.world.astro = syncHomeFromClimate(this.world.astro, this.world.climate);
-    } else {
-      this.world.astro = defaultStarSystem(this.world.meta.seed, this.world.climate);
-    }
-    computeClimate(this.world);
-    generateBiomes(this.world);
-    const seed = this.world.meta.seed;
-    for (const layerId of ['vegetation', 'fauna', 'race'] as const) {
-      unifiedGenerate(this.world, layerId, genConfigFromParams(layerId, seed));
-    }
-    this.touchWorld();
-    this.status = '已按气候重算群系/生物';
-  }
-
-  regenPolitical() {
-    if (!this.world) return;
-    const seed = this.world.meta.seed;
-    // 行省先于国家（country = fromLayer 聚合 province）
-    for (const layerId of ['province', 'country', 'culture', 'religion', 'military'] as const) {
-      unifiedGenerate(this.world, layerId, genConfigFromParams(layerId, seed));
-    }
-    this.touchWorld();
-  }
-
-  regenNetworks() {
-    if (!this.world) return;
-    generateRoads(this.world, this.world.meta.seed, 3, 2, 1.2);
-    generateRoutes(this.world, this.world.meta.seed, 6);
-    this.touchWorld();
-    this.status = '已重生成道路/航线';
-  }
-
-  async applyHeightmap(file: File) {
-    if (!this.world) return;
-    const r = await applyHeightmapFile(this.world, file, { seaLevel: 0.5 });
-    generateRivers(this.world, Math.max(4, Math.floor(this.world.cells.length / 400)));
-    this.applyNature();
-    this.regenPolitical();
-    this.touchWorld();
-    this.status = `高程图已应用：陆地 ${r.land} · 海洋 ${r.ocean} · 已重算河网`;
-  }
-
-  measureClick(lon: number, lat: number) {
-    const p = { lon, lat };
-    if (!this.measureA || this.measureB) {
-      this.measureA = p;
-      this.measureB = null;
-      this.measuring = true;
-      this.status = '测量：点起点，再点终点';
-    } else {
-      this.measureB = p;
-      this.measuring = false;
-      this.status = `已设测量终点`;
-    }
   }
 
   /** 导出纯 .mapedi.json（顶栏世界名菜单；.gz 是另一项，见 exportGz） */

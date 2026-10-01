@@ -3,7 +3,7 @@ import { createWorld, serializeWorld } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
 import { generateRivers } from '../src/core/rivers';
 import { computeClimate } from '../src/core/climate';
-import { generateBiomes } from '../src/core/biomes';
+import { computeBiomes } from '../src/core/biomes';
 import { unifiedGenerate } from '../src/core/generate/unified';
 import { defaultGenConfig } from '../src/core/layer';
 import { generateRoads } from '../src/core/generate/networks';
@@ -16,7 +16,7 @@ function pipeline(seed: number, count: number) {
   generateDemoContinents(w, seed);
   generateRivers(w, Math.max(4, Math.floor(count / 400)));
   computeClimate(w);
-  generateBiomes(w);
+  computeBiomes(w);
   // 生产路径统一生成器；province 先于 country
   unifiedGenerate(w, 'province', defaultGenConfig('province', seed));
   unifiedGenerate(w, 'country', defaultGenConfig('country', seed));

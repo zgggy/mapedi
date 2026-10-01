@@ -9,12 +9,7 @@ import type { Region, World } from '../core/types';
 import { defaultPathColor } from '../core/paths';
 import { ensureBuiltinLayers } from '../core/world';
 import { emptyDrawSession, type DrawSession } from '../core/draw/brush';
-import {
-  defaultLayerVisible,
-  isFreeLayer as isFreeLayerDef,
-  visibleColorRoots,
-} from '../core/displayCompose';
-import { moveAmongSiblings, siblingRegions, setRegionColor } from '../core/regionOps';
+import { moveAmongSiblings, siblingRegions } from '../core/regionOps';
 import {
   patchElementStyle,
   clampElementStyle,
@@ -23,6 +18,12 @@ import {
   type ElementStylePatch,
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
+import {
+  defaultLayerVisible,
+  isFreeLayer as isFreeLayerDef,
+  materializeParentCells,
+  visibleColorRoots,
+} from '../core/displayCompose';
 import {
   AddLayerCommand,
   AnnexCommand,
@@ -138,6 +139,8 @@ export class CommandService {
     const cmd = history.undo(this.world);
     if (cmd) {
       this.historyEffect(cmd, 'revert');
+      // 撤销后父层并集重派生（步骤7：父 cells=子并集，touchWorld 不物化 → 父残留）
+      materializeParentCells(this.world);
       this.touchWorld();
       // 不清空选中：多步撤销时保持上下文
       this.status = `已撤销（剩余 ${history.depth} 步可撤销）`;
@@ -149,6 +152,7 @@ export class CommandService {
     const cmd = history.redo(this.world);
     if (cmd) {
       this.historyEffect(cmd, 'apply');
+      materializeParentCells(this.world);
       this.touchWorld();
       this.status = '已重做';
     }
@@ -801,25 +805,5 @@ export class CommandService {
     this.status = `已新增「${name}」`;
   }
 
-  renameSelected() {
-    if (!this.world || !this.selectedRegionId) return;
-    const r = this.world.regions.find((x) => x.id === this.selectedRegionId);
-    if (!r) return;
-    const next = window.prompt('名称', r.name);
-    if (next !== null && next.trim()) {
-      r.name = next.trim();
-      this.touchWorld();
-    }
-  }
 
-  recolorSelected() {
-    if (!this.world || !this.selectedRegionId) return;
-    const r = this.world.regions.find((x) => x.id === this.selectedRegionId);
-    if (!r) return;
-    const next = window.prompt('颜色 (#RRGGBB)', r.color);
-    if (next) {
-      setRegionColor(this.world, this.selectedRegionId, next);
-      this.touchWorld();
-    }
-  }
 }

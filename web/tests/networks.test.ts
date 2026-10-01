@@ -3,7 +3,7 @@ import { createWorld } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
 import { generateRivers } from '../src/core/rivers';
 import { computeClimate } from '../src/core/climate';
-import { generateBiomes } from '../src/core/biomes';
+import { computeBiomes } from '../src/core/biomes';
 import { unifiedGenerate } from '../src/core/generate/unified';
 import { defaultGenConfig } from '../src/core/layer';
 import { generateRoads, generateRoutes } from '../src/core/generate/networks';
@@ -14,7 +14,7 @@ function worldWithLands(seed = 31) {
   generateDemoContinents(w, seed);
   generateRivers(w, 6);
   computeClimate(w);
-  generateBiomes(w);
+  computeBiomes(w);
   // 生产路径统一生成器；province 先于 country（fromLayer 聚合并设 parentId）
   unifiedGenerate(w, 'province', defaultGenConfig('province', seed));
   unifiedGenerate(w, 'country', defaultGenConfig('country', seed));

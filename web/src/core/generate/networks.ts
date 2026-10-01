@@ -94,11 +94,12 @@ export function generateRoads(
 ): void {
   // 群系代价（森林/沙漠/山地系数）按**当前地形**取——缓存不落盘+rev 失效（还债步骤 4）
   ensureBiome(world);
-  world.regions = world.regions.filter((r) => r.layerId !== 'road');
   const capitals = world.regions
     .filter((r) => r.layerId === 'country' && r.centerCellId !== undefined)
     .map((r) => ({ id: r.id, cell: r.centerCellId!, name: r.name, color: r.color }));
+  // 校验先于清空（步骤7 已知问题修复）：无法重建时保留既有路网，杜绝「路网归零不可复」
   if (capitals.length < 2) return;
+  world.regions = world.regions.filter((r) => r.layerId !== 'road');
   const rng = createRng(hashSeed(seed, 505));
   void rng;
 
@@ -173,7 +174,6 @@ export function generateRoads(
 
 /** 海港间大圆航线，采样陆地跳过 */
 export function generateRoutes(world: World, seed: number, maxPorts = 8): void {
-  world.regions = world.regions.filter((r) => r.layerId !== 'route');
   const ports: { cell: number; lon: number; lat: number }[] = [];
   for (const c of world.cells) {
     if (c.height > 0 && c.neighbors.some((n) => world.cells[n].height <= 0)) {
@@ -185,7 +185,9 @@ export function generateRoutes(world: World, seed: number, maxPorts = 8): void {
   // 均匀抽 maxPorts
   const step = Math.max(1, Math.floor(ports.length / maxPorts));
   const selected = ports.filter((_, i) => i % step === 0).slice(0, maxPorts);
+  // 校验先于清空（同 generateRoads）：无法重建时保留既有航线
   if (selected.length < 2) return;
+  world.regions = world.regions.filter((r) => r.layerId !== 'route');
 
   let ri = 0;
   for (let i = 0; i < selected.length; i++) {

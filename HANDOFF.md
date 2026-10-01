@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十八轮 5-c 首批。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十九轮 步骤7 大扫除。**
 
 ## 先读
 
@@ -19,7 +19,17 @@
   - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
   - 基线：tsc 0、svelte-check 0 errors。
 
-## 当前状态（第二十八轮完成，5-c 首批待提交；在案：`113d023` 反馈四件 → `ced5e81` 5-b4 → `8e22dac` 5-b5 → 第二十八轮 5-c）
+## 当前状态（第二十九轮完成，步骤7 批待提交；在案：`ced5e81` 5-b4 → `8e22dac` 5-b5 → `20b3c20` 5-c → 第二十九轮 步骤7）
+
+- **◐ 第二十九轮（2026-10-01，还债步骤 7 大扫除：死码/孤儿/两修复全清）**：
+  - **七项死码按当日现状复核**：cellIndex **整文件删**（索引零读者，invalidate 无读者=无效失效）+ rebuildNeighborsFromSharedVerts + NamePlacement/nameStyle + cellsLayer 空桩出双管线；centerLabel/PathFeature.name 判**活**保留；Viewport 旧注释已随重构漂移无存。
+  - **孤儿链全删（外部零调用实证）**：store（applyNature/regenPolitical/regenNetworks/applyHeightmap/measureClick）、CommandService（rename/recolorSelected）、DrawController（roadBreaks）、GenerationService（applyGenPreset/toggleProfile）；**nature.ts 整文件删**+biomes 瘦至 83 行活核+climate.test 删 nature 两案+networks/perf 夹具换 computeBiomes；SOFT_MAX_DENSITY 死导出删；store **888→803**。
+  - **修复①路网**：校验先于清空（roads+routes）——合成探针双分支 verdict=true（早退保留/正常清空）。
+  - **修复②撤销父残留**：undo/redo 补物化 + materializeParentCells 改**精确派生（父≡∪子）**——6/7 对恒等、唯一 extra=历史残留→**自愈 extraNow=[]**、撤销 unrestored=[] 逐位还原。**语义注**：从空重建的前提=「父 cells≡∪子」实测成立（AGENTS §3 字面语义）；若未来出现父直接持有子外 cell 的合法流程，需回看此假设。
+  - **转独立小包三项存量**：容差字面量 65 处 / 图层名硬编码 30 处（=LayerDef 标志位数据模型级）/ as unknown 25 处 11 文件——详见 ROADMAP 步骤7。
+  - 基线：tsc 0、svelte-check 0 errors；冒烟=四次模式切换+建层撤销零错。
+  - 进度：**1 ✓ 2 ✓ 3 ✓ 4 ✓ 5 ◐（剩 shell 协调+两小包）6 ◐ 7 ◐（三项存量转包）**。
+
 
 - **◐ 第二十八轮（2026-10-01，还债 5-c 首批：App 转发器瘦身）**：
   - **审计**：双向比对 39 个 on* 赋值**零死转发**（前轮已清 canPaint/onMoveLayer 类）。
@@ -134,5 +144,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 步骤 7 大扫除**（climate/astro 孤儿、core/nature.ts 死码、路网再生成、父物化撤销残留、容差集中、违契图层名特判）→ 5-c 剩余等 UI 重构线协调。历史面板（地基全就绪）等用户点名。
+- **默认下一包 = 用户点名**：历史面板（地基全就绪）/ 功能包（比例尺·指南针·测量·搜索跳转）/ 步骤7 转出的三小包（容差集中·图层名标志位·as-unknown 收敛）/ 5-c 剩余（等 UI 线）。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。

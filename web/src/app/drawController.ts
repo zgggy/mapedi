@@ -30,7 +30,7 @@ import {
 import { defaultLayerConfig, placementAllows } from '../core/layer/config';
 import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
 import { setHeightStroke } from '../core/draw/heightDraw';
-import { buildRoadSegments, dragRoadEndpoint, roadComponentCount } from '../core/draw/roads';
+import { buildRoadSegments, dragRoadEndpoint } from '../core/draw/roads';
 import { absorbLandCell, releaseOceanCell } from '../core/heightRegions';
 import {
   HeightCellsCommand,
@@ -390,11 +390,5 @@ export class DrawController {
     return buildRoadSegments(world, region);
   }
 
-  roadBreaks(): number {
-    const world = this.ctx.world;
-    if (!world || !this.ctx.draw.targetRegionId) return 0;
-    const region = world.regions.find((r) => r.id === this.ctx.draw.targetRegionId);
-    if (!region || region.cells.length === 0) return 0;
-    return Math.max(0, roadComponentCount(world, region) - 1);
-  }
+
 }

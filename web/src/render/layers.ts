@@ -242,17 +242,7 @@ export const frameLayer: RenderLayer = {
  * 陆地轮廓色由 displayStack 边界内填充（高度层=大陆色，否则黄陆）。
  * 此层只画选中高亮的 cell 描边。
  */
-export const cellsLayer: RenderLayer = {
-  name: 'cells',
-  repeat: true,
-  draw(env) {
-    const { ctx } = env;
-    beginWorld(ctx, env);
-    clipToMapFrame(ctx, env);
-    ctx.restore();
-    endWorld(ctx);
-  },
-};
+
 
 /** ring 补边 frameY：wraps 投影都补（含罗宾森）；周期 = 局部 periodAt（单一真相源） */
 function frameYOf(env: RenderEnv) {
@@ -883,7 +873,6 @@ export const decorationsLayer: RenderLayer = {
  * bg / cellsMesh / elements 三通道由 GL 直绘（见 render/gl/mapRenderer），不再进 2D 管线。
  */
 export const defaultPipeline: RenderLayer[] = [
-  cellsLayer,
   pathsLayer,
   decorationsLayer,
   frameLayer,

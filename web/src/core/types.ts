@@ -99,17 +99,7 @@ export interface LayerDef {
   styleSetId: string;
 }
 
-/** 元素名显示位置与参数（标签跟图层） */
-export interface NamePlacement {
-  cellId?: CellId;
-  lon?: number;
-  lat?: number;
-  dx?: number;
-  dy?: number;
-  rotateDeg?: number;
-  fontSize?: number;
-  visible?: boolean;
-}
+
 
 /** 重叠关系：两元素共享地块（大重叠只记 count，sharedCells 可空） */
 export interface ElementOverlap {
@@ -139,8 +129,6 @@ export interface Region {
   coreLabel?: string;
   /** 兼容旧字段 */
   centerLabel?: string;
-  /** 名称显示位置 */
-  nameStyle?: NamePlacement;
   parentId?: RegionId;
   /** 基本色：与主元素一致；子元素不得单独改基本色 */
   color: string;

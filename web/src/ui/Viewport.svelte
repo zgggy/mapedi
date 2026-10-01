@@ -19,11 +19,7 @@
     type HoverInfo,
   } from '../render/map2d';
   import { getProjCache } from '../render/projCache';
-  import {
-    cellsLayer,
-    frameLayer,
-    pathsLayer,
-  } from '../render/layers';
+  import { frameLayer, pathsLayer } from '../render/layers';
   import {
     screenToContentLonLat,
     unwrapXAgainst,
@@ -201,7 +197,7 @@
    * Esc / 退出绘制后控件消失，不能再画。
    */
   const pathEdit = $derived(isFreeLayer && drawActive);
-  const pathPipeline = [cellsLayer, pathsLayer, frameLayer];
+  const pathPipeline = [pathsLayer, frameLayer];
   /** 拖点时的原曲线（虚线幽灵） */
   let dragGhostPts = $state<LonLat[] | null>(null);
 

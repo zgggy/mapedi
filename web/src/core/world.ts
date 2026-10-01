@@ -7,8 +7,6 @@ import { migrateToPathFeature } from './paths';
 import { getCellGrid, invalidateCellGrid } from './index/cellGrid';
 
 export const DEFAULT_DENSITY = 100000;
-/** 软上限：超过需用户确认解锁；不是生成链的钳制 */
-export const SOFT_MAX_DENSITY = 100000;
 /** 硬上限：生成链唯一钳制点（store.generate）；UI 输入框 max 与此一致 */
 export const HARD_MAX_DENSITY = 200000;
 
@@ -275,62 +273,6 @@ export function canonicalizeCellPolygons(world: World): void {
   }
 }
 
-/**
- * 邻接 = **共享一条边（≥2 个角点）**。
- * 只共一个角点不算；kNN 假邻居一律丢弃。
- */
-export function rebuildNeighborsFromSharedVerts(world: World): void {
-  const vertOwner = new Map<string, number[]>();
-  for (const c of world.cells) {
-    if (!c?.polygon?.length) continue;
-    const seen = new Set<string>();
-    for (const p of c.polygon) {
-      const k = lonlatKey(p);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      let a = vertOwner.get(k);
-      if (!a) {
-        a = [];
-        vertOwner.set(k, a);
-      }
-      a.push(c.id);
-    }
-  }
-  const pairHits = new Map<string, number>();
-  const pairIds = new Map<string, [number, number]>();
-  for (const owners of vertOwner.values()) {
-    for (let i = 0; i < owners.length; i++) {
-      for (let j = i + 1; j < owners.length; j++) {
-        const a = Math.min(owners[i], owners[j]);
-        const b = Math.max(owners[i], owners[j]);
-        const ek = `${a}-${b}`;
-        pairHits.set(ek, (pairHits.get(ek) ?? 0) + 1);
-        pairIds.set(ek, [a, b]);
-      }
-    }
-  }
-  const adj = new Map<number, Set<number>>();
-  for (const [ek, hits] of pairHits) {
-    if (hits < 2) continue;
-    const [a, b] = pairIds.get(ek)!;
-    let sa = adj.get(a);
-    if (!sa) {
-      sa = new Set();
-      adj.set(a, sa);
-    }
-    sa.add(b);
-    let sb = adj.get(b);
-    if (!sb) {
-      sb = new Set();
-      adj.set(b, sb);
-    }
-    sb.add(a);
-  }
-  for (const c of world.cells) {
-    const s = adj.get(c.id);
-    c.neighbors = s ? [...s] : [];
-  }
-}
 
 /**
  * 从 cells 多边形重建 sharedEdges（缺档兜底）。

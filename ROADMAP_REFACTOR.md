@@ -61,10 +61,18 @@
 - **验收**：**同状态 stash A/B（旧码 vs 新码、零交互默认态）最终 diff=0.0%**（首次 7.1% = 渐现时序，3s 后完全收敛）；帧 p50 9.7ms 无回归；tsc/svelte-check 0。
 - **✗ 缓发（含理由）**：④ 世界副本数 GL/2D 统一——副本机制是历史 bug 旋涡（硬教训1），合并需全量副本回归另立包；⑤ borderCache 键补 regionsRev——与「件环不删缓存、Δ 补丁即机制」红线冲突（键上加 rev 会把补丁作废成全量重算），运行时断言随翻转探针包一起做；⑥ flip 探针降级 debug 断言（可选项，随定向包）。
 
-### ☐ 7. 大扫除（P2，随时可做，建议搭车）
+### ◐ 7. 大扫除（P2）——2026-10-01 第二十九轮：死码/孤儿/两修复全清，三项存量转独立小包
 
-- **内容**：死代码七项（`cellIndex.ts`、`rebuildNeighborsFromSharedVerts`、`NamePlacement`/`nameStyle`、`PathFeature.name` 展示或删、`cellsLayer`、`centerLabel` 双写、`Viewport:777` 旧注释）；容差集中为 `tolerances` 模块（三套量化精度并存）；违契图层名特判（`'cells'`/`'landsea'`/`isFreeLayer`）；`as unknown` 封装破洞收敛。
-- **验收**：grep 零残留；`npm run check` 0 errors。
+- **✓ 死代码七项清账**（逐项按当日现状复核，非照抄评审行号）：
+  - `cellIndex.ts` **整文件删除**——索引机器（CellIndex/getCellIndex）零读者，仅剩的 invalidate 无读者=无效失效 → 连 store/changePipeline 的调用一并删；
+  - `rebuildNeighborsFromSharedVerts` 零调用 ✓ 删；`NamePlacement`+`Region.nameStyle` 随 cellIndex 死亡链 ✓ 删；`cellsLayer` 空桩（draw=空 pass）出 **Viewport pathPipeline 与 defaultPipeline 双管线** ✓ 删；
+  - `centerLabel` 判**活**（validate.ts 消费）保留；`PathFeature.name` 判**活**（路径行展示）保留；`Viewport 旧注释`随重构漂移无存 ✓。
+- **✓ 孤儿判定与删除（外部零调用实证）**：store 链 `applyNature/regenPolitical/regenNetworks/applyHeightmap/measureClick`、CommandService `renameSelected/recolorSelected`、DrawController `roadBreaks`、GenerationService `applyGenPreset/toggleProfile`（presets 无 UI 入口）全删；**`core/nature.ts` 整文件删**（应用零引用，测试手术随行）；biomes 瘦身至活核 83 行（删 generateBiomes/syncEnvironmentRegions/BIOME_META/biomeAt/environmentRegions/sampleBiomeSeed）；测试=climate.test 删 nature 两案、networks/perf 夹具 `generateBiomes→computeBiomes`；`SOFT_MAX_DENSITY` 死导出删；store 孤儿 import 清（**888→803**）。
+- **✓ 两修复**：
+  - **路网清空先于早退**（已知问题）：generateRoads/generateRoutes 改**校验先于清空**——合成探针双分支实测 verdict=true（早退保留既有路网 / 正常重建照常清空）；
+  - **撤销后父层残留**（5-b4 发现的预存缺口）：CommandService undo/redo 补 `materializeParentCells`，且物化实现由「从父现有并=**只加不减**」改为**精确派生（父≡∪子，AGENTS §3 字面语义）**——实测 7 对父子中 6 对恒等、唯一 extra 全为历史残留本身 → 改后**自愈**（extraNow=[]）+ 撤销逐位还原（unrestored=[]）、深度 0、零错。
+- **☐ 转独立小包的三项存量（本日实测，非 grep 删除级）**：① 容差集中——数值字面量 **65 处**散布（需先归类语义再建 tolerances 模块）；② 违契图层名特判 **30 处**（landsea/height/cells 硬编码，修法=LayerDef 标志位=数据模型级改动）；③ `as unknown` 收敛 **25 处/11 文件**。
+- **验收达成部分**：grep 死码零残留 ✓；npm check 0 errors ✓（tsc/svelte-check 绿）。三项存量按拆包纪律各自立项。
 
 ---
 

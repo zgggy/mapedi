@@ -10,7 +10,6 @@
 import type { World } from '../core/types';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
-import { invalidateCellIndex } from '../core/index/cellIndex';
 import { invalidateProjCache } from '../render/projCache';
 import { invalidateBorderCache } from '../render/borderCache';
 import { bumpAllRev, bumpHeightRev, bumpRegionsRev } from '../core/rev';
@@ -60,7 +59,6 @@ export class ChangePipeline {
   /** 仅 Region 归属/排序/颜色：不重建投影缓存 */
   touchRegions(): void {
     invalidateRegionIndex();
-    invalidateCellIndex();
     invalidateBorderCache();
     bumpRegionsRev();
     materializeParentCells(this.ctx.world!);
@@ -77,7 +75,6 @@ export class ChangePipeline {
   /** 归属提交（增量）：bump data rev + 调用方标脏；不动静态贴图/边界缓存（rev 键自愈） */
   touchRegionsIncremental(): void {
     invalidateRegionIndex();
-    invalidateCellIndex();
     bumpRegionsRev();
     materializeParentCells(this.ctx.world!);
     this.swapIdentity();
