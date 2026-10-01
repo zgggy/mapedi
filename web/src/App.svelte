@@ -427,7 +427,6 @@
     onAddLayer={(n) => editor.addLayer(n)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
     expandPanel={layerExpand}
-    onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyLayer={(id) => editor.copyItem(id)}
     onDeleteLayer={(id) => editor.deleteItem(id)}
   />

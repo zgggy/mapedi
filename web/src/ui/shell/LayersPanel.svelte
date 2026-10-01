@@ -25,7 +25,6 @@
     onDrawLayer,
     onAddLayer,
     onRandomName,
-    onMoveLayer,
     onCopyLayer,
     onDeleteLayer,
     expandPanel,
@@ -46,8 +45,6 @@
     onAddLayer?: (name: string) => void;
     /** 随机名（返回生成的名字，本面板回填文本框） */
     onRandomName?: () => string;
-    /** 右键菜单：上移/下移一层（dir=-1 上移） */
-    onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
     onCopyLayer?: (id: string) => void;
     /** 右键菜单：删除 */

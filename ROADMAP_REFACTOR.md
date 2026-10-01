@@ -11,10 +11,10 @@
 
 依据：评审 §6。原则 = AGENTS §6 整包交付；**步骤 1 是后续一切（含未来叙事编辑器第 0 包）的地基**。
 
-### ◐ 1. 变更纪律闭环（P0）——1-a ✓（`3b43698`）、1-b 部分 ✓（`4492ba4`），2026-09-30
+### ◐ 1. 变更纪律闭环（P0）——1-a ✓（`3b43698`）、1-b ✓（`4492ba4`→`43ff5d1`→第十八轮），2026-10-01
 
-- **内容**：① 修 undo 腐蚀——**✓ 1-a**：笔画快照-diff 多元素补丁（`MultiRegionCommand`）；② 高频直改命令化——**◐ 1-b 已覆盖**：显隐（3 树连动整批）、样式、建层、保存信息（改名/描述/颜色）、外交三操作（`RegionFields/LayersVisibility/LayerStyle/AddLayer` 四纯数据命令 + `patchRegions` 快照执行器）；**1-b 进展**：✓ **路径域全清（2026-10-01）**——`withPaths` 快照执行器 + 控制点拖动会话（begin/commit，一次手势一条命令）+ `PathsCommand`（apply/revert 手动平面拷贝）覆盖 Viewport 六处（建线/增点/删点/拖点/起草）与 store 五处（删除/显隐/顺序/复制/新建·重命名）；**坑：path.points 经 $state 深代理，structuredClone 必炸**（DataCloneError）→ 快照与 apply 全用手动平面拷贝 + `dispatchSave` 克隆失败先规范化重试一次；**剩余：图层树拖拽排序（dragLayer）/图层复制 deleteItem 图层支/气候 astro 命令化、道路端点 endpointOverrides（region 域，独立于 paths）**；③ 命令纯数据化——**☐ 1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在（历史面板的唯一前置）。
-- **验收**：每类编辑撤销后 world 与改前**逐位一致**（"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a/1-b 已验（浏览器干净复测：撤笔画还原/显隐三态/改名列表回滚/建层消失，零错误）。
+- **内容**：① 修 undo 腐蚀——**✓ 1-a**：笔画快照-diff 多元素补丁（`MultiRegionCommand`）；② 高频直改命令化——**✓ 1-b 已全覆盖**：显隐（3 树连动整批）、样式、建层、保存信息（改名/描述/颜色）、外交三操作（`RegionFields/LayersVisibility/LayerStyle/AddLayer` 四纯数据命令 + `patchRegions` 快照执行器）、顺序（`moveItemStep`）、**路径域（`43ff5d1`）**——`withPaths` 快照执行器 + 控制点拖动会话（begin/commit，一次手势一条命令）+ `PathsCommand`（apply/revert 手动平面拷贝）覆盖 Viewport 六处与 store 五处（**坑：path.points 经 $state 深代理，structuredClone 必炸** → 手动平面拷贝 + `dispatchSave` 规范化重试）、**复制·删除·拖拽死码（第十八轮）**——`copyItem` 层支 `AddLayerCommand`/元素支 `CreateRegionCommand(at)`、`deleteItem` 层支 `DeleteLayerCommand`（ctor 快照层定义+regions+renderCfg，revert 全量恢复）、`dragLayer/dragRegion`/DropHint/`onMoveLayer` 死码删除（十轮拖动退役后零调用）；**判定残余（不阻塞 1-b 收口）**：climate/astro 无 UI 写入口=孤儿归步骤 7 大扫除、道路端点 `endpointOverrides` 属 region 域（独立于 paths，随 1-c 收口核对）；③ 命令纯数据化——**☐ 1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在（历史面板的唯一前置）。
+- **验收**：每类编辑撤销后 world 与改前**逐位一致**（"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a/1-b 已验（浏览器干净复测：撤笔画还原/显隐三态/改名列表回滚/建层消失/路径拖点撤销还原、**第十八轮：元素复制 9→8 撤销、图层复制 15→16→15、建层→右键删除→Ctrl+Z 恢复 15→16→15→16，零 error overlay**）。
 
 ### ✓ 2. GL 恢复路径（P0，单点故障）——2026-10-01 完成
 

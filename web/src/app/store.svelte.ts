@@ -20,6 +20,7 @@ import {
   LayersVisibilityCommand,
   LayerStyleCommand,
   AddLayerCommand,
+  DeleteLayerCommand,
   RegionsOrderCommand,
   LayersOrderCommand,
   LayerFieldsCommand,
@@ -62,11 +63,8 @@ import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
 import { defaultPathColor } from '../core/paths';
 import {
   demoteRegionAsChild,
-  promoteRegionToParentLayer,
-  applyRegionDrop,
   moveAmongSiblings,
   siblingRegions,
-  type DropHint,
 } from '../core/regionOps';
 import { defaultExclusiveColor } from '../core/layer/style';
 import { unifiedGenerate } from '../core/generate/unified';
@@ -1092,14 +1090,15 @@ export class EditorStore {
     // 图层
     const layer = this.world.layers.find((l) => l.id === id);
     if (layer) {
-      const n = this.world.layers.filter((l) => l.id.startsWith('custom-')).length + 1;
       const nid = `custom-${Date.now().toString(36)}`;
-      this.world.layers.push({
+      const copy = {
         ...layer,
         id: nid,
         name: `${layer.name || id} 副本`,
         parentLayerId: layer.parentLayerId,
-      });
+      };
+      // 1-b：复制图层入栈（AddLayerCommand 天然支持整层 add/remove undo）
+      history.run(this.world, new AddLayerCommand(copy, '复制图层'));
       this.touchWorld();
       this.focusLayer = nid;
       this.status = '已复制图层（样式与设置，不含元素）';
@@ -1136,7 +1135,8 @@ export class EditorStore {
         overlaps: [],
       };
       const idx = this.world.regions.indexOf(r);
-      this.world.regions.splice(idx + 1, 0, copy);
+      // 1-b：复制元素入栈（at=原件后一位，列表位置与直插一致）
+      history.run(this.world, new CreateRegionCommand(copy, '复制元素', idx + 1));
       this.selectedRegionId = nid;
       this.touchRegions();
       this.status = `已复制「${r.name}」（空胞副本，涂画填充）`;
@@ -1151,9 +1151,11 @@ export class EditorStore {
         this.status = '内置图层不可删除';
         return;
       }
-      this.world.layers = this.world.layers.filter((l) => l.id !== id);
-      this.world.regions = this.world.regions.filter((r) => r.layerId !== id);
-      this.world.layerRenderConfig?.delete(id);
+      const layer = this.world.layers.find((l) => l.id === id)!;
+      // 1-b：删除图层入栈（层定义+其元素+渲染配置整包恢复；undo 后焦点保持 cells——UI 态不入历史）
+      const cmd = new DeleteLayerCommand(layer, this.world);
+      cmd.apply(this.world);
+      history.run(this.world, cmd, { alreadyApplied: true });
       if (this.focusLayer === id) this.focusLayer = 'cells';
       this.touchWorld();
       this.status = '已删除图层';
@@ -1429,86 +1431,6 @@ export class EditorStore {
   focusLayerForDraw(id: string) {
     this.selectLayerTop(id);
     this.notify();
-  }
-
-  /** 图层拖拽 */
-  dragLayer(
-    fromId: string,
-    hint: { kind: 'nest'; targetId: string; nestFirst?: boolean } | { kind: 'gap'; afterId: string | null } | { kind: 'root' },
-  ) {
-    if (!this.world) return;
-    const layers = this.world.layers;
-    const from = layers.find((l) => l.id === fromId);
-    if (!from) return;
-
-    if (hint.kind === 'root') {
-      if (from.parentLayerId) {
-        from.parentLayerId = undefined;
-        this.touchRegions();
-        this.status = `${from.name || fromId} 已提到顶层`;
-      } else {
-        const fi = layers.indexOf(from);
-        layers.splice(fi, 1);
-        layers.push(from);
-        this.touchRegions();
-        this.status = '已排序图层';
-      }
-      return;
-    }
-
-    if (hint.kind === 'nest') {
-      if (fromId === hint.targetId) return;
-      let cur: string | undefined = hint.targetId;
-      while (cur) {
-        if (cur === fromId) {
-          this.status = '不能形成循环';
-          return;
-        }
-        cur = layers.find((l) => l.id === cur)?.parentLayerId;
-      }
-      from.parentLayerId = hint.targetId;
-      this.touchRegions();
-      this.status = `${from.name || fromId} → 子层 of ${hint.targetId}`;
-      return;
-    }
-
-    const afterId = hint.afterId;
-    const parentKey = from.parentLayerId ?? null;
-    if (!afterId) {
-      const sibs = layers.filter((l) => (l.parentLayerId ?? null) === parentKey);
-      const fi = layers.indexOf(from);
-      layers.splice(fi, 1);
-      const firstOther = sibs.find((l) => l.id !== fromId);
-      if (firstOther) {
-        const ti = layers.indexOf(firstOther);
-        layers.splice(ti, 0, from);
-      } else {
-        layers.unshift(from);
-      }
-      this.touchRegions();
-      this.status = '已插入到最前';
-      return;
-    }
-    const after = layers.find((l) => l.id === afterId);
-    if (!after) return;
-    if ((from.parentLayerId ?? null) !== (after.parentLayerId ?? null)) {
-      from.parentLayerId = after.parentLayerId;
-    }
-    const fi = layers.indexOf(from);
-    layers.splice(fi, 1);
-    const ai = layers.indexOf(after);
-    layers.splice(ai + 1, 0, from);
-    this.touchRegions();
-    this.status = '已排序图层';
-  }
-
-  /** 工作区元素拖拽（统一 applyRegionDrop） */
-  dragRegion(fromId: string, hint: DropHint) {
-    if (!this.world) return;
-    const r = applyRegionDrop(this.world, fromId, hint);
-    this.touchRegions();
-    this.status = r.message;
-    if (r.ok) this.selectedRegionId = fromId;
   }
 
   createRegion(layerId: string, parentId?: string) {

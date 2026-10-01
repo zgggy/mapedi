@@ -299,14 +299,18 @@ export class CreateRegionCommand implements EditCommand {
   constructor(
     private region: Region,
     public label = '新增元素',
+    /** 插入位置（复制元素=原件后一位）；缺省追加尾部 */
+    private at?: number,
   ) {}
 
   apply(world: World): void {
     if (findRegion(world, this.region.id)) return;
-    world.regions.push({
-      ...this.region,
-      cells: [...this.region.cells],
-    });
+    const entry = { ...this.region, cells: [...this.region.cells] };
+    if (this.at !== undefined && this.at >= 0 && this.at <= world.regions.length) {
+      world.regions.splice(this.at, 0, entry);
+    } else {
+      world.regions.push(entry);
+    }
   }
 
   revert(world: World): void {
@@ -421,6 +425,50 @@ export class AddLayerCommand implements EditCommand {
 
   revert(world: World): void {
     world.layers = world.layers.filter((l) => l.id !== this.layer.id);
+  }
+}
+
+/** 删除图层（1-b 图层树删除命令化）：层定义 + 其元素 + 渲染配置整包快照，
+ *  apply=删（调用方 alreadyApplied），revert=全量恢复（元素含 cells/Set/Map 深拷贝）。 */
+export class DeleteLayerCommand implements EditCommand {
+  private regions: Region[];
+  private renderCfg: [string, NonNullable<World['layerRenderConfig']> extends Map<string, infer V> ? V : never][];
+
+  constructor(private layer: World['layers'][number], world: World, public label = '删除图层') {
+    this.regions = world.regions
+      .filter((r) => r.layerId === layer.id)
+      .map((r) => ({
+        ...r,
+        cells: [...r.cells],
+        adjacentElementIds: r.adjacentElementIds ? new Set(r.adjacentElementIds) : undefined,
+        weights: r.weights ? new Map(r.weights) : undefined,
+        endpointOverrides: r.endpointOverrides ? new Map(r.endpointOverrides) : undefined,
+        overlaps: r.overlaps ? [...r.overlaps] : r.overlaps,
+      }));
+    const cfg = world.layerRenderConfig?.get(layer.id);
+    this.renderCfg = cfg ? [[layer.id, cfg]] : [];
+  }
+
+  apply(world: World): void {
+    world.layers = world.layers.filter((l) => l.id !== this.layer.id);
+    world.regions = world.regions.filter((r) => r.layerId !== this.layer.id);
+    world.layerRenderConfig?.delete(this.layer.id);
+  }
+
+  revert(world: World): void {
+    if (!world.layers.some((l) => l.id === this.layer.id)) world.layers.push({ ...this.layer });
+    for (const r of this.regions) {
+      if (!world.regions.some((x) => x.id === r.id)) {
+        world.regions.push({
+          ...r,
+          cells: [...r.cells],
+          adjacentElementIds: r.adjacentElementIds ? new Set(r.adjacentElementIds) : undefined,
+          weights: r.weights ? new Map(r.weights) : undefined,
+          endpointOverrides: r.endpointOverrides ? new Map(r.endpointOverrides) : undefined,
+        });
+      }
+    }
+    if (world.layerRenderConfig) for (const [k, v] of this.renderCfg) world.layerRenderConfig.set(k, v);
   }
 }
 

@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**当前提交 `bed0880`（第十轮文档），工作区干净。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第十八轮 1-b 收尾批（接 `43ff5d1` 路径包）。**
 
 ## 先读
 
@@ -16,9 +16,16 @@
 
 用户九点：① 缩进无视觉效果→button 内最左侧短竖线 ② 缩进/提升顺序乱（未变成上一个图层的子图层）③ 元素面板无缩进/提升两钮 ④ 展开后为空→直接不能展开 ⑤ ul 与 panel 左右间距再小 ⑥ 图层/元素列表不能滚动（连续三轮）⑦ 结构定稿（创建行文本框兼搜索+🎲+加，拉满同 button 宽；两面板同构；独立搜索行退役）⑧ 任何模式 button 上无操作控件，滑块只在高度元素展开内容 ⑨ （隐含）检查/绘制模式展开各含一个高度滑块。
 
-## 当前状态（第十八轮进行中，**工作区含 1-b 路径包未提交**；`8bdec59` 基线 + `03a7756` 渲染批已提交）
+## 当前状态（第十八轮完成并提交（git log 头）；在案提交：`8bdec59` 基线 → `03a7756` 渲染批 → `43ff5d1` 1-b 路径包 → 第十八轮 1-b 收尾）
 
-- **✓ 1-b 路径编辑命令化（2026-10-01 完成，浏览器全链验收）**：`withPaths(label, fn)`（前后整表快照→有变化才入栈 `PathsCommand`→统一 touch）+ 控制点拖动会话 `beginPathsDrag/commitPathsDrag`（移动过程直改、up 一条命令）。覆盖：Viewport 六处（双击建线/空路径两点成线/插入/删除/拖点会话/草稿提交）、store 五处（删除/显隐/上移下移顺序/复制/新建·重命名）。**⚠ 大坑：`path.points` 经组件 `$state` 深代理 → `structuredClone` DataCloneError**——快照/apply 全改**手动平面拷贝**（{...p, points: map({lon,lat})}）；连带 autosave Worker 克隆 world 也炸 → `dispatchSave` 捕获后先 `snapPaths` 规范化重试一次（实测 Worker 保存恢复、无降级提示）。**验收**：建线 pts0→2、拖点坐标变化、撤销1 精确回拖前、撤销2 回 []、autosaveAt 正常刷新。**1-b 剩余**：图层树 dragLayer 排序、图层/元素 copyItem 命令化、climate/astro、道路端点（region 域）。
+- **✓ 第十八轮（2026-10-01，1-b 收尾：复制/删除命令化 + 拖拽死码清理，浏览器全链验收）**：
+  - **命令化**：`copyItem` 层支 → `history.run(world, new AddLayerCommand(copy,'复制图层'))`、元素支 → `new CreateRegionCommand(copy,'复制元素', idx+1)`（**新增 `at` 参数**：复制插原位之后）；`deleteItem` 层支 → 新 **`DeleteLayerCommand`**（ctor 快照层定义+其 regions（cells/Set/Map 深拷贝）+renderCfg；apply=删、revert=全量恢复；`alreadyApplied:true` 执行后入栈）。
+  - **死码**：store `dragLayer/dragRegion`/DropHint import（十轮拖动退役后零调用）、LayersPanel+App 死 prop `onMoveLayer` 一并删除。
+  - **验收**：元素复制（右键「复制一个」9行→Ctrl+Z 回8，副本消失）✓；图层复制（15→16→15）✓；建层→右键删除→Ctrl+Z 恢复（15→16→15→16）✓；全程零 error overlay；测试层已清理（终态 15 原始行）。tsc/svelte-check 0 errors。
+  - **1-b 收口**：剩 climate/astro（无 UI 写入口=孤儿，归步骤 7 判定）、道路端点 `endpointOverrides`（region 域，随 1-c 核对）。**下一包 = 1-c 命令纯数据化（历史面板唯一前置）**。
+  - **测试坑**：编辑后 HMR 整页重载会把整段 evaluate 拖到 32s 超时（两次误判为 copy 死循环）→ 先跑活体探针（页内自旋 50ms）再分步执行；本 runtime **globals 不跨 evaluate 调用**，每次都要重挂 setupBrowserRuntime。
+
+- **✓ 1-b 路径编辑命令化（2026-10-01 完成并提交 `43ff5d1`，浏览器全链验收）**：`withPaths(label, fn)`（前后整表快照→有变化才入栈 `PathsCommand`→统一 touch）+ 控制点拖动会话 `beginPathsDrag/commitPathsDrag`（移动过程直改、up 一条命令）。覆盖：Viewport 六处（双击建线/空路径两点成线/插入/删除/拖点会话/草稿提交）、store 五处（删除/显隐/上移下移顺序/复制/新建·重命名）。**⚠ 大坑：`path.points` 经组件 `$state` 深代理 → `structuredClone` DataCloneError**——快照/apply 全改**手动平面拷贝**（{...p, points: map({lon,lat})}）；连带 autosave Worker 克隆 world 也炸 → `dispatchSave` 捕获后先 `snapPaths` 规范化重试一次（实测 Worker 保存恢复、无降级提示）。**验收**：建线 pts0→2、拖点坐标变化、撤销1 精确回拖前、撤销2 回 []、autosaveAt 正常刷新。**1-b 剩余**：图层树 dragLayer 排序、图层/元素 copyItem 命令化、climate/astro、道路端点（region 域）。
 
 
 - **⚠→✅ 渲染错乱根因（2026-10-01 用户报障 → 已修）**：本批 `ensureMapGl` 在 renderer 创建**之前**调用了无参 `glCanvas.getContext('webgl2')`——**WebGL 上下文属性由首次调用者决定**，无参默认建出 `alpha/depth=true、stencil=false` 的上下文，renderer 请求的 `stencil:true` 被静默忽略 → **轮廓 stencil/evenodd 填色掩码全废 = 渲染错乱**（复现实证：错乱会话 `getContextAttributes()` = alpha:true/depth:true/**stencil:false**）。修法：ensureMapGl 彻底不再自己 getContext，丢失判定改用 renderer 自带 `isLost()`，创建只走 `MapGlRenderer.create`（首个调用者=renderer ✓ 属性归正）。**验收：修复后 attrs = alpha:false/depth:false/stencil:true 与 renderer 请求完全一致**；沉降后统计与基线一致（meanR57/distinct≈基线），早段差异=渐现时序噪声（见方法论）。基线存档提交 `8bdec59`（第十一~十四轮+速修包，渲染批之前）。
@@ -61,9 +68,9 @@
 
 ## 遗留清单（按优先级）
 
-1. **1-b 剩余**：路径点编辑（Viewport 8 处直改）、paths 数组序、图层复制/删除命令化、climate/astro。
-2. **1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在——**历史面板的唯一前置**。
-3. 还债步骤 2/3/4（GL 恢复路径、存档链路硬化、cellClimate 真相归位）——见 ROADMAP_REFACTOR。
+1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓（本批）；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域随 1-c 核对）。
+2. **1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在——**历史面板的唯一前置**，= 下一包。
+3. 还债步骤 **2 ✓ / 3 ✓ / 6 ◐**（2026-10-01 已完，见 ROADMAP_REFACTOR）、**步骤 4** cellClimate 真相归位（P0 未动）、步骤 5 拆分、步骤 7 大扫除。
 4. ~~两面板创建行共用 newName~~ **已拆**（第十二轮：各面板局部 text 独立过滤）；全局 newName 现只服务子级 CreateBox。
 5. 同类 stale 潜力点按 view 快照模式逐步收编（DisplayStylePanel 内部直读 style 的模板等——见 ROADMAP_REFACTOR 已知问题表）。
 6. **专属色/外交 = UI 已删、数据层 legacy 保留**：`Region.exclusiveColor`、`core/diplomacy.ts`、piece 传递与 regionOps 自动填充仍在（无 UI 入口）——若要"概念彻底消失"需动渲染/序列化，待用户拍板再清。
@@ -100,7 +107,7 @@
 2. 契约变更落 AGENTS（写日期+用户原话语义）；状态落 ROADMAP 系；交接只放轮次摘要与教训。
 3. 交付说明 = 问题/原理/预期效果；整包交付；**不主动跑测试**；显示不打折；先根因后表现。
 
-## 下一轮候选（第十一轮之外）
+## 下一轮候选
 
-- 还债步骤 2（GL 恢复路径，P0 单点黑屏）或 3（存档硬化）；历史面板（依赖 1-c）。
-- 待用户复核：组织模式"提升=上溯最老祖先"语义；海陆案 A（产品级删层）；生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）。
+- **默认下一包 = 1-c 命令纯数据化**（`PatchRegionsCommand`/`HeightStrokeCommand` 闭包 → 纯数据；历史面板唯一前置）→ 之后：步骤 4 cellClimate（P0）→ 步骤 5 store/Viewport 拆分 → 步骤 7 大扫除（顺带判 climate/astro 孤儿）。
+- 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。
