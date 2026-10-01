@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十六轮 5-b4 批。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十七轮 5-b5 批。**
 
 ## 先读
 
@@ -19,7 +19,13 @@
   - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
   - 基线：tsc 0、svelte-check 0 errors。
 
-## 当前状态（第二十六轮完成，5-b4 批待提交；在案：`3d497dc` 插单 → `47023e5` 5-b3 → `113d023` 反馈四件 → 第二十六轮 5-b4）
+## 当前状态（第二十七轮完成，5-b5 批待提交；在案：`47023e5` 5-b3 → `113d023` 反馈四件 → `ced5e81` 5-b4 → 第二十七轮 5-b5）
+
+- **✓ 第二十七轮（2026-10-01，还债 5-b5：CommandService 命令 CRUD 出库）**：
+  - `app/commandService.ts`（814 行）：undo/redo+类型分发/删·复制·吞并/图层树缩进·提升·移序/样式·显隐·透明度/路径快照执行器+拖动会话/字段快照执行器/新建·重命名·换色全量出库——**方法体原样搬运**（`this.*` 经类内代理映射 Ctx，零改写，diff 安全）；选中类留 store（App 直连）。store **2045→888**。
+  - **验收（八组门面回归）**：建层/元素复制/删除层/缩进提升/显隐/样式/withPaths/patchRegions 全经 facade 生效+撤销回滚；样式真值 border.width 0.8→4.2→0.8；栈归零、IDB 15 层清净（测试层无残留）、零 console 错；tsc/svelte-check 0、孤儿 import 29 项清。
+  - **验证教训（入 quirks）**：undo 换 world 身份后**数组长度断言读旧引用=假阴**（曾把八组里六组误判失败）——对象字段级断言 + `history.depth` 栈计数 + IDB 实读三口径才可信。
+  - 子包进度：5-a ✓ 5-b1 ✓ 5-b2 ✓ 5-b3 ✓ 反馈四件 ✓ 5-b4 ✓ **5-b5 ✓** / 5-c App 回调瘦身 ☐ / 步骤 7 ☐。
 
 - **✓ 第二十六轮（2026-10-01，还债 5-b4：DrawController 绘制会话出库——今天收工批）**：
   - `app/drawController.ts`（400 行）：会话启停（成员/高度/道路）+ 笔刷命中 + **笔画快照-diff 入栈**（undo 腐蚀采集端）+ 洪水填充/设中心/道路端点；paintDirty/strokeSnap/高度样本/区间选择随类迁移；Ctx 注入选中/状态/失效族（$state 写留 store 闭包）；store 六段 facade 零调用点改动（**1686→1462**）。
@@ -122,5 +128,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 5-b5 CommandService（命令 CRUD 出库，facade+Ctx 同款）**→ 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除（climate/astro 孤儿、nature.ts 死码、路网再生成、父物化撤销残留）。历史面板（1-c 前置已清）等用户点名。
+- **默认下一包 = 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除**（climate/astro 孤儿、nature.ts 死码、路网再生成、父物化撤销残留）。历史面板（1-c 前置已清、门面/服务就绪）等用户点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。

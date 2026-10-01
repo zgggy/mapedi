@@ -5,66 +5,25 @@ import { installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateCellIndex } from '../core/index/cellIndex';
 import { invalidateCellGraph } from '../core/index/cellGraph';
 import { invalidateViewIndex } from '../render/viewIndex';
-import {
-  AnnexCommand,
-  CreateRegionCommand,
-  DeleteRegionCommand,
-  HeightCellsCommand,
-  RegionFieldsCommand,
-  PathsCommand,
-  LayersVisibilityCommand,
-  LayerStyleCommand,
-  AddLayerCommand,
-  DeleteLayerCommand,
-  RegionsOrderCommand,
-  LayersOrderCommand,
-  LayerFieldsCommand,
-  type EditCommand,
-  history,
-} from '../core/history';
+import { history } from '../core/history';
 import { ChangePipeline } from './changePipeline';
 import { AutosaveService } from './autosaveService';
 import { GenerationService } from './generationService';
 import { DrawController } from './drawController';
-import { setRegionColor } from '../core/regionOps';
+import { CommandService } from './commandService';
 import { createRng } from '../core/rng';
-import {
-  adjustWeights,
-  emptyDrawSession,
-  removeCellsFromRegion,
-  shareCellsWithOthers,
-  type DrawSession,
-  type DrawTool,
-} from '../core/draw/brush';
+import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
 import { computeClimate } from '../core/climate';
 import { generateBiomes } from '../core/biomes';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
-import {
-  defaultLayerVisible,
-  isFreeLayer as isFreeLayerDef,
-  visibleColorRoots,
-} from '../core/displayCompose';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { loadWorldAsync } from '../core/generate/runGenerate';
 import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
-import { defaultPathColor } from '../core/paths';
-import {
-  demoteRegionAsChild,
-  moveAmongSiblings,
-  siblingRegions,
-} from '../core/regionOps';
-import { defaultExclusiveColor } from '../core/layer/style';
 import { unifiedGenerate } from '../core/generate/unified';
 import { genConfigFromParams } from '../core/layer';
-import {
-  patchElementStyle,
-  clampElementStyle,
-  type ElementStyle,
-  type ElementStylePatch,
-} from '../core/layer/style';
-import { resolveLayerStyle } from '../core/layer/config';
+import type { ElementStyle, ElementStylePatch } from '../core/layer/style';
 import { generateRoads, generateRoutes } from '../core/generate/networks';
 import { generateRivers } from '../core/rivers';
 import { applyHeightmapFile } from '../core/heightmap';
@@ -302,7 +261,7 @@ export class EditorStore {
     get world() {
       return worldRaw;
     },
-    snapPaths: (w) => EditorStore.snapPaths(w),
+    snapPaths: (w) => CommandService.snapPaths(w),
     setAutosaveAt: (v) => {
       ui.autosaveAt = v;
     },
@@ -377,6 +336,56 @@ export class EditorStore {
     touchRegions: () => this.touchRegions(),
     touchRegionsIncremental: () => this.touchRegionsIncremental(),
     touchPaint: () => this.touchPaint(),
+    markHeightDirty: (ids) => this.markHeightDirty(ids),
+    flushHeightRegions: (samples) => this.flushHeightRegions(samples),
+  });
+
+  /** 命令 CRUD 与历史门面（还债 5-b5）——选中/焦点/状态/失效族经闭包注入 */
+  private readonly cmds = new CommandService({
+    get world() {
+      return worldRaw;
+    },
+    get selectedRegionId() {
+      return ui.selectedRegionId;
+    },
+    set selectedRegionId(v) {
+      ui.selectedRegionId = v;
+    },
+    get focusLayer() {
+      return ui.focusLayer;
+    },
+    set focusLayer(v) {
+      ui.focusLayer = v;
+    },
+    get newName() {
+      return ui.newName;
+    },
+    set newName(v) {
+      ui.newName = v;
+    },
+    get annexPick() {
+      return ui.annexPick;
+    },
+    set annexPick(v) {
+      ui.annexPick = v;
+    },
+    get draw() {
+      return ui.draw;
+    },
+    set draw(v) {
+      ui.draw = v;
+    },
+    setStatus: (v) => {
+      ui.status = v;
+    },
+    notify: () => {
+      ui.rev++;
+    },
+    randomName: (kind) => this.randomName(kind),
+    touchWorld: () => this.touchWorld(),
+    touchRegions: () => this.touchRegions(),
+    touchLayerView: () => this.touchLayerView(),
+    touchHeight: (full) => this.touchHeight(full),
     markHeightDirty: (ids) => this.markHeightDirty(ids),
     flushHeightRegions: (samples) => this.flushHeightRegions(samples),
   });
@@ -501,391 +510,100 @@ export class EditorStore {
     return true;
   }
 
+  // —— 命令 CRUD 与历史门面（实现体在 CommandService，还债 5-b5）——
   undo() {
-    if (!this.world) return;
-    const cmd = history.undo(this.world);
-    if (cmd) {
-      this.historyEffect(cmd, 'revert');
-      this.touchWorld();
-      // 不清空选中：多步撤销时保持上下文
-      this.status = `已撤销（剩余 ${history.depth} 步可撤销）`;
-    } else this.status = '没有可撤销的操作';
+    this.cmds.undo();
   }
 
   redo() {
-    if (!this.world) return;
-    const cmd = history.redo(this.world);
-    if (cmd) {
-      this.historyEffect(cmd, 'apply');
-      this.touchWorld();
-      this.status = '已重做';
-    }
-  }
-
-  /**
-   * 1-c 命令纯数据化的副作用分发：undo/redo 后按**命令类型**执行增量失效/派生
-   * （原 HeightStrokeCommand 闭包 afterApply/afterRevert 的去处——命令本体只持数据，
-   * 失效管线归 store）。高度笔画必须走 flushHeightRegions：区间/landsea 归属是
-   * 派生数据，数据回滚后不重算 = 归属过期（不只是显示问题）。
-   */
-  private historyEffect(cmd: EditCommand, dir: 'apply' | 'revert'): void {
-    if (!(cmd instanceof HeightCellsCommand)) return;
-    const samples = cmd.samples;
-    if (!samples.length) return;
-    this.markHeightDirty(samples.map((s) => s.id));
-    if (dir === 'apply') {
-      this.flushHeightRegions(samples);
-      this.touchHeight(false);
-    } else {
-      this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })));
-      this.touchHeight(true);
-    }
+    this.cmds.redo();
   }
 
   deleteSelected() {
-    if (!this.world || !this.selectedRegionId) return;
-    // 先试路径
-    const pathIdx = (this.world.paths ?? []).findIndex((p) => p.id === this.selectedRegionId);
-    if (pathIdx >= 0 && this.world.paths) {
-      this.withPaths('删除路径', () => {
-        this.world!.paths = this.world!.paths!.filter((p) => p.id !== this.selectedRegionId);
-      });
-      this.status = '已删除路径';
-      this.selectedRegionId = null;
-      return;
-    }
-    const cmd = new DeleteRegionCommand(this.selectedRegionId);
-    cmd.apply(this.world);
-    history.run(this.world, cmd, { alreadyApplied: true });
-    this.touchRegions();
-    this.selectedRegionId = null;
-    this.status = '已删除元素（子层保留为未分配）';
+    this.cmds.deleteSelected();
   }
 
   /** 右键菜单：显隐切换（元素/路径级，仅显示层过滤） */
   toggleItemHidden(id: string) {
-    if (!this.world) return;
-    const r = this.world.regions.find((x) => x.id === id);
-    if (r) {
-      // 1-b：元素显隐经字段快照入栈（可撤销）；path 分支仍为直改（1-b 剩余）
-      const wasHidden = !!r.hidden;
-      const name = r.name;
-      this.patchRegions(wasHidden ? '显示元素' : '隐藏元素', () => {
-        const cur = this.world!.regions.find((x) => x.id === id);
-        if (cur) cur.hidden = !cur.hidden;
-      });
-      this.status = wasHidden ? `已显示「${name}」（Ctrl+Z 可撤销）` : `已隐藏「${name}」（Ctrl+Z 可撤销）`;
-      return;
-    }
-    const p = (this.world.paths ?? []).find((x) => x.id === id);
-    if (p) {
-      this.withPaths(p.hidden ? '显示路径' : '隐藏路径', () => {
-        const t = this.world!.paths!.find((x) => x.id === id);
-        if (t) t.hidden = !t.hidden;
-      });
-      this.status = p.hidden ? `已隐藏「${p.name}」` : `已显示「${p.name}」`;
-    }
+    this.cmds.toggleItemHidden(id);
   }
 
-  /**
-   * 图层显示列表（组织模式用，**与 LayersPanel 渲染同序**）：根在前、子递归，
-   * 兄弟取 layers 数组出现序 = 面板自上而下。
-   * 第十一轮修正（2026-09-30）：旧 visualItems 对图层也 reverse（顶=数组末），
-   * 与图层面板（顶=数组首）相反 → 「视觉上一个」取成了下一行，缩进/提升锚点错位、顺序乱。
-   * 图层显示 = 数组前序 DFS（父必在子前、同级保持数组序）——这是本方法与
-   * indent/unindent「只改 parent、不动数组序」推理的不变量。
-   */
-  private layerDisplayList(): { id: string; parentId: string | undefined }[] {
-    const w = this.world;
-    if (!w) return [];
-    const layers = w.layers;
-    const validParent = (p: string | undefined) =>
-      p && layers.some((x) => x.id === p) ? p : undefined;
-    const items = layers.map((l) => ({ id: l.id, parentId: validParent(l.parentLayerId) }));
-    const out: { id: string; parentId: string | undefined }[] = [];
-    const walk = (pid: string | undefined) => {
-      for (const k of items) {
-        if (k.parentId !== pid) continue;
-        out.push(k);
-        walk(k.id);
-      }
-    };
-    walk(undefined);
-    return out;
-  }
-
-  /**
-   * 缩进（组织模式 · 图层，2026-10-01 语义 v2 用户定稿）：
-   * 目标 = **面板中的视觉上一行**——它要么就是上一个同级（对方无子 → 成为其子），
-   * 要么就是上一个同级子树的链尾（对方有子 → 沿子下钻直到"没有子元素的父元素"，
-   * 视觉上一行按构造必为叶子父）。
-   * 「只触发一次关系计算」：一次 layerDisplayList + 一次 parentLayerId 写 +
-   * 单条 LayerFieldsCommand；**数组序不动**（前序不变量保证位置零漂移、叠放零影响）。
-   * 元素树的缩进已随按钮退役，本方法只服务图层。
-   */
   indentItem(id: string): void {
-    const w = this.world;
-    if (!w) return;
-    if (!w.layers.some((l) => l.id === id)) {
-      this.status = '缩进只适用于图层';
-      return;
-    }
-    const vis = this.layerDisplayList();
-    const idx = vis.findIndex((x) => x.id === id);
-    if (idx <= 0) {
-      this.status = '已是第一个图层，无处缩进';
-      return;
-    }
-    const above = vis[idx - 1];
-    const l = w.layers.find((x) => x.id === id)!;
-    const beforeParent = l.parentLayerId;
-    if ((beforeParent ?? undefined) === above.id) {
-      this.status = '已在上一个图层之下';
-      return;
-    }
-    l.parentLayerId = above.id;
-    history.run(
-      w,
-      new LayerFieldsCommand(
-        [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: above.id } }],
-        '缩进',
-      ),
-      { alreadyApplied: true },
-    );
-    this.touchWorld();
-    this.status = '已缩进（Ctrl+Z 可撤销）';
+    this.cmds.indentItem(id);
   }
 
-  /**
-   * 提升（缩进反向 · 图层，2026-10-01 语义 v2 用户定稿）：**一次点击直接到顶层**
-   * ——「提升之后若同时还有父元素和同级元素，需要再次提升」= 逐级上溯但结果一次算出：
-   * parentLayerId 直接置空（顶层），不做循环逐跳。
-   * 原理同缩进：layers 数组保持前序不动，改 parent 后本图层随数组锚点自然排在
-   * 原祖先子树之后的顶层位置——叠放序零影响；单条命令一次撤销。
-   */
   unindentItem(id: string): void {
-    const w = this.world;
-    if (!w) return;
-    const l = w.layers.find((x) => x.id === id);
-    if (!l) {
-      this.status = '提升只适用于图层';
-      return;
-    }
-    const hasParent =
-      !!l.parentLayerId && w.layers.some((x) => x.id === l.parentLayerId);
-    if (!hasParent) {
-      this.status = '已是顶层图层，无处提升';
-      return;
-    }
-    const beforeParent = l.parentLayerId;
-    l.parentLayerId = undefined;
-    history.run(
-      w,
-      new LayerFieldsCommand(
-        [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: undefined } }],
-        '提升',
-      ),
-      { alreadyApplied: true },
-    );
-    this.touchWorld();
-    this.status = '已提升至顶层（Ctrl+Z 可撤销）';
+    this.cmds.unindentItem(id);
   }
 
-  /**
-   * 同父兄弟内上移/下移一层（dir=-1 上移）；图层/元素/路径通用。
-   * 1-b：layers/regions 数组序入栈可撤销（paths 序仍为直改——路径编辑剩余）。
-   */
   moveItemStep(id: string, dir: -1 | 1) {
-    if (!this.world) return;
-    const layersB = this.world.layers.map((l) => l.id);
-    const regionsB = this.world.regions.map((r) => r.id);
-    this.moveItemStepImpl(id, dir);
-    if (!this.world) return;
-    const layersA = this.world.layers.map((l) => l.id);
-    const regionsA = this.world.regions.map((r) => r.id);
-    if (layersB.join('') !== layersA.join('')) {
-      history.run(this.world, new LayersOrderCommand(layersB, layersA, '调整顺序'), {
-        alreadyApplied: true,
-      });
-    } else if (regionsB.join('') !== regionsA.join('')) {
-      history.run(this.world, new RegionsOrderCommand(regionsB, regionsA, '调整顺序'), {
-        alreadyApplied: true,
-      });
-    }
+    this.cmds.moveItemStep(id, dir);
   }
 
-  private moveItemStepImpl(id: string, dir: -1 | 1) {
-    if (!this.world) return;
-    // 图层：同父兄弟在 layers 数组中的顺序
-    const layer = this.world.layers.find((l) => l.id === id);
-    if (layer) {
-      const sibs = this.world.layers.filter((l) => (l.parentLayerId ?? null) === (layer.parentLayerId ?? null));
-      const i = sibs.findIndex((l) => l.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= sibs.length) return;
-      const arr = this.world.layers;
-      const ai = arr.indexOf(layer);
-      const bi = arr.indexOf(sibs[j]);
-      arr[ai] = sibs[j];
-      arr[bi] = layer;
-      this.touchWorld();
-      this.status = dir < 0 ? '已上移一层' : '已下移一层';
-      return;
-    }
-    const r = this.world.regions.find((x) => x.id === id);
-    if (r) {
-      const sibs = siblingRegions(this.world, r.layerId, r.parentId);
-      const i = sibs.findIndex((x) => x.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= sibs.length) return;
-      moveAmongSiblings(this.world, id, sibs[j].id, dir < 0 ? 'before' : 'after');
-      this.touchRegions();
-      this.status = dir < 0 ? '已上移一层' : '已下移一层';
-      return;
-    }
-    const p = (this.world.paths ?? []).find((x) => x.id === id);
-    if (p && this.world.paths) {
-      const same = this.world.paths.filter((x) => x.layerId === p.layerId);
-      const i = same.findIndex((x) => x.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= same.length) return;
-      const nid = same[j].id;
-      this.withPaths('调整顺序', () => {
-        const arr = this.world!.paths!;
-        const ai = arr.findIndex((x) => x.id === id);
-        const bi = arr.findIndex((x) => x.id === nid);
-        if (ai < 0 || bi < 0) return;
-        arr[ai] = same[j];
-        arr[bi] = p;
-      });
-      this.status = dir < 0 ? '已上移一层' : '已下移一层';
-    }
-  }
-
-  /** 右键菜单：复制一个（元素 = 同层空胞副本；路径 = 点列副本；图层 = 新层副本） */
   copyItem(id: string) {
-    if (!this.world) return;
-    // 图层
-    const layer = this.world.layers.find((l) => l.id === id);
-    if (layer) {
-      const nid = `custom-${Date.now().toString(36)}`;
-      const copy = {
-        ...layer,
-        id: nid,
-        name: `${layer.name || id} 副本`,
-        parentLayerId: layer.parentLayerId,
-      };
-      // 1-b：复制图层入栈（AddLayerCommand 天然支持整层 add/remove undo）
-      history.run(this.world, new AddLayerCommand(copy, '复制图层'));
-      this.touchWorld();
-      this.focusLayer = nid;
-      this.status = '已复制图层（样式与设置，不含元素）';
-      return;
-    }
-    // 路径
-    const p = (this.world.paths ?? []).find((x) => x.id === id);
-    if (p && this.world.paths) {
-      const nid = `${p.layerId}-${Date.now().toString(36)}`;
-      const copy = {
-        ...p,
-        id: nid,
-        name: `${p.name} 副本`,
-        points: p.points.map((q) => ({ ...q })),
-      };
-      this.withPaths('复制路径', () => {
-        this.world!.paths!.push(copy);
-      });
-      this.selectedRegionId = nid;
-      this.status = '已复制路径';
-      return;
-    }
-    // 元素：同层同父副本（不复制 cells，避免双归属）+ 选中便于直接涂画
-    const r = this.world.regions.find((x) => x.id === id);
-    if (r) {
-      const nid = `${r.layerId}-${Date.now().toString(36)}`;
-      const copy: Region = {
-        ...r,
-        id: nid,
-        name: `${r.name} 副本`,
-        cells: [],
-        hidden: undefined,
-        adjacentElementIds: new Set<string>(),
-        overlaps: [],
-      };
-      const idx = this.world.regions.indexOf(r);
-      // 1-b：复制元素入栈（at=原件后一位，列表位置与直插一致）
-      history.run(this.world, new CreateRegionCommand(copy, '复制元素', idx + 1));
-      this.selectedRegionId = nid;
-      this.touchRegions();
-      this.status = `已复制「${r.name}」（空胞副本，涂画填充）`;
-    }
+    this.cmds.copyItem(id);
   }
 
-  /** 右键菜单：删除（元素/路径/自定义图层） */
   deleteItem(id: string) {
-    if (!this.world) return;
-    if (this.world.layers.some((l) => l.id === id)) {
-      if (!id.startsWith('custom-')) {
-        this.status = '内置图层不可删除';
-        return;
-      }
-      const layer = this.world.layers.find((l) => l.id === id)!;
-      // 1-b：删除图层入栈（层定义+其元素+渲染配置整包恢复；undo 后焦点保持 cells——UI 态不入历史）
-      const cmd = new DeleteLayerCommand(layer, this.world);
-      cmd.apply(this.world);
-      history.run(this.world, cmd, { alreadyApplied: true });
-      if (this.focusLayer === id) this.focusLayer = 'cells';
-      this.touchWorld();
-      this.status = '已删除图层';
-      return;
-    }
-    this.selectedRegionId = id;
-    this.deleteSelected();
+    this.cmds.deleteItem(id);
   }
 
   doAnnex(targetId: string) {
-    if (!this.world || !this.selectedRegionId || this.selectedRegionId === targetId) return;
-    const a = this.world.regions.find((r) => r.id === this.selectedRegionId);
-    const t = this.world.regions.find((r) => r.id === targetId);
-    if (!a || !t || a.layerId !== t.layerId) {
-      this.status = '吞并失败（需同层）';
-      return;
-    }
-    const cmd = new AnnexCommand(this.selectedRegionId, targetId);
-    cmd.apply(this.world);
-    history.run(this.world, cmd, { alreadyApplied: true });
-    this.touchRegions();
-    this.annexPick = false;
-    this.status = '已吞并（Ctrl+Z 可撤销）';
+    this.cmds.doAnnex(targetId);
   }
 
-  /** 添加自定义图层（可选名称，与工作区创建同一套 header）——1-b 命令化 */
   addLayer(name?: string) {
-    if (!this.world) return;
-    const n = this.world.layers.filter((l) => l.id.startsWith('custom-')).length + 1;
-    const id = `custom-${Date.now().toString(36)}`;
-    const label = (name ?? this.newName)?.trim() || `图层 ${n}`;
-    const layer = {
-      id,
-      name: label,
-      kind: 'custom',
-      modeDefault: 'edit',
-      allowOverlap: true,
-      requireAdjacency: false,
-      requireCenter: false,
-      styleSetId: 'default',
-    } as World['layers'][number];
-    this.world.layers.push(layer);
-    history.run(this.world, new AddLayerCommand(layer), { alreadyApplied: true });
-    this.newName = '';
-    this.touchWorld();
-    this.focusLayer = id;
-    this.status = `已添加图层「${label}」（Ctrl+Z 可撤销）`;
+    this.cmds.addLayer(name);
   }
 
   randomLayerName(): string {
-    const pool = ['领地', '文明圈', '信仰带', '商路', '军区', '自治区', '遗迹区', '部落域'];
-    return pool[Math.floor(Math.random() * pool.length)] + ' ' + (1 + Math.floor(Math.random() * 9));
+    return this.cmds.randomLayerName();
+  }
+
+  layerStyleConfig(id: string): ElementStyle {
+    return this.cmds.layerStyleConfig(id);
+  }
+
+  setLayerStyle(id: string, patch: ElementStylePatch) {
+    this.cmds.setLayerStyle(id, patch);
+  }
+
+  toggleLayerVisible(id: string) {
+    this.cmds.toggleLayerVisible(id);
+  }
+
+  setLayerOpacity(id: string, opacity: number) {
+    this.cmds.setLayerOpacity(id, opacity);
+  }
+
+  /** 路径快照执行器（1-b）：fn 前后整表快照 → 有变化才入栈；统一 touch */
+  withPaths(label: string, fn: () => void): void {
+    this.cmds.withPaths(label, fn);
+  }
+
+  /** 控制点拖动会话：pointerdown 快照 / pointerup 提交 */
+  beginPathsDrag(): void {
+    this.cmds.beginPathsDrag();
+  }
+
+  commitPathsDrag(label = '移动控制点'): void {
+    this.cmds.commitPathsDrag(label);
+  }
+
+  patchRegions(label: string, fn: () => void): void {
+    this.cmds.patchRegions(label, fn);
+  }
+
+  createRegion(layerId: string, parentId?: string) {
+    this.cmds.createRegion(layerId, parentId);
+  }
+
+  renameSelected() {
+    this.cmds.renameSelected();
+  }
+
+  recolorSelected() {
+    this.cmds.recolorSelected();
   }
 
   /** 单击选中：只改选中态；填充/边界按选中层 */
@@ -905,194 +623,6 @@ export class EditorStore {
     this.notify();
   }
 
-  /** 图层显示样式（DisplayStyle 面板） */
-  layerStyleConfig(id: string): ElementStyle {
-    return resolveLayerStyle(this.world, id);
-  }
-
-  setLayerStyle(id: string, patch: ElementStylePatch) {
-    if (!this.world) return;
-    const map = this.world.layerRenderConfig ?? new Map();
-    const before = resolveLayerStyle(this.world, id);
-    // 只叠局部 patch，不整份回写默认
-    const next = clampElementStyle(patchElementStyle(before, patch));
-    map.set(id, next);
-    this.world.layerRenderConfig = map;
-    // 1-b 样式命令化：before/after = 完整样式引用（拖滑块连发会 coalesce 吗——不 coalesce：
-    // 样式是离散 undo 步，逐次可撤；高频由 debounce 在 UI 层收敛）
-    history.run(this.world, new LayerStyleCommand(id, before, next, '显示参数'), {
-      alreadyApplied: true,
-    });
-    this.touchRegions();
-  }
-
-  /** 显示开关：点击图层 box；最多 3 个颜色根树（父+子占 1 名额） */
-  toggleLayerVisible(id: string) {
-    if (!this.world) return;
-    // 1-b 显隐命令化：整批 id→visible 前后快照（3 树连动/父子链都收敛为一条命令）
-    const visIds = this.world.layers.map((l) => l.id);
-    const visBefore = this.world.layers.map((l) => l.visible);
-    const commitVis = () => {
-      if (!this.world) return;
-      const visAfter = this.world.layers.map((l) => l.visible);
-      if (visBefore.some((v, i) => v !== visAfter[i])) {
-        history.run(this.world, new LayersVisibilityCommand(visIds, visBefore, visAfter, '显隐'), {
-          alreadyApplied: true,
-        });
-      }
-    };
-    const layers = this.world.layers;
-    const layer = layers.find((l) => l.id === id);
-    if (!layer) return;
-    const def = defaultLayerVisible(layer);
-    const cur = layer.visible ?? def;
-    const next = !cur;
-    const byId = new Map(layers.map((l) => [l.id, l]));
-
-    if (next) {
-      // 点亮子层时父链一并点亮（子随父显示）
-      let p = layer.parentLayerId;
-      const chain: string[] = [];
-      while (p && byId.has(p)) {
-        chain.push(p);
-        p = byId.get(p)!.parentLayerId;
-      }
-      for (const pid of chain) {
-        const pl = byId.get(pid)!;
-        if (pl.visible === false || (pl.visible === undefined && !defaultLayerVisible(pl))) {
-          pl.visible = true;
-        }
-      }
-      layer.visible = true;
-      // 根树名额（试算）
-      const roots = visibleColorRoots(this.world, 3);
-      // 若新开的是自由层则不限；否则确认根数
-      if (!isFreeLayerDef(layer)) {
-        const visibleSet = new Set(
-          layers.filter((l) => l.visible ?? defaultLayerVisible(l)).map((l) => l.id),
-        );
-        let rootCount = 0;
-        for (const l of layers) {
-          if (isFreeLayerDef(l)) continue;
-          if (!visibleSet.has(l.id)) continue;
-          const par = l.parentLayerId;
-          if (par && visibleSet.has(par)) continue;
-          rootCount++;
-        }
-        if (rootCount > 3) {
-          layer.visible = false;
-          // 父链可能被点亮，保持原状即可（不回滚父，避免误关）——**净变化入栈**（否则撤销缺账）
-          commitVis();
-          // 父链 visible 已被写 true：必须失效显示缓存/换 world 身份，否则
-          // 「眼睛=显示中但地图没画」（2026-10-01 用户反馈的断点）
-          this.touchLayerView();
-          this.status = '最多同时显示 3 个图层树（父+子占 1 席）';
-          this.notify();
-          return;
-        }
-      }
-      void roots;
-      this.status = `显示「${layer.name || id}」`;
-    } else {
-      layer.visible = false;
-      // 关父则关整棵子树
-      const kids = (pid: string) => layers.filter((l) => l.parentLayerId === pid);
-      const stack = [id];
-      while (stack.length) {
-        const curId = stack.pop()!;
-        for (const k of kids(curId)) {
-          k.visible = false;
-          stack.push(k.id);
-        }
-      }
-      this.status = `隐藏「${layer.name || id}」`;
-    }
-    commitVis();
-    this.touchLayerView();
-  }
-
-  /**
-   * 字段快照执行器（1-b）：fn 前后对全部 Region 浅字段（name/color/exclusiveColor/
-   * attributes/hidden）快照 → diff → 单命令入栈。覆盖「core 直改字段」类操作
-   * （元素保存信息、外交 attributes 等）；cells 不在此域（成员变更走笔画快照-diff）。
-   */
-  /** 路径整表快照：**手动平面拷贝**——points 经 $state 深代理，structuredClone 会 DataCloneError（2026-10-01 实测），必须重建纯对象。 */
-  private static snapPaths(w: World): NonNullable<World['paths']> {
-    return (w.paths ?? []).map((p) => ({
-      ...p,
-      points: (p.points ?? []).map((q) => ({ lon: q.lon, lat: q.lat })),
-    }));
-  }
-
-  /** 路径快照执行器（1-b）：fn 前后对 world.paths 整表快照 → 有变化才入栈一条 PathsCommand；统一 touch。 */
-  withPaths(label: string, fn: () => void): void {
-    if (!this.world) return;
-    const snap = () => EditorStore.snapPaths(this.world!);
-    const before = snap();
-    fn();
-    const after = snap();
-    // 写回纯对象：fn 可能把 $state 代理（pathDraft/llAt 链）存进 world——代理会炸
-    // structuredClone（autosave Worker）；规范化后 world.paths 恒为平面数据。
-    this.world.paths = after;
-    if (JSON.stringify(before) !== JSON.stringify(after)) {
-      history.run(this.world, new PathsCommand(before, after, label), { alreadyApplied: true });
-    }
-    this.touchRegions();
-  }
-
-  /** 控制点拖动会话（1-b）：pointerdown 快照 / pointerup 提交——移动过程直改不入栈，一次手势一条命令 */
-  private pathsDragSnap: NonNullable<World['paths']> | null = null;
-  beginPathsDrag(): void {
-    if (this.world) this.pathsDragSnap = EditorStore.snapPaths(this.world);
-  }
-  commitPathsDrag(label = '移动控制点'): void {
-    if (!this.world || !this.pathsDragSnap) return;
-    const before = this.pathsDragSnap;
-    this.pathsDragSnap = null;
-    const after = EditorStore.snapPaths(this.world);
-    this.world.paths = after; // 拖动过程中 points 可能含代理引用 → 规范化为平面数据
-    if (JSON.stringify(before) !== JSON.stringify(after)) {
-      history.run(this.world, new PathsCommand(before, after, label), { alreadyApplied: true });
-    }
-    this.touchRegions();
-  }
-
-  patchRegions(label: string, fn: () => void): void {
-    if (!this.world) return;
-    const FIELDS = ['name', 'color', 'exclusiveColor', 'attributes', 'hidden'] as const;
-    type Snap = Record<string, unknown>;
-    const snap = () =>
-      new Map<string, Snap>(
-        this.world!.regions.map((r) => [
-          r.id,
-          Object.fromEntries(FIELDS.map((f) => [f, (r as unknown as Snap)[f]])),
-        ]),
-      );
-    const before = snap();
-    fn();
-    const after = snap();
-    const patches: { id: string; before: Partial<Region>; after: Partial<Region> }[] = [];
-    for (const [id, a] of after) {
-      const b = before.get(id);
-      if (!b) continue;
-      if (FIELDS.some((f) => b[f] !== a[f])) {
-        patches.push({ id, before: b as Partial<Region>, after: a as Partial<Region> });
-      }
-    }
-    if (patches.length) {
-      history.run(this.world, new RegionFieldsCommand(patches, label), { alreadyApplied: true });
-    }
-    this.touchRegions();
-  }
-
-  setLayerOpacity(id: string, opacity: number) {
-    if (!this.world) return;
-    const layer = this.world.layers.find((l) => l.id === id);
-    if (!layer) return;
-    layer.opacity = Math.max(0, Math.min(1, opacity));
-    this.touchLayerView();
-  }
-
   /**
    * 图层显隐/不透明度：**视图态**轻失效——只换 world 身份触发重绘 + dataRev 变
    * 使合成缓存失效；件环/几何缓存不受影响（显隐不改变任何 cell 集），隐藏层再显示
@@ -1106,110 +636,6 @@ export class EditorStore {
   focusLayerForDraw(id: string) {
     this.selectLayerTop(id);
     this.notify();
-  }
-
-  createRegion(layerId: string, parentId?: string) {
-    if (!this.world) return;
-    let meta = this.world.layers.find((l) => l.id === layerId);
-    if (!meta) {
-      ensureBuiltinLayers(this.world);
-      meta = this.world.layers.find((l) => l.id === layerId);
-    }
-    if (!meta) {
-      this.status = `图层 ${layerId} 不存在，无法添加`;
-      return;
-    }
-
-    // 道路/航线/河流：工作区「添加」= 建一条空曲线，再在地图上绘制控制点
-    if (layerId === 'road' || layerId === 'route' || layerId === 'river') {
-      const name = this.newName.trim() || `${meta.name} ${(this.world.paths?.filter((p) => p.layerId === layerId).length ?? 0) + 1}`;
-      if (!this.world.paths) this.world.paths = [];
-      const existingEmpty = this.world.paths.find(
-        (p) => p.layerId === layerId && (!p.points || p.points.length < 2),
-      );
-      if (existingEmpty) {
-        this.withPaths('重命名路径', () => {
-          existingEmpty.name = name;
-        });
-        this.newName = '';
-        this.status = `已重命名「${name}」，在地图上点击绘制`;
-        return;
-      }
-      const nid = `${layerId}-${Date.now().toString(36)}`;
-      this.withPaths('新建路径', () => {
-        const w = this.world!;
-        if (!w.paths) w.paths = [];
-        w.paths.push({
-          id: nid,
-          layerId: layerId as 'road' | 'route' | 'river',
-          name,
-          points: [],
-          color: defaultPathColor(layerId as 'road' | 'route' | 'river'),
-          attributes: {},
-        });
-      });
-      const pid = nid;
-      this.newName = '';
-      // 选中新建的路径并进入编辑，地图上画点即写入这条曲线
-      this.selectedRegionId = pid;
-      this.draw = {
-        ...emptyDrawSession(),
-        active: true,
-        targetRegionId: pid,
-        tool: 'brush',
-        addMode: true,
-      };
-      this.focusLayer = layerId;
-      this.status = `已添加「${name}」→ 在地图上点两下生成直线`;
-      return;
-    }
-
-    const name = this.newName.trim() || this.randomName(layerId as 'country' | 'province');
-    const colors = ['#c45c5c', '#5c8dc4', '#5cc48d', '#c4a15c', '#9b5cc4', '#c47a5c'];
-    const id = `${layerId}-${Date.now().toString(36)}`;
-    const parent = parentId
-      ? this.world.regions.find((r) => r.id === parentId)
-      : undefined;
-    history.run(
-      this.world,
-      new CreateRegionCommand({
-        id,
-        layerId,
-        name,
-        cells: [],
-        parentId: parent?.id,
-        color: parent?.color ?? colors[this.world.regions.filter((r) => r.layerId === layerId).length % colors.length],
-        exclusiveColor: parent ? defaultExclusiveColor(parent.color) : undefined,
-        attributes: {},
-      }),
-    );
-    moveAmongSiblings(this.world, id, null, 'before');
-    this.touchRegions();
-    this.newName = '';
-    this.selectedRegionId = id;
-    this.status = `已新增「${name}」`;
-  }
-
-  renameSelected() {
-    if (!this.world || !this.selectedRegionId) return;
-    const r = this.world.regions.find((x) => x.id === this.selectedRegionId);
-    if (!r) return;
-    const next = window.prompt('名称', r.name);
-    if (next !== null && next.trim()) {
-      r.name = next.trim();
-      this.touchWorld();
-    }
-  }
-
-  recolorSelected() {
-    if (!this.world || !this.selectedRegionId) return;
-    const r = this.world.regions.find((x) => x.id === this.selectedRegionId);
-    if (!r) return;
-    const next = window.prompt('颜色 (#RRGGBB)', r.color);
-    if (next) {
-      setRegionColor(this.world, this.selectedRegionId, next);
-      this.touchWorld();
-    }
   }
 
   // —— 绘制会话（实现体在 DrawController，还债 5-b4）——
