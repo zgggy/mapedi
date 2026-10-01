@@ -1,7 +1,6 @@
 import type { LayerRenderConfig, Region } from '../core/types';
 import { defaultLayerRenderConfig } from '../core/types';
-import { createWorld, deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
-import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
+import { deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateCellIndex } from '../core/index/cellIndex';
 import { invalidateCellGraph } from '../core/index/cellGraph';
@@ -27,6 +26,7 @@ import {
 } from '../core/history';
 import { ChangePipeline } from './changePipeline';
 import { AutosaveService } from './autosaveService';
+import { GenerationService } from './generationService';
 import { queuePieceInvalidation } from '../render/patchQueues';
 import { setRegionColor } from '../core/regionOps';
 import { createRng } from '../core/rng';
@@ -58,7 +58,7 @@ import {
 } from '../core/displayCompose';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
-import { generateWorldAsync, loadWorldAsync } from '../core/generate/runGenerate';
+import { loadWorldAsync } from '../core/generate/runGenerate';
 import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
 import { defaultPathColor } from '../core/paths';
 import {
@@ -94,13 +94,9 @@ import { applyHeightmapFile } from '../core/heightmap';
 // 形态回归（规则清单见设计稿附录 A）。
 import { defaultClimate, type ClimateParams, type LonLat, type World } from '../core/types';
 import { idbLoad } from '../persist/storage';
-import { SOFT_MAX_DENSITY, HARD_MAX_DENSITY } from '../core/world';
-import {
-  cascadeEnabled,
-  defaultProfiles,
-  type GenerationProfile,
-} from '../core/generate/profile';
-import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
+import { SOFT_MAX_DENSITY } from '../core/world';
+import { defaultProfiles, type GenerationProfile } from '../core/generate/profile';
+import type { WorldShape } from '../core/layer/genTypes';
 
 const NAME_POOL = ['北境', '南洋', '东海', '西陆', '中央', '苍岭', '赤原', '银湾', '铁丘', '雾林'];
 
@@ -131,6 +127,9 @@ const ui = $state({
   projectEpoch: 0,
   rev: 0,
 });
+
+/** 世代序：任何「换世界」的异步操作（生成/恢复/导入）互斥过期闸（5-b2 起为模块状态，服务与 store 共享） */
+let generationSeq = 0;
 
 // —— 生成参数草稿持久化（U3-b，设计稿 §3.3：localStorage mapedi.ui.gen.*）——
 // 跨刷新保留种子/地块数/各层生成参数；500ms 防抖（胶囊滑动 onInput 连发避免逐帧 stringify）。
@@ -297,7 +296,6 @@ export class EditorStore {
   /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即发现全部副作用，
    *  含 replace 剥他人 / split 新建 / flood steal——undo 腐蚀修复的核心，2026-09-30 还债1-①） */
   private strokeSnap: Map<string, number[]> | null = null;
-  private generationSeq = 0;
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
   heightIntervalId = 'h6';
@@ -338,6 +336,42 @@ export class EditorStore {
     setStatus: (v) => {
       ui.status = v;
     },
+  });
+
+  /** 生成编排（还债 5-b2）：Worker/主线程双路+单层再生成+生成参数——UI 回显经闭包注入 */
+  private readonly gen = new GenerationService({
+    get world() {
+      return worldRaw;
+    },
+    get seq() {
+      return generationSeq;
+    },
+    nextSeq: () => ++generationSeq,
+    replaceWorld: (w) => this.replaceWorld(w),
+    get profiles() {
+      return ui.profiles;
+    },
+    setProfiles: (p) => {
+      ui.profiles = p;
+    },
+    setFocusLayer: (v) => {
+      ui.focusLayer = v;
+    },
+    setStatus: (v) => {
+      ui.status = v;
+    },
+    setGenerating: (v) => {
+      ui.generating = v;
+    },
+    setGenProgress: (v) => {
+      ui.genProgress = v;
+    },
+    notify: () => {
+      ui.rev++;
+    },
+    scheduleAutosave: () => this.scheduleAutosave(),
+    touchWorld: () => this.touchWorld(),
+    saveGenDraftSoon: () => saveGenDraftSoon(),
   });
 
   /** 几何/拓扑变化：全量失效（投影、拾取、索引、边界环） */
@@ -401,190 +435,32 @@ export class EditorStore {
     this.pipeline.touchPaint();
   }
 
+  /** 整链生成（实现体在 GenerationService：Worker 主路 + 主线程回退） */
   async generate(seed: number, count: number) {
-    const seq = ++this.generationSeq;
-    // 硬上限唯一钳制点（core/world.HARD_MAX_DENSITY）；软上限解锁是 UI 策略，不在生成链
-    const n = Math.max(100, Math.min(count, HARD_MAX_DENSITY));
-    this.generating = true;
-    this.genProgress = 0;
-    this.status = `生成中… ${n} 地块`;
-    this.notify();
-    try {
-      // P1：整链 Worker（主线程不冻）；失败再退回主线程
-      await this.generateViaWorker(seed, n, seq);
-      if (seq !== this.generationSeq) return;
-      this.generating = false;
-      this.genProgress = 100;
-      this.notify();
-    } catch {
-      if (seq !== this.generationSeq) return;
-      try {
-        await this.generateOnMain(seed, n, false, seq);
-        if (seq !== this.generationSeq) return;
-        this.generating = false;
-        this.genProgress = 100;
-        this.notify();
-      } catch (e) {
-        this.status = `生成失败 ${e}`;
-        this.generating = false;
-        this.notify();
-      }
-    }
+    await this.gen.generate(seed, count);
   }
 
-  private async generateViaWorker(seed: number, count: number, seq: number) {
-    this.status = `生成中（Worker）… ${count} 地块`;
-    this.notify();
-    // profile 面板参数随 Worker 下发（否则面板旋钮只在主线程回退路径生效）
-    const params: Record<string, Record<string, number | string | boolean>> = {};
-    for (const p of this.profiles) params[p.layerId] = p.params;
-    const got = await generateWorldAsync(seed, count, (p) => {
-      if (seq !== this.generationSeq) return;
-      this.genProgress = p.progress;
-      this.status = `${p.label}… ${p.progress}%`;
-      this.notify();
-    }, params);
-    if (seq !== this.generationSeq) return;
-    const world = got.world;
-    if (got.projCache) installProjCache(got.projCache);
-    for (const r of world.regions) {
-      if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
-    }
-    rebuildLandSeaRegions(world);
-    world.astro = defaultStarSystem(seed, world.climate);
-    this.replaceWorld(world);
-    // 生成后默认选中并显示高度层（产品默认：生成 → 直接看地形）
-    world.layers.find((l) => l.id === 'height')!.visible = true;
-    this.focusLayer = 'height';
-    this.status = `${world.cells.length} 地块 · Worker`;
-    this.scheduleAutosave();
-    this.notify();
-  }
-
-  private async generateOnMain(seed: number, count: number, quiet = false, seq = this.generationSeq) {
-    const t0 = performance.now();
-    // 让浏览器先绘制一次 loading
-    await new Promise((r) => setTimeout(r, 0));
-    if (seq !== this.generationSeq) return;
-    const world = createWorld({ seed, count });
-    const params: Record<string, Record<string, number | string | boolean>> = {};
-    for (const p of this.profiles) params[p.layerId] = p.params;
-    const enabled = new Set(cascadeEnabled(this.profiles));
-    runCascade(world, seed, undefined, undefined, params, enabled);
-    world.astro = defaultStarSystem(seed, world.climate);
-    for (const r of world.regions) {
-      if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
-    }
-    rebuildLandSeaRegions(world);
-    if (seq !== this.generationSeq) return;
-    this.replaceWorld(world);
-    // 生成后默认选中并显示高度层（产品默认：生成 → 直接看地形）
-    world.layers.find((l) => l.id === 'height')!.visible = true;
-    this.focusLayer = 'height';
-    const ms = Math.round(performance.now() - t0);
-    if (!quiet) this.status = `${world.cells.length} 地块 · ${ms}ms`;
-    void CASCADE_LABELS;
-    this.scheduleAutosave();
-    this.notify();
-  }
-
+  /** 单层再生成（实现体在 GenerationService；height 连带删旧建新海陆） */
   regenLayer(layerId: string) {
-    if (!this.world) return;
-    const params = this.profiles.find((p) => p.layerId === layerId)?.params;
-    const enabled = new Set([layerId]);
-    // 依赖层也要跑，否则 climate 缺失
-    const deps = this.profiles.find((p) => p.layerId === layerId);
-    void deps;
-    runCascade(
-      this.world,
-      this.world.meta.seed,
-      [layerId],
-      undefined,
-      params ? { [layerId]: params } : undefined,
-      enabled,
-    );
-    if (layerId === 'height') {
-      // 「生成高度图 = 删除海陆图层[元素]」（2026-09-30 用户语义）：地形重跑后旧海陆
-      // 划分失效 → 删旧建新（rebuildLandSeaRegions 全量重建派生元素）
-      rebuildLandSeaRegions(this.world);
-    }
-    this.touchWorld();
-    if (layerId === 'height') {
-      // 高度重生成后默认显示并聚焦高度层（与整世界生成同规则）
-      const h = this.world?.layers.find((l) => l.id === 'height');
-      if (h) h.visible = true;
-      this.focusLayer = 'height';
-    }
-    this.status = `已重新生成：${layerId}`;
+    this.gen.regenLayer(layerId);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean) {
-    this.profiles = this.profiles.map((p) =>
-      p.layerId === layerId ? { ...p, params: { ...p.params, [key]: value } } : p,
-    );
-    saveGenDraftSoon();
+    this.gen.setProfileParam(layerId, key, value);
   }
 
   /** height profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_WORLD_SHAPE） */
   get worldShape(): WorldShape {
-    const p = this.profiles.find((x) => x.layerId === 'height')?.params ?? {};
-    const num = (k: keyof WorldShape, d: number) => (typeof p[k] === 'number' ? (p[k] as number) : d);
-    const bool = (k: keyof WorldShape, d: boolean) => (typeof p[k] === 'boolean' ? (p[k] as boolean) : d);
-    return {
-      landRatio: num('landRatio', DEFAULT_WORLD_SHAPE.landRatio),
-      relief: num('relief', DEFAULT_WORLD_SHAPE.relief),
-      flatness: num('flatness', DEFAULT_WORLD_SHAPE.flatness),
-      continentScale: num('continentScale', DEFAULT_WORLD_SHAPE.continentScale),
-      coastBreak: num('coastBreak', DEFAULT_WORLD_SHAPE.coastBreak),
-      mountain: num('mountain', DEFAULT_WORLD_SHAPE.mountain),
-      detail: num('detail', DEFAULT_WORLD_SHAPE.detail),
-      seaRugged: num('seaRugged', DEFAULT_WORLD_SHAPE.seaRugged),
-      latBias: num('latBias', DEFAULT_WORLD_SHAPE.latBias),
-      erosion: num('erosion', DEFAULT_WORLD_SHAPE.erosion),
-    };
+    return this.gen.worldShape;
   }
 
   /** 生成预设 */
   applyGenPreset(name: string) {
-    const next = this.profiles.map((p) => ({ ...p, params: { ...p.params } }));
-    const set = (id: string, params: Record<string, number | string | boolean>, on = true) => {
-      const p = next.find((x) => x.layerId === id);
-      if (p) {
-        p.enabled = on;
-        p.params = { ...p.params, ...params };
-      }
-    };
-    switch (name) {
-      case '群岛':
-        set('height', { landRatio: 0.12, relief: 90, flatness: 0.15, continentScale: 0.25, coastBreak: 0.85, mountain: 0.6, detail: 0.7, latBias: 0.7 });
-        set('country', { count: 12, fromLayerCount: 2, allowOcean: true });
-        set('province', { count: 24 });
-        break;
-      case '海国世界':
-        set('country', { allowOcean: true });
-        set('culture', { allowOcean: true });
-        break;
-      case '高原世界':
-        set('height', { landRatio: 0.28, relief: 80, flatness: 0.55, continentScale: 0.75, coastBreak: 0.35, mountain: 0.55, detail: 0.35, latBias: 0.35 });
-        set('culture', { coreSelector: 'highElevation' });
-        break;
-      case '默认大陆':
-      default:
-        set('height', { landRatio: 0.15, relief: 127, flatness: 0, continentScale: 0.5, coastBreak: 0.55, mountain: 0.7, detail: 0.5, latBias: 0.55 });
-        set('country', { count: 8, fromLayerCount: 3, allowOcean: false });
-        set('province', { count: 15 });
-        set('culture', { allowOcean: false });
-        break;
-    }
-    this.profiles = next;
-    this.status = `已套用预设：${name}`;
-    this.notify();
+    this.gen.applyGenPreset(name);
   }
 
   toggleProfile(layerId: string) {
-    this.profiles = this.profiles.map((p) =>
-      p.layerId === layerId ? { ...p, enabled: !p.enabled } : p,
-    );
+    this.gen.toggleProfile(layerId);
   }
 
   scheduleAutosave() {
@@ -592,16 +468,16 @@ export class EditorStore {
   }
 
   async tryRestore(): Promise<boolean> {
-    const seq = this.generationSeq;
+    const seq = generationSeq;
     const json = await idbLoad();
-    if (seq !== this.generationSeq) return true;
+    if (seq !== generationSeq) return true;
     if (!json) return false;
     // Worker 反序列化 + 预建投影缓存（主线程免 0.8s 反序列化 + 1s 首建）；失败回退主线程
     let w: World;
     let projCache: ProjCache | undefined;
     try {
       const got = await loadWorldAsync(json);
-      if (seq !== this.generationSeq) return true;
+      if (seq !== generationSeq) return true;
       w = got.world;
       projCache = got.projCache;
     } catch {
@@ -1744,12 +1620,12 @@ export class EditorStore {
   }
 
   async importProjectFile(file: File) {
-    const seq = ++this.generationSeq;
+    const seq = ++generationSeq;
     this.generating = false;
     try {
       const { importProjectFile } = await import('../persist/storage');
       const w = await importProjectFile(file);
-      if (seq !== this.generationSeq) return;
+      if (seq !== generationSeq) return;
       ensureBuiltinLayers(w);
       rebuildLandSeaRegions(w);
       this.replaceWorld(w);

@@ -44,8 +44,9 @@
   - **三失联清账**：`canPaint` 死 prop 物理删（prop+类型+5 处 `(drawActive || canPaint)`，App 从未传入）；`panningMode` 死成员 `'cam'` 删（只赋过 `'content'/null`）；`onpaint` 丢参**已在第十四轮速修包修复**（本项闭合）。
   - **验收（浏览器实测）**：显隐切换经新管线（👁→🚫 翻转+撤销回弹、零 console 错）；高度笔画画 -10→撤销回 61；**队列 E2E**：commit 同步窥探 deltas=8/patches=3（入列）→ 让帧后队列排空（渲染经模块消费）→ 撤销正常；tsc/svelte-check 0；store 2045→1900 行。
 - **✓ 5-b1 Persistence（自动保存机械出库，2026-10-01 第二十二轮）**：`app/autosaveService.ts`（新，~140 行）——2s 防抖+epoch 作废+Worker 派发（busy/latest-wins）+DataCloneError 规范化重试+同步降级链+drain 等待器整体出库；Ctx 注入 world/snapPaths/autosaveAt/status（`$state` 写仍在 store 闭包）；store 留 `scheduleAutosave()` 门面 + `replaceWorld/clearAutosave` 走 `invalidate()/drainQueue()/drain()`。**验收（浏览器实测）**：显隐触碰→2s 防抖→Worker→回显 3:51:36→3:51:59；IDB 实读 at 新鲜/cells 100000/regions 162 **且无 cellClimate/biome**（步骤4 不落盘回归 ✓）；撤销复原零错。**注**：clearAutosave 未实跑（删用户存档=破坏性），机械移植+tsc 兑底。
-- **☐ 5-b2 CommandService / GenerationService / DrawController 分包**：history 门面+命令 CRUD、生成管线、绘制会话归位。
+- **✓ 5-b2 GenerationService（生成编排出库，2026-10-01 第二十三轮）**：`app/generationService.ts`（新 239 行）——整链 Worker（失败回主线程）/单层再生成/profiles·worldShape·预设·开关全量出库；Cts={world/seq/nextSeq/replaceWorld/profiles/status/focus/…}，**世代序 `generationSeq` 模块化**（与 tryRestore/import 共享的换世界互斥闸）；store 留六门面（generate/regenLayer/setProfileParam/worldShape/applyGenPreset/toggleProfile）调用点零改动。**顺带修预存静默缺陷**：`profileParams` 直传 `ui.profiles` 的 $state 深代理 → Worker `postMessage` 必抛 DataCloneError → 生成**一直**无声回退主线程（旧 catch 吞错；本轮加 console.warn 才暴露）——修=params 平面化 `{...p.params}`，修后实测「100000 地块 · Worker」11.2s 零 warn。**验收**：参数三件（toggle/setProfileParam/预设）快照-还原逐位一致；生成 3k Worker 路径 status「地块 · Worker」；regenLayer 状态回显；tsc/svelte-check 0。**⚠ 事故与恢复（诚实记录）**：真点生成的 invalidate 保护法**失手**——测试 3k 世界写进了 autosave（唯一键）覆盖用户 100k 旧档（恢复法见记忆：IDB 快照法才是硬保护）；已用默认参数重新生成 100k（seed=页面草稿种子）落盘恢复，用户旧档的逐位还原不可能（原世界为生成态，种子未留档）。
 - **☐ 5-b3 Viewport 侧**：抽 `MapTransform` / `ViewportController`（坐标变换/相机）。
+- **☐ 5-b4 CommandService / DrawController**：命令 CRUD 与绘制会话出库——UI 态（选中/焦点/绘制会话）耦合最重，殿后。
 - **☐ 5-c App 转发器瘦身**：~75 个 on* 回调收敛（与 UI 重构线协调，勿单方面改 prop 面）。
 - **验收（总）**：各模块独立可测；App 不再是回调转发器；渲染不反向 import store。
 
