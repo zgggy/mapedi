@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十三轮 5-b2 批。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十六轮 5-b4 批。**
 
 ## 先读
 
@@ -19,7 +19,14 @@
   - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
   - 基线：tsc 0、svelte-check 0 errors。
 
-## 当前状态（第二十四轮完成并提交（git log 头）；在案：`d629a99` 5-a → `0cfb3eb` 5-b1 → `865e3da` 5-b2 → `3d497dc` 插单 → 第二十四轮 5-b3）
+## 当前状态（第二十六轮完成，5-b4 批待提交；在案：`3d497dc` 插单 → `47023e5` 5-b3 → `113d023` 反馈四件 → 第二十六轮 5-b4）
+
+- **✓ 第二十六轮（2026-10-01，还债 5-b4：DrawController 绘制会话出库——今天收工批）**：
+  - `app/drawController.ts`（400 行）：会话启停（成员/高度/道路）+ 笔刷命中 + **笔画快照-diff 入栈**（undo 腐蚀采集端）+ 洪水填充/设中心/道路端点；paintDirty/strokeSnap/高度样本/区间选择随类迁移；Ctx 注入选中/状态/失效族（$state 写留 store 闭包）；store 六段 facade 零调用点改动（**1686→1462**）。
+  - **验收**：高度三态=画 17/17/4 → 撤销全 0 → 重做全 0（干净栈 stack0=0）；成员笔画=无主地 +17 收编 → **被画子层撤销精确还原 du=0**、depth=0；drawGuard 行省隐藏警示正常；tsc/svelte-check 0。
+  - **预存缺口登记**：撤销后**父层物化残留**（父 cells=子并集，undo 只 touchWorld 不重物化→父多出 cells 残留到下次 touchRegions）——终证 +16 残留实测，代码同构推定预存，已入 ROADMAP 已知问题（修法=undo 后补物化，注意频率成本）。
+  - **环境插曲**：vite 开发服务器中途死亡（5173 拒连）→ 已后台重启（`npm run dev`，日志 /tmp/vite-dev.log）；测试间歇污染（残留笔画栈/已涂状态）靠 reload 清栈 + 自适应涂改值化解。
+  - 子包进度：5-a ✓ 5-b1 ✓ 5-b2 ✓ 5-b3 ✓ 反馈四件 ✓ **5-b4 ✓** / 5-b5 CommandService ☐ / 5-c ☐。
 
 > 更早轮次（第十一~十七轮、1-b 路径包、渲染错乱根因、还债步骤 2/3/6、速修包、冻结 P0、第十一/十二轮）已剪至 `docs/history/HANDOFF_LOG_2026-10-01.md`（冻结）。
 
@@ -115,5 +122,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 步骤 5-b4（CommandService/DrawController 分包，殿后）**→ 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除（climate/astro 孤儿、nature.ts 死码、路网再生成）。历史面板（1-c 前置已清）等用户点名。
+- **默认下一包 = 5-b5 CommandService（命令 CRUD 出库，facade+Ctx 同款）**→ 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除（climate/astro 孤儿、nature.ts 死码、路网再生成、父物化撤销残留）。历史面板（1-c 前置已清）等用户点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。

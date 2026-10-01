@@ -10,7 +10,6 @@ import {
   CreateRegionCommand,
   DeleteRegionCommand,
   HeightCellsCommand,
-  MultiRegionCommand,
   RegionFieldsCommand,
   PathsCommand,
   LayersVisibilityCommand,
@@ -20,35 +19,25 @@ import {
   RegionsOrderCommand,
   LayersOrderCommand,
   LayerFieldsCommand,
-  SetCenterCommand,
   type EditCommand,
   history,
 } from '../core/history';
 import { ChangePipeline } from './changePipeline';
 import { AutosaveService } from './autosaveService';
 import { GenerationService } from './generationService';
-import { queuePieceInvalidation } from '../render/patchQueues';
+import { DrawController } from './drawController';
 import { setRegionColor } from '../core/regionOps';
 import { createRng } from '../core/rng';
 import {
-  addCellsToRegion,
   adjustWeights,
-  cellAtPoint,
-  cellsInBrush,
   emptyDrawSession,
-  floodFillCells,
-  pointInPolygon,
   removeCellsFromRegion,
-  resolveDrawTarget,
   shareCellsWithOthers,
-  stealFromSiblings,
   type DrawSession,
   type DrawTool,
 } from '../core/draw/brush';
-import { buildRoadSegments, dragRoadEndpoint, roadComponentCount } from '../core/draw/roads';
 import { computeClimate } from '../core/climate';
 import { generateBiomes } from '../core/biomes';
-import { absorbLandCell, releaseOceanCell } from '../core/heightRegions';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import {
@@ -76,16 +65,6 @@ import {
   type ElementStylePatch,
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
-import {
-  setHeightStroke,
-} from '../core/draw/heightDraw';
-import {
-  membershipDrawStroke,
-  type DrawActor,
-  type OverwriteMode,
-} from '../core/draw/membershipDraw';
-import { defaultLayerConfig, placementAllows } from '../core/layer/config';
-import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
 import { generateRoads, generateRoutes } from '../core/generate/networks';
 import { generateRivers } from '../core/rivers';
 import { applyHeightmapFile } from '../core/heightmap';
@@ -295,16 +274,6 @@ export class EditorStore {
   get revision() { return ui.rev; }
   notify() { ui.rev++; }
 
-  private paintDirty = false;
-  private strokeRegionId: string | null = null;
-  /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即发现全部副作用，
-   *  含 replace 剥他人 / split 新建 / flood steal——undo 腐蚀修复的核心，2026-09-30 还债1-①） */
-  private strokeSnap: Map<string, number[]> | null = null;
-  private heightStroke: { id: number; h: number }[] | null = null;
-  private heightTouched: Set<number> | null = null;
-  heightIntervalId = 'h6';
-  /** 当前涂改高度值（工作区滑块选定；未选过则用所选区间的 min 兜底） */
-  heightPaintValue: number | null = null;
 
   randomName(kind: string) {
     const rng = createRng((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
@@ -376,6 +345,40 @@ export class EditorStore {
     scheduleAutosave: () => this.scheduleAutosave(),
     touchWorld: () => this.touchWorld(),
     saveGenDraftSoon: () => saveGenDraftSoon(),
+  });
+
+  /** 绘制会话与笔画状态机（还债 5-b4）——选中/状态/失效族经闭包注入 */
+  private readonly drawCtl = new DrawController({
+    get world() {
+      return worldRaw;
+    },
+    setWorld: (w) => {
+      worldRaw = w;
+    },
+    get draw() {
+      return ui.draw;
+    },
+    set draw(v) {
+      ui.draw = v;
+    },
+    get selectedRegionId() {
+      return ui.selectedRegionId;
+    },
+    set selectedRegionId(v) {
+      ui.selectedRegionId = v;
+    },
+    setStatus: (v) => {
+      ui.status = v;
+    },
+    notify: () => {
+      ui.rev++;
+    },
+    touchWorld: () => this.touchWorld(),
+    touchRegions: () => this.touchRegions(),
+    touchRegionsIncremental: () => this.touchRegionsIncremental(),
+    touchPaint: () => this.touchPaint(),
+    markHeightDirty: (ids) => this.markHeightDirty(ids),
+    flushHeightRegions: (samples) => this.flushHeightRegions(samples),
   });
 
   /** 几何/拓扑变化：全量失效（投影、拾取、索引、边界环） */
@@ -1209,299 +1212,68 @@ export class EditorStore {
     }
   }
 
+  // —— 绘制会话（实现体在 DrawController，还债 5-b4）——
   startDraw(regionId: string) {
-    this.selectedRegionId = regionId;
-    const region = this.world?.regions.find((r) => r.id === regionId);
-    // 区间型元素（kind=interval）的绘制语义 = 把区间值直刷到 cell（`__height__` 协议），
-    // 不是区域归属——归属由高度派生（数据驱动，未来区间型元素同一规则）
-    if (region?.attributes?.kind === 'interval') {
-      this.startHeightDraw(regionId);
-      return;
-    }
-    const layer = this.world?.layers.find((l) => l.id === region?.layerId);
-    let tool: DrawTool = 'brush';
-    if (layer?.kind === 'road' || layer?.kind === 'route') tool = 'road';
-    this.draw = { ...emptyDrawSession(), active: true, targetRegionId: regionId, tool, addMode: true };
-    this.status =
-      tool === 'road'
-        ? '道路绘制：左键加地块；拖端点 · Esc 退出'
-        : '绘制会话：左键笔刷，Shift 移除，Esc 退出';
+    this.drawCtl.startDraw(regionId);
   }
 
   /** 高度绘制会话：整数场 + 12 工作区间 */
   startHeightDraw(intervalId?: string) {
-    // 笔刷目标元素 = 选中态（工作区黄框，与图层面板选中语义一致）
-    this.selectedRegionId = intervalId ?? this.heightIntervalId ?? null;
-    this.heightIntervalId = intervalId ?? this.heightIntervalId ?? 'h6';
-    this.draw = {
-      ...emptyDrawSession(),
-      active: true,
-      targetRegionId: `__height__:${this.heightIntervalId}`,
-      tool: 'brush',
-      addMode: true,
-    };
-    const iv = intervalById(this.heightIntervalId);
-    this.status = `高度绘制 · ${iv?.name ?? ''} ${this.heightPaintValue ?? iv?.min ?? 0}：左键刷值 · Shift+左键擦除 · Esc 退出`;
+    this.drawCtl.startHeightDraw(intervalId);
   }
 
   setHeightInterval(intervalId: string) {
-    this.heightIntervalId = intervalId;
-    if (this.draw.targetRegionId?.startsWith('__height__')) {
-      this.draw = { ...this.draw, targetRegionId: `__height__:${intervalId}` };
-    }
-    const iv = intervalById(intervalId);
-    this.status = `选定：${iv?.name ?? intervalId}（${iv?.lo} ~ ${iv?.hi}）→ 涂改值 ${this.heightPaintValue}`;
-    this.notify();
+    this.drawCtl.setHeightInterval(intervalId);
   }
 
   /** 工作区滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字 */
   setHeightPaint(intervalId: string, value: number) {
-    this.heightIntervalId = intervalId;
-    this.heightPaintValue = value;
-    if (this.draw.targetRegionId?.startsWith('__height__')) {
-      this.draw = { ...this.draw, targetRegionId: `__height__:${intervalId}` };
-    }
-    const iv = intervalById(intervalId);
-    this.status = `涂改值 ${value}（${iv?.name ?? intervalId}）`;
-    this.notify();
+    this.drawCtl.setHeightPaint(intervalId, value);
   }
 
   heightIntervals() {
-    return HEIGHT_INTERVALS;
+    return this.drawCtl.heightIntervals();
   }
 
   setDrawTool(tool: DrawTool) {
-    this.draw = { ...this.draw, tool };
+    this.drawCtl.setDrawTool(tool);
   }
 
   endDraw() {
-    if (this.draw.active) {
-      this.draw = { ...this.draw, active: false };
-      this.status = '已退出绘制会话';
-      this.touchWorld();
-    }
+    this.drawCtl.endDraw();
   }
 
-    paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): number[] | null {
-      if (!this.world || !this.draw.active) return null;
-      // 笔画开始：在 resolveDrawTarget **之前**拍快照——resolve 可能自动新建元素（行省），
-      // 新建也必须进 created 被撤销捕获
-      if (!this.paintDirty) this.beginStrokeSnap();
-      const resolved = resolveDrawTarget(this.world, this.draw);
-    if (!resolved) return null;
-    if (resolved === 'height') {
-      // 擦除 = 右键或 Shift+左键（A′契约画布右键=纯位移，Shift 是可达的擦除手势）
-      return this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 || shift ? 'right' : 'left');
-    }
-    const pointer = button === 2 || shift ? 'right' : 'left';
-    const hits = cellsInBrush(this.world, lon, lat, this.draw.radiusDeg);
-    if (!hits.length) return null;
-    if (!this.paintDirty) {
-      this.paintDirty = true;
-    }
-    const lcfg = defaultLayerConfig(resolved.region.layerId);
-    const actor: DrawActor = {
-      layerId: resolved.region.layerId,
-      elementId: resolved.region.id,
-      overwrite: (this.draw.addMode ? 'emptyOnly' : 'replace') as OverwriteMode,
-      placement: lcfg.placement,
-      splitPolicy: lcfg.splitPolicy,
-    };
-    // placement 闸 + overwrite + splitPolicy
-    const result = membershipDrawStroke(this.world, actor, {
-      cellIds: hits,
-      pointer: pointer as 'left' | 'right',
-      shift,
-      alt,
-    });
-    if (result.membershipChanges.length) {
-      this.selectedRegionId = resolved.region.id;
-      // 每元素增减不再单独采集：commit 走快照-diff（捕获全部副作用，含 replace/split/steal）
-    }
-    void placementAllows;
-    void ctrl;
-    return hits;
+  paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): number[] | null {
+    return this.drawCtl.paint(lon, lat, shift, ctrl, alt, button);
   }
 
   /** 高度笔刷：HeightDraw 整数语义 */
   paintHeight(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, pointer: 'left' | 'right' = 'left'): number[] | null {
-    void shift; void ctrl; void alt;
-    if (!this.world) return null;
-    const radius = this.draw.radiusDeg || 1.2;
-    const hits = cellsInBrush(this.world, lon, lat, radius);
-    if (!hits.length) return null;
-    if (!this.paintDirty) {
-      this.strokeRegionId = '__height__';
-      this.paintDirty = true;
-      this.heightStroke = [];
-      this.heightTouched = new Set();
-    }
-    // 撤销样本：每个 cell 在**首次触碰**时记录原高（此前只记首批 = 拖涂撤销不完整）
-    for (const id of hits) {
-      if (!this.heightTouched!.has(id)) {
-        this.heightStroke!.push({ id, h: this.world!.cells[id].height });
-        this.heightTouched!.add(id);
-      }
-    }
-    // 【v2 语义】笔刷只写「选定值」（擦除 → pointer right → 写 0）；拖动中零重算，只回传命中供色块高亮
-    const paintValue = this.heightPaintValue ?? intervalById(this.heightIntervalId)?.min ?? 0;
-    setHeightStroke(this.world, hits, paintValue, pointer === 'right');
-    for (const id of hits) {
-      const c = this.world.cells[id];
-      if (!c) continue;
-      if (c.isOcean) releaseOceanCell(this.world, c.id);
-      else absorbLandCell(this.world, c.id);
-      this.markHeightDirty([c.id]);
-    }
-    return hits;
+    return this.drawCtl.paintHeight(lon, lat, shift, ctrl, alt, pointer);
   }
 
   commitStroke() {
-    if (this.strokeRegionId === '__height__' && this.heightStroke?.length) {
-      const before = this.heightStroke;
-      const samples = before.map(({ id, h }) => ({
-        id,
-        h0: h,
-        h1: this.world!.cells[id].height,
-      }));
-      const w = this.world!;
-      const dirtyIds = samples.map((s) => s.id);
-      // 1-c：命令纯数据（只有 samples+label）；undo/redo 后的失效副作用由
-      // historyEffect 按命令类型分发，不再作为闭包存进命令。
-      const cmd = new HeightCellsCommand(samples, '高度笔刷');
-      history.run(w, cmd, { alreadyApplied: true });
-      this.heightStroke = null;
-      this.strokeRegionId = null;
-      this.strokeSnap = null;
-      this.paintDirty = false;
-      this.markHeightDirty(dirtyIds);
-      this.flushHeightRegions(samples);
-      if (this.world) this.world = { ...this.world };
-      this.notify();
-      return;
-    }
-    // 成员笔画提交：快照-diff → 多元素补丁入栈（undo 腐蚀修复：replace/split/steal 副作用一并撤销）
-    const dirty = this.commitStrokeDiff('绘制');
-    this.strokeRegionId = null;
-    this.paintDirty = false;
-    // 归属提交：**每个被修改的 Region** 逐件定向失效（多元素副作用的件环同样必须补丁，
-    // 「全清/补丁」二选一的不变量在多元素语义下逐件兑现）
-    if (dirty.length) {
-      this.touchRegionsIncremental();
-      if (this.world) {
-        for (const id of dirty) {
-          const r = this.world.regions.find((x) => x.id === id);
-          if (r) {
-            queuePieceInvalidation(`piece:${r.layerId}:${r.id}:`);
-          }
-        }
-      }
-    } else {
-      this.touchRegions();
-    }
-  }
-
-  /** 笔画开始：全量 Region.cells 引用快照（写入皆 COW 换数组 → 引用比对即得副作用集） */
-  private beginStrokeSnap() {
-    this.strokeSnap = this.world ? new Map(this.world.regions.map((r) => [r.id, r.cells])) : null;
-  }
-
-  /**
-   * 笔画提交（快照-diff）：捕获本次笔画触碰的**所有** Region——目标、被 replace/steal
-   * 剥 cell 的旁者、splitPolicy/自动建新建的元素——→ MultiRegionCommand 入栈。
-   * 返回被修改的**已存在** Region id（新建元素无旧缓存条目，只需 touch 不需件失效）。
-   */
-  private commitStrokeDiff(label: string): string[] {
-    const snap = this.strokeSnap;
-    this.strokeSnap = null;
-    if (!this.world || !snap) return [];
-    const patches: { id: string; added: number[]; removed: number[] }[] = [];
-    const created: { id: string; region: Region }[] = [];
-    const modified: string[] = [];
-    for (const r of this.world.regions) {
-      const prev = snap.get(r.id);
-      if (prev === undefined) {
-        created.push({ id: r.id, region: r });
-        continue;
-      }
-      if (prev === r.cells) continue;
-      const s0 = new Set(prev);
-      const s1 = new Set(r.cells);
-      const added = r.cells.filter((c) => !s0.has(c));
-      const removed = [...s0].filter((c) => !s1.has(c));
-      if (added.length || removed.length) {
-        patches.push({ id: r.id, added, removed });
-        modified.push(r.id);
-      }
-    }
-    if (patches.length || created.length) {
-      history.run(this.world, new MultiRegionCommand({ patches, created }, label), {
-        alreadyApplied: true,
-      });
-    }
-    return modified;
+    this.drawCtl.commitStroke();
   }
 
   flood(cellId: number) {
-    if (!this.world || !this.draw.active) return;
-    // 快照-diff（同笔画机制）：resolve 可能自动建元素、steal 会剥同层旁者——全部入补丁
-    this.beginStrokeSnap();
-    const resolved = resolveDrawTarget(this.world, this.draw);
-    if (!resolved || resolved === 'height') {
-      this.strokeSnap = null;
-      return;
-    }
-    const hits = floodFillCells(this.world, cellId, true);
-    addCellsToRegion(resolved.region, hits);
-    stealFromSiblings(this.world, resolved.region, hits);
-    this.commitStrokeDiff('填充');
-    this.touchWorld();
-    this.status = `洪水填充 ${hits.length} 地块`;
+    this.drawCtl.flood(cellId);
   }
 
   setCenterAt(cellId: number) {
-    if (!this.world || !this.selectedRegionId) return;
-    history.run(this.world, new SetCenterCommand(this.selectedRegionId, cellId));
-    this.touchWorld();
-    this.status = `已设中心 → cell #${cellId}`;
+    this.drawCtl.setCenterAt(cellId);
   }
 
   endpoint(cellId: number, lon: number, lat: number, phase: 'start' | 'move' | 'end') {
-    if (!this.world || !this.draw.active) return;
-    const region = this.world.regions.find((r) => r.id === this.draw.targetRegionId);
-    if (!region) return;
-    if (phase === 'start') return;
-    if (phase === 'move') {
-      const cell = this.world.cells[cellId];
-      if (cell && pointInPolygon(lon, lat, cell.polygon)) {
-        dragRoadEndpoint(this.world, region, cellId, lon, lat, cellId, true);
-        // 端点拖动只改 endpointOverrides（regions 域渲染提示）：不炸几何/投影缓存
-        this.touchPaint();
-      }
-      return;
-    }
-    const cell = this.world.cells[cellId];
-    const inside = cell ? pointInPolygon(lon, lat, cell.polygon) : false;
-    const hit = cellAtPoint(this.world, lon, lat);
-    const result = dragRoadEndpoint(this.world, region, cellId, lon, lat, hit, inside);
-    this.touchRegions();
-    if (result === 'transfer') this.status = '端点已拖出：原地块取消道路，目标地块纳入道路';
-    else if (result === 'override') this.status = '端点已微调（多边形内）';
+    this.drawCtl.endpoint(cellId, lon, lat, phase);
   }
 
   roadSegments() {
-    if (!this.world || !this.draw.active || this.draw.tool !== 'road' || !this.draw.targetRegionId)
-      return [];
-    const region = this.world.regions.find((r) => r.id === this.draw.targetRegionId);
-    if (!region) return [];
-    return buildRoadSegments(this.world, region);
+    return this.drawCtl.roadSegments();
   }
 
   roadBreaks() {
-    if (!this.world || !this.draw.targetRegionId) return 0;
-    const region = this.world.regions.find((r) => r.id === this.draw.targetRegionId);
-    if (!region || region.cells.length === 0) return 0;
-    return Math.max(0, roadComponentCount(this.world, region) - 1);
+    return this.drawCtl.roadBreaks();
   }
 
   applyNature() {
