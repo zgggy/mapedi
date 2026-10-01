@@ -79,10 +79,6 @@
     onzoom,
     onwarm,
     onpick,
-    onpaint,
-    onradius,
-    onstrokeend,
-    onendpoint,
     bindCanvas,
   }: {
     world: World;
@@ -109,16 +105,6 @@
      * 传 null = 该处无 cell（点击空白处，语义交由调用方决定）。
      */
     onpick?: (cellId: number | null) => void;
-    /** 渲染后端：gpu = GL 直绘（bg/cellsMesh/元素三通道，相机 uniform 逐帧直绘） */
-    onpaint?: (lon: number, lat: number, shift: boolean, ctrl?: boolean, alt?: boolean, button?: number) => number[] | null;
-    onradius?: (v: number) => void;
-    onstrokeend?: () => void;
-    onendpoint?: (
-      cellId: number,
-      lon: number,
-      lat: number,
-      phase: 'start' | 'move' | 'end',
-    ) => void;
     bindCanvas?: (c: HTMLCanvasElement) => void;
   } = $props();
 
@@ -359,7 +345,7 @@
 
   function paintAt(e: PointerEvent) {
     const ll = llAt(e);
-    const hits = onpaint?.(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
+    const hits = editor.paint(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
     if (hits?.length) {
       let grew = false;
       for (const id of hits) {
@@ -1207,7 +1193,7 @@
           if (ep !== null) {
             dragEndpoint = ep;
             capturePointer(canvas, e.pointerId);
-            onendpoint?.(ep, ll.lon, ll.lat, 'start');
+            editor.endpoint(ep, ll.lon, ll.lat, 'start');
             return;
           }
         }
@@ -1244,7 +1230,7 @@
       }
       if (dragEndpoint !== null) {
         const ll = llAt(e);
-        onendpoint?.(dragEndpoint, ll.lon, ll.lat, 'move');
+        editor.endpoint(dragEndpoint, ll.lon, ll.lat, 'move');
         return;
       }
       // 始终更新笔刷位置 = 鼠标屏幕坐标（绘制命中仍用 llAt）
@@ -1315,11 +1301,11 @@
       }
       if (dragEndpoint !== null) {
         const ll = llAt(e);
-        onendpoint?.(dragEndpoint, ll.lon, ll.lat, 'end');
+        editor.endpoint(dragEndpoint, ll.lon, ll.lat, 'end');
         dragEndpoint = null;
       }
       if (painting) {
-        onstrokeend?.();
+        editor.commitStroke();
         paintPreviewCommitted = true;
         requestOverlay();
       }
@@ -1341,7 +1327,7 @@
     }}
     onpointerleave={() => {
       if (painting) {
-        onstrokeend?.();
+        editor.commitStroke();
         paintPreviewCommitted = true;
         requestOverlay();
       }
@@ -1360,7 +1346,7 @@
       // Alt+滚轮：改笔刷半径
       if (e.altKey && drawActive) {
         const d = e.deltaY > 0 ? -0.15 : 0.15;
-        onradius?.(Math.max(0.3, Math.min(8, brushRadiusDeg + d)));
+        editor.draw = { ...editor.draw, radiusDeg: Math.max(0.3, Math.min(8, brushRadiusDeg + d)) };
         return;
       }
       const rect = canvas.getBoundingClientRect();

@@ -540,6 +540,10 @@ export class EditorStore {
     this.cmds.moveItemStep(id, dir);
   }
 
+  organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string) {
+    this.cmds.organize(action, id);
+  }
+
   copyItem(id: string) {
     this.cmds.copyItem(id);
   }

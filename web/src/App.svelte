@@ -171,15 +171,6 @@
     });
   }
 
-  /** 组织模式四操作（2026-09-30 拖动退役）：上移/下移方向按两面板既有菜单映射
-   *  （图层上移=-1、元素上移=+1——两者数组方向相反，各自验证过） */
-  function organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string) {
-    const isLayer = world?.layers.some((l) => l.id === id) ?? false;
-    if (action === 'indent') editor.indentItem(id);
-    else if (action === 'unindent') editor.unindentItem(id);
-    else editor.moveItemStep(id, action === 'up' ? (isLayer ? -1 : 1) : isLayer ? 1 : -1);
-  }
-
   onMount(() => {
     try {
       editor
@@ -295,13 +286,6 @@
           onzoom={(z) => (zoomScale = z)}
           onwarm={(done) => (preparing = !done)}
           onpick={pickElement}
-          onpaint={(lon, lat, shift, ctrl, alt, button) =>
-            editor.paint(lon, lat, shift, ctrl, alt, button)}
-          onradius={(v) => {
-            editor.draw = { ...editor.draw, radiusDeg: v };
-          }}
-          onendpoint={(cellId, lon, lat, phase) => editor.endpoint(cellId, lon, lat, phase)}
-          onstrokeend={() => editor.commitStroke()}
         />
       {:else}
         {#await import('./ui/GlobeView.svelte') then mod}
@@ -419,7 +403,7 @@
       // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐在检查模式展开区（第八轮）
       editor.focusLayerForDraw(id);
     }}
-    onOrganize={organize}
+    onOrganize={(action, id) => editor.organize(action, id)}
     taskMode={shell.wsMode}
     onAddLayer={(n) => editor.addLayer(n)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
@@ -462,7 +446,7 @@
         editor.focusLayer === 'province' ? 'province' : 'country',
       ))}
     onNewName={(n) => (editor.newName = n)}
-    onOrganize={organize}
+    onOrganize={(action, id) => editor.organize(action, id)}
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
   />
@@ -503,13 +487,6 @@
     width: 100%;
     height: 100%;
     background: #0b1018;
-  }
-  /* 生成模式：元素级生成占位（引擎包待落地，GEN_UNIFIED_DESIGN §6） */
-  .gen-pending {
-    font-size: 10px;
-    color: var(--text-dim);
-    padding: 6px 8px;
-    border-top: 1px dashed var(--panel-border);
   }
   .view {
     position: absolute;

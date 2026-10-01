@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十七轮 5-b5 批。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十八轮 5-c 首批。**
 
 ## 先读
 
@@ -19,7 +19,13 @@
   - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
   - 基线：tsc 0、svelte-check 0 errors。
 
-## 当前状态（第二十七轮完成，5-b5 批待提交；在案：`47023e5` 5-b3 → `113d023` 反馈四件 → `ced5e81` 5-b4 → 第二十七轮 5-b5）
+## 当前状态（第二十八轮完成，5-c 首批待提交；在案：`113d023` 反馈四件 → `ced5e81` 5-b4 → `8e22dac` 5-b5 → 第二十八轮 5-c）
+
+- **◐ 第二十八轮（2026-10-01，还债 5-c 首批：App 转发器瘦身）**：
+  - **审计**：双向比对 39 个 on* 赋值**零死转发**（前轮已清 canPaint/onMoveLayer 类）。
+  - **首批三件（不碰 shell prop 面）**：① Viewport 四纯转发下沉（paint/radius/endpoint/strokeend → 直调 editor，路径编辑同先例）——真指针笔画验收：61→撤销精确回 10、栈 1；alt+滚轮 1.5→1.65；② `organize` 下沉 CommandService+门面（indent 翻转+回弹 ✓）；③ 死 CSS `.gen-pending` 删。App 532→509、Viewport 1437→1423、tsc/svelte-check 0。
+  - **☐ 剩余 ~35 个 shell 转发待 UI 重构线协调**：TopBar 12（rename/export/import/style/projection/globe×5/switchView…）、WorkspaceDrawer 11、LayersPanel 7、GenerateSection 4、LeftRail 4——**勿单方面删改**；届时按「组件直连 editor 或收进 UI 状态模块」两路处理。
+  - 子包进度：5-a ✓ 5-b1~5-b5 ✓ **5-c ◐（首批）** / 步骤 7 ☐。
 
 - **✓ 第二十七轮（2026-10-01，还债 5-b5：CommandService 命令 CRUD 出库）**：
   - `app/commandService.ts`（814 行）：undo/redo+类型分发/删·复制·吞并/图层树缩进·提升·移序/样式·显隐·透明度/路径快照执行器+拖动会话/字段快照执行器/新建·重命名·换色全量出库——**方法体原样搬运**（`this.*` 经类内代理映射 Ctx，零改写，diff 安全）；选中类留 store（App 直连）。store **2045→888**。
@@ -128,5 +134,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除**（climate/astro 孤儿、nature.ts 死码、路网再生成、父物化撤销残留）。历史面板（1-c 前置已清、门面/服务就绪）等用户点名。
+- **默认下一包 = 步骤 7 大扫除**（climate/astro 孤儿、core/nature.ts 死码、路网再生成、父物化撤销残留、容差集中、违契图层名特判）→ 5-c 剩余等 UI 重构线协调。历史面板（地基全就绪）等用户点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。

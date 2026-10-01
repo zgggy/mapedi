@@ -48,7 +48,11 @@
 - **✓ 5-b3 相机运算出库（2026-10-01 第二十四轮）**：勘察结论=**MapTransform 原语早已成形**（`render/space.ts`/`render/map2d.ts`），本轮抽 `ui/planeCamera.ts`（145 行纯函数）：`zoomCamAt`（锚点缩放）/`panCam`/`contentPanDeltaX`/`bestDrawDxFor`（可见副本挑选）/`revealCamTarget`（C7 遮挡反解）/`startCamTween`（180ms easeOut 补间）——手势监听与绘制状态机留 Viewport（事件边界不动）。**验收（浏览器实测）**：缩放 ratio=1.331=1.1³、**锚点世界点误差 1.6e-16**；右键内容平移 +0.563、中键相机 dx=-80/319、dy=+40/319 精确；C7 露出端到端=元素拖至 sx137（轨下）→点行→补间 camDx=-2.059→sx794 入可见区、仅越界轴修正（dy=0）；tsc/svelte-check 0。**环境坑**：失焦页 rAF 冻结（0 帧）→ 补间不跑——**连拍截图泵 BeginFrame 即恢复**（4s/54 帧），以泵帧法验通。
 - **✓ 5-b4 DrawController（绘制会话出库，2026-10-01 第二十六轮）**：`app/drawController.ts`（400 行）——会话启停（成员/高度/道路）、笔刷命中、笔画快照-diff 入栈（undo 腐蚀采集端）、洪水填充/设中心/道路端点路段全量出库；状态（paintDirty/strokeSnap/高度样本/区间选择）随类迁移，选中/状态/失效族经 Ctx 注入；store 六段 facade 调用点零改动（1686→1462）。**验收**：高度三态=画 17/17/4 → 撤销全 0 → 重做全 0（stack0=0 干净栈）；成员笔画=无主地 +17 收编 → 撤销**被画子层精确还原 du=0**/depth=0；drawGuard「行省已隐藏」正常；tsc/svelte-check 0。
 - **✓ 5-b5 CommandService（命令 CRUD 出库，2026-10-01 第二十七轮）**：`app/commandService.ts`（814 行，**方法体自 store 原样搬运**——`this.*` 经类内代理映射 Ctx，零改写）：undo/redo+类型分发、删除/复制/吞并、图层树缩进·提升·移序、样式·显隐·透明度、路径快照执行器+拖动会话、字段快照执行器、新建·重命名·换色；选中类（selectLayerTop/clearLayerSelection/focusLayerForDraw）留 store（App 直连）。store **888 行**（日初 2045）。**验收（浏览器八组门面回归）**：建层/元素复制/删除层/缩进提升/显隐/样式（border.width 0.8→4.2→0.8）/withPaths/patchRegions 全部经 facade 生效且撤销回滚、栈归零、IDB 15 层清净、零 console 错。**教训**：undo 换 world 身份后**数组长度断言读旧引用=假阴**——对象字段级断言+栈计数+IDB 实读才是可信口径。孤儿 import 29 项清理；tsc/svelte-check 0。
-- **☐ 5-c App 转发器瘦身**：~75 个 on* 回调收敛（与 UI 重构线协调，勿单方面改 prop 面）。
+- **◐ 5-c App 转发器瘦身——首批完成（2026-10-01 第二十八轮），shell 面板面待协调**：
+  - **审计**：双向比对=真实 on* 赋值 **39 个、零死转发**（canPaint/onMoveLayer 类已在前轮清完）。
+  - **✓ 首批（不碰 shell prop 面）**：① Viewport 四个纯 editor 转发下沉（onpaint/onradius/onendpoint/onstrokeend → 组件内直调 editor——该组件本就直连 store，路径编辑同先例），App 的 Viewport 标签 6 props→2；② `organize` 业务规则（图层 up=-1/元素 up=+1 映射）下沉 CommandService.organize+门面，App 删 9 行函数；③ 死 CSS `.gen-pending` 删除。App 532→**509**、Viewport 1437→1423。
+  - **验收（浏览器）**：真指针笔画 down→move→up（走下沉 paint/commitStroke 链）61→撤销精确回 10、栈 1；alt+滚轮半径 1.5→1.65（下沉 onradius）；organize('indent') parentLayerId 翻转+撤销回弹；tsc/svelte-check 0、零 console 错。
+  - **☐ 剩余（~35 个，待与 UI 重构线协调后动）**：TopBar12/WorkspaceDrawer11/LayersPanel7/GenerateSection4/LeftRail4——均为 shell 面板面，单方面删改会与 UI 线撞车；清单在 HANDOFF。
 - **验收（总）**：各模块独立可测；App 不再是回调转发器；渲染不反向 import store。
 
 ### ◐ 6. 热路径与缓存保险（P1）——2026-10-01 核心三项落地，两项缓发

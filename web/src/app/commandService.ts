@@ -346,6 +346,17 @@ export class CommandService {
     }
   }
 
+  /**
+   * 组织模式四操作（2026-09-30 拖动退役；5-c 自 App 下沉）：上移/下移方向按两面板
+   * 既有菜单映射（图层上移=-1、元素上移=+1——两者数组方向相反，各自验证过）。
+   */
+  organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string): void {
+    const isLayer = this.world?.layers.some((l) => l.id === id) ?? false;
+    if (action === 'indent') this.indentItem(id);
+    else if (action === 'unindent') this.unindentItem(id);
+    else this.moveItemStep(id, action === 'up' ? (isLayer ? -1 : 1) : isLayer ? 1 : -1);
+  }
+
   private moveItemStepImpl(id: string, dir: -1 | 1) {
     if (!this.world) return;
     // 图层：同父兄弟在 layers 数组中的顺序
