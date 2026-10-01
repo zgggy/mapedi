@@ -34,11 +34,18 @@
 - **验收（浏览器实测）**：① 三态语义——cell#1 `mountain/-37.4°C` → 真实笔画画 -10（海）→ ensure 重算 `ocean/2°C` → Ctrl+Z → ensure 回 `mountain/-37.4°C` **精确基线**（撤销失效路径 ✓）；② 缓存机制——首算 115ms / 命中 0ms / 高度变更后重算 111ms 且 `sameMap=false`；③ `serializeWorld` 顶层无 `cellClimate`/`biome`（`climate` 参数保留）；④ legacy 档注入两旧字段 → deserialize 不炸、字段被忽略、世界完整；⑤ `generateRoads` 清空两缓存后直调 → 入口自回填（207ms）零错误；tsc/svelte-check 0。
 - **边界（诚实记录）**：① 仅改河流不翻 heightRev（partial river regen 当前 UI 不可达）→ 降水河邻加湿沿用旧值 ±0.15；② biome 依赖的气候参数变更走 applyNature 直算（同步刷新戳）；③ 生产 world 的 `computeBiomes` 覆盖全部 100k cell，`Map.get` 恒有值，`?? null` 仅为类型收窄。
 
-### ☐ 5. store / Viewport 拆分（P1）
+### ◐ 5. store / Viewport 拆分（P1）——5-a ✓（第二十一轮），其余子包待续
 
-- **内容**：按六模块边界分包——UIState / ChangePipeline（touch*+consume*，最先拆）/ CommandService / GenerationService / Persistence / DrawController；抽 `MapTransform` / `ViewportController`；顺手修三处失联（`canPaint` 死 prop、`onpaint` 丢参致右键擦除不可达、`panningMode:'cam'` 死分支）。
-- **验收**：各模块独立可测；App 不再是 ~60 回调的转发器；渲染不再反向 import store 私有队列。
-- **依赖**：建议在步骤 1 之后（命令化减少拆分时的行为风险）。
+> 范围大 → 按 AGENTS §6 拆子包整包交付；原「六模块」总目标不变，子包划分如下。
+
+- **✓ 5-a 失效管线与队列出库（2026-10-01 第二十一轮）**：
+  - **`app/changePipeline.ts`（新）**：touch* 家族（World/Regions/View/RegionsIncremental/LayerView/Height/Paint）+ 高度派生 flush（markHeightDirty/flushHeightRegions）+ 高度脏状态整体出库（183 行）——只管失效/派生/换身份，持久化与 UI 经 `PipelineCtx` 注入（`$state` 写入留在 store 文件内的 ctx 闭包）；store 保留同名薄门面，**全部调用点零改动**；顺带删死字段 `heightNotifyQueued`。
+  - **`render/patchQueues.ts`（新）**：三队列（pieceInvalidations/heightDeltas/piecePatches）+ 同键 Δ 合成从 store 私有字段抽为模块单例（rev.ts 同款先例）；**Viewport 的 3 处 `editor.consume*` 改直接模块导入 = 渲染不再反向 import store 私有队列**（验收项 ✓）；store 1749 定向失效改 `queuePieceInvalidation`。
+  - **三失联清账**：`canPaint` 死 prop 物理删（prop+类型+5 处 `(drawActive || canPaint)`，App 从未传入）；`panningMode` 死成员 `'cam'` 删（只赋过 `'content'/null`）；`onpaint` 丢参**已在第十四轮速修包修复**（本项闭合）。
+  - **验收（浏览器实测）**：显隐切换经新管线（👁→🚫 翻转+撤销回弹、零 console 错）；高度笔画画 -10→撤销回 61；**队列 E2E**：commit 同步窥探 deltas=8/patches=3（入列）→ 让帧后队列排空（渲染经模块消费）→ 撤销正常；tsc/svelte-check 0；store 2045→1900 行。
+- **☐ 5-b CommandService / GenerationService / Persistence / DrawController 分包**：history 门面+命令 CRUD、生成管线、持久化、绘制会话归位；抽 `MapTransform` / `ViewportController`。
+- **☐ 5-c App 转发器瘦身**：~75 个 on* 回调收敛（与 UI 重构线协调，勿单方面改 prop 面）。
+- **验收（总）**：各模块独立可测；App 不再是回调转发器；渲染不反向 import store。
 
 ### ◐ 6. 热路径与缓存保险（P1）——2026-10-01 核心三项落地，两项缓发
 

@@ -2,10 +2,7 @@ import type { LayerRenderConfig, Region } from '../core/types';
 import { defaultLayerRenderConfig } from '../core/types';
 import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
-import { invalidateProjCache, installProjCache, type ProjCache } from '../render/projCache';
-import { invalidateBorderCache } from '../render/borderCache';
-import { invalidateCellGrid } from '../core/index/cellGrid';
-import { invalidateRegionIndex } from '../core/index/regionIndex';
+import { installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateCellIndex } from '../core/index/cellIndex';
 import { invalidateCellGraph } from '../core/index/cellGraph';
 import { invalidateViewIndex } from '../render/viewIndex';
@@ -28,6 +25,8 @@ import {
   type EditCommand,
   history,
 } from '../core/history';
+import { ChangePipeline } from './changePipeline';
+import { queuePieceInvalidation } from '../render/patchQueues';
 import { setRegionColor } from '../core/regionOps';
 import { createRng } from '../core/rng';
 import {
@@ -48,16 +47,15 @@ import {
 import { buildRoadSegments, dragRoadEndpoint, roadComponentCount } from '../core/draw/roads';
 import { computeClimate } from '../core/climate';
 import { generateBiomes } from '../core/biomes';
-import { absorbLandCell, releaseOceanCell, heightTopologyChanged } from '../core/heightRegions';
+import { absorbLandCell, releaseOceanCell } from '../core/heightRegions';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
-import { rebuildHeightIntervalElements, updateHeightIntervalElements, normalizeHeightIntervalElements } from '../core/layer/heightElements';
+import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
   visibleColorRoots,
-  materializeParentCells,
 } from '../core/displayCompose';
-import { bumpAllRev, bumpHeightRev, bumpRegionsRev, regionsRev } from '../core/rev';
+import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { generateWorldAsync, loadWorldAsync } from '../core/generate/runGenerate';
 import { defaultStarSystem, syncHomeFromClimate } from '../core/astro';
@@ -298,13 +296,10 @@ export class EditorStore {
   /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即发现全部副作用，
    *  含 replace 剥他人 / split 新建 / flood steal——undo 腐蚀修复的核心，2026-09-30 还债1-①） */
   private strokeSnap: Map<string, number[]> | null = null;
-  /** 提交后需定向失效的件前缀（渲染侧消费；守「全清/补丁」不变量） */
-  private pendingPieceInvalidations: string[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private saveEpoch = 0;
   private saveQueue: Promise<void> = Promise.resolve();
   private generationSeq = 0;
-  private paintFrame = 0;
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
   heightIntervalId = 'h6';
@@ -319,16 +314,23 @@ export class EditorStore {
     return base;
   }
 
+  /** 失效管线（还债 5-a）：touch* 家族与高度派生 flush 的实现体；本类保留同名薄代理 */
+  private readonly pipeline = new ChangePipeline({
+    get world() {
+      return worldRaw;
+    },
+    setWorld: (v) => {
+      worldRaw = v;
+    },
+    notify: () => {
+      ui.rev++;
+    },
+    scheduleAutosave: () => this.scheduleAutosave(),
+  });
+
   /** 几何/拓扑变化：全量失效（投影、拾取、索引、边界环） */
   touchWorld() {
-    invalidateRegionIndex();
-    invalidateCellGrid();
-    invalidateProjCache();
-    invalidateBorderCache();
-    bumpAllRev();
-    this.world = this.world ? { ...this.world } : this.world;
-    this.scheduleAutosave();
-    this.notify();
+    this.pipeline.touchWorld();
   }
 
   /** Replace a project atomically; no selection or cached geometry belongs to the new world. */
@@ -356,179 +358,36 @@ export class EditorStore {
 
   /** 仅 Region 归属/排序/颜色：不重建投影缓存 */
   touchRegions() {
-    invalidateRegionIndex();
-    invalidateCellIndex();
-    invalidateBorderCache();
-    bumpRegionsRev();
-    materializeParentCells(this.world!);
-    this.world = this.world ? { ...this.world } : this.world;
-    this.scheduleAutosave();
-    this.notify();
+    this.pipeline.touchRegions();
   }
 
   /** 仅视图/选中/UI：不失效几何缓存 */
   touchView() {
-    this.notify();
+    this.pipeline.touchView();
   }
-
 
   /** 归属提交（增量）：bump data rev + 调用方标脏；不动静态贴图/边界缓存（rev 键自愈） */
   private touchRegionsIncremental() {
-    invalidateRegionIndex();
-    invalidateCellIndex();
-    bumpRegionsRev();
-    materializeParentCells(this.world!);
-    this.world = this.world ? { ...this.world } : this.world;
-    this.scheduleAutosave();
-    this.notify();
+    this.pipeline.touchRegionsIncremental();
   }
 
-  /** 高度提交：仅在拓扑变化时增量 rebuild 大陆/湖/海 */
-  private heightGeomDirty = false;
-  private heightDirtyIds: Set<number> | null = null;
-  private heightNotifyQueued = false;
-
-  /**
-   * 高度笔刷的失效：**永不全清环缓存**（全清 = 下一帧重建所有可见件 = 秒级冻结）。
-   * forward：tick 已增量维护高度件 → 只定向失效 landsea 件（拓扑翻转重塑大陆）；
-   * undo：区间归属被反向套用而未打补丁 → 定向失效高度件。
-   */
+  /** 高度失效/派生（实现体在 ChangePipeline——高度件永不全清环缓存、Δ 补丁落盘） */
   touchHeight(full = false) {
-    invalidateRegionIndex();
-    invalidateCellGrid();
-    // 件环**不删缓存**（删 = 内容消失 + 重暖风暴）：区间/landsea 的成员增减都以
-    // Δ 补丁落盘（pendingHeightDeltas / pendingPiecePatches），见 flushHeightRegions。
-    void full;
-    bumpHeightRev();
-    bumpRegionsRev();
-    this.heightGeomDirty = true;
-    this.world = this.world ? { ...this.world } : this.world;
-    this.scheduleAutosave();
-    this.notify();
+    this.pipeline.touchHeight(full);
   }
 
   private markHeightDirty(ids: Iterable<number>) {
-    if (!this.heightDirtyIds) this.heightDirtyIds = new Set();
-    for (const id of ids) this.heightDirtyIds.add(id);
-    this.heightGeomDirty = true;
+    this.pipeline.markHeightDirty(ids);
   }
 
-  /** commit 后：拓扑变才 rebuild；尽量增量 */
+  /** commit 后：拓扑变才 rebuild；尽量增量（区间/landsea 派生重建 + 补丁入队） */
   private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]) {
-    if (!this.world) return;
-    const sampleIds = samples?.map((s) => s.id) ?? null;
-    // 【绘制模型】区间归属只在松手时一次重算；Δ 交给渲染侧打件环补丁
-    if (samples && samples.length) {
-      const deltas = updateHeightIntervalElements(this.world, samples);
-      for (const d of deltas) this.queueHeightDelta(d);
-    } else {
-      rebuildHeightIntervalElements(this.world);
-    }
-    if (!this.heightGeomDirty) {
-      bumpHeightRev();
-      return;
-    }
-    if (samples && samples.length && !heightTopologyChanged(samples)) {
-      this.heightGeomDirty = false;
-      this.heightDirtyIds = null;
-      bumpHeightRev();
-      return;
-    }
-    const dirty = this.heightDirtyIds;
-    const dirtyList = dirty && dirty.size ? [...dirty] : sampleIds;
-    // rebuild 前后 diff landsea 成员 → 件环增量补丁（与高度 Δ 同型）
-    const prevCells = new Map<string, Set<number>>();
-    for (const r of this.world.regions) {
-      if (r.layerId !== 'landsea') continue;
-      prevCells.set(r.id, new Set(r.cells));
-    }
-    rebuildLandSeaRegions(this.world, dirtyList ?? null);
-    for (const r of this.world.regions) {
-      if (r.layerId !== 'landsea') continue;
-      const prev = prevCells.get(r.id);
-      const now = new Set(r.cells);
-      const added: number[] = [];
-      const removed: number[] = [];
-      if (prev) {
-        for (const id of now) if (!prev.has(id)) added.push(id);
-        for (const id of prev) if (!now.has(id)) removed.push(id);
-      } else {
-        for (const id of now) added.push(id);
-      }
-      if (added.length || removed.length) {
-        this.queuePiecePatch(`piece:landsea:${r.id}:0`, added, removed);
-      }
-    }
-    this.heightGeomDirty = false;
-    this.heightDirtyIds = null;
-    bumpHeightRev();
-    bumpRegionsRev();
-  }
-
-  /** 二期：笔刷 tick 的区间增减队列（渲染侧消费后打件环补丁） */
-  private pendingHeightDeltas: import('../core/layer/heightElements').HeightIntervalDelta[] = [];
-  /** landsea 件环补丁队列：rebuild 前后 diff 出增减格（提交/撤销走补丁，不删缓存） */
-  private pendingPiecePatches: { setKey: string; added: number[]; removed: number[] }[] = [];
-  consumePieceInvalidations(): string[] | null {
-    if (!this.pendingPieceInvalidations.length) return null;
-    const out = this.pendingPieceInvalidations;
-    this.pendingPieceInvalidations = [];
-    return out;
-  }
-
-  consumeHeightDeltas(): import('../core/layer/heightElements').HeightIntervalDelta[] | null {
-    if (!this.pendingHeightDeltas.length) return null;
-    const out = this.pendingHeightDeltas;
-    this.pendingHeightDeltas = [];
-    return out;
-  }
-
-  /** 同键 Δ 合成入列：球面视图不消费队列时「键数=上界」，杜绝无限增长（2026-10-01 已知问题） */
-  private queuePiecePatch(setKey: string, added: number[], removed: number[]): void {
-    const same = this.pendingPiecePatches.find((p) => p.setKey === setKey);
-    if (!same) {
-      this.pendingPiecePatches.push({ setKey, added: [...added], removed: [...removed] });
-      return;
-    }
-    const add = new Set(same.added);
-    const rem = new Set(same.removed);
-    for (const c of added) { rem.delete(c); add.add(c); }
-    for (const c of removed) { add.delete(c); rem.add(c); }
-    same.added = [...add];
-    same.removed = [...rem];
-  }
-
-  /** 高度区间 Δ 同键（layerId+regionId）合成入列 */
-  private queueHeightDelta(d: import('../core/layer/heightElements').HeightIntervalDelta): void {
-    const same = this.pendingHeightDeltas.find((x) => x.layerId === d.layerId && x.regionId === d.regionId);
-    if (!same) {
-      this.pendingHeightDeltas.push({ layerId: d.layerId, regionId: d.regionId, added: [...d.added], removed: [...d.removed] });
-      return;
-    }
-    const add = new Set(same.added);
-    const rem = new Set(same.removed);
-    for (const c of d.added) { rem.delete(c); add.add(c); }
-    for (const c of d.removed) { add.delete(c); rem.add(c); }
-    same.added = [...add];
-    same.removed = [...rem];
-  }
-
-  consumePiecePatches(): { setKey: string; added: number[]; removed: number[] }[] | null {
-    if (!this.pendingPiecePatches.length) return null;
-    const out = this.pendingPiecePatches;
-    this.pendingPiecePatches = [];
-    return out;
+    this.pipeline.flushHeightRegions(samples);
   }
 
   private touchPaint() {
-    invalidateRegionIndex();
-    this.paintFrame++;
-    // 笔画中每帧防抖排队自动保存（scheduleAutosave 自带 2s debounce）
-    this.scheduleAutosave();
-    if (this.paintFrame % 3 === 0) {
-      this.world = this.world ? { ...this.world } : this.world;
-      this.notify();
-    }
+    // 实现体在 ChangePipeline（笔画中每帧防抖入存 + 每 3 帧换身份通知）
+    this.pipeline.touchPaint();
   }
 
   async generate(seed: number, count: number) {
@@ -1446,10 +1305,7 @@ export class EditorStore {
    * 应毫秒级命中缓存，禁止走 touchRegions 的全量失效。
    */
   private touchLayerView() {
-    bumpRegionsRev();
-    this.world = this.world ? { ...this.world } : this.world;
-    this.scheduleAutosave();
-    this.notify();
+    this.pipeline.touchLayerView();
   }
 
   /** 聚焦该层（显隐由 toggleLayerVisible 独立控制，此处不再强制显示） */
@@ -1745,8 +1601,7 @@ export class EditorStore {
         for (const id of dirty) {
           const r = this.world.regions.find((x) => x.id === id);
           if (r) {
-            const key = `piece:${r.layerId}:${r.id}:`;
-            if (!this.pendingPieceInvalidations.includes(key)) this.pendingPieceInvalidations.push(key);
+            queuePieceInvalidation(`piece:${r.layerId}:${r.id}:`);
           }
         }
       }

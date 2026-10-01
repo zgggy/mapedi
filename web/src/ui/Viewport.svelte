@@ -49,6 +49,11 @@
   import type { LonLat } from '../core/types';
   import { resolveLayerStyle } from '../core/layer/config';
   import { editor } from '../app/store.svelte';
+  import {
+    consumeHeightDeltas,
+    consumePieceInvalidations,
+    consumePiecePatches,
+  } from '../render/patchQueues';
   import { MapGlRenderer } from '../render/gl/mapRenderer';
   import { viewMemory } from './viewMemory';
 
@@ -57,7 +62,6 @@
     focusLayer = 'cells',
     drawActive = false,
     drawTool = 'brush' as DrawTool,
-    canPaint = false,
     brushRadiusDeg = 1.5,
     highlightRegionId = null,
     railW = 0,
@@ -80,8 +84,6 @@
     focusLayer?: string;
     drawActive?: boolean;
     drawTool?: DrawTool;
-    /** 允许左键直接画（高度层默认 true） */
-    canPaint?: boolean;
     brushRadiusDeg?: number;
     highlightRegionId?: string | null;
     /** C7 有效视口：左轨遮挡宽度（0 = 无轨/已收起）；选中露出按此避让 */
@@ -130,7 +132,8 @@
   let lastY = 0;
   /** 右键拖动：地图内容相对于矩形的偏移（右键拖动 = 构图摆放，与中键改相机是两个概念，C2） */
   let contentOffsetX = $state(viewMemory.plane?.contentOffsetX ?? 0);
-  let panningMode: 'cam' | 'content' | null = null;
+  /** 右键内容平移会话（'cam' 成员已死：中键相机平移走独立路径，5-a 清理） */
+  let panningMode: 'content' | null = null;
 
   // 每次相机/内容偏移变化即回写（视图卸载前的最后一次回写即记忆）
   $effect(() => {
@@ -609,7 +612,7 @@
       focusLayer === 'height' &&
       workspaceOpen &&
       brushHover &&
-      (drawActive || canPaint) &&
+      drawActive &&
       !pathEdit;
     if (showHLabels) {
       const drawHLabel = (sx: number, sy: number, text: string, strong: boolean) => {
@@ -650,7 +653,7 @@
     }
 
     // 笔刷：光标位置（与 cell 无关，不进地图管线）
-    if ((drawActive || canPaint) && !pathEdit && brushHover) {
+    if (drawActive && !pathEdit && brushHover) {
       ctx.beginPath();
       ctx.arc(brushSx, brushSy, brushRadiusPx(), 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(240,195,106,0.95)';
@@ -909,7 +912,8 @@
     if (!canvas) return;
     syncBackingStore();
     // 二期：笔刷 Δ → 件环就地补丁（O(|Δ|·deg + 受牵连环)），渲染层持有投影器故在此消费
-    const deltas = editor.consumeHeightDeltas();
+    // （5-a：队列抽为 patchQueues 模块，渲染不再反向 import store 私有队列）
+    const deltas = consumeHeightDeltas();
     if (deltas?.length) {
       for (const d of deltas) {
         patchPieceEntry(
@@ -923,12 +927,12 @@
       }
     }
     // 成员笔刷提交的定向失效（守「全清/补丁」不变量）
-    const invs = editor.consumePieceInvalidations();
+    const invs = consumePieceInvalidations();
     if (invs?.length) {
       for (const prefix of invs) invalidatePieceEntries(prefix);
     }
     // landsea 件环增量补丁（与高度 Δ 同型；不删缓存 → 内容不消失）
-    const patches = editor.consumePiecePatches();
+    const patches = consumePiecePatches();
     if (patches?.length) {
       for (const pt of patches) {
         patchPieceEntry(world, pt.setKey, projection, (ll) => project(ll, projection, projParams ?? defaultProjParams()), pt.added, pt.removed);
@@ -1135,7 +1139,7 @@
         return;
       }
       // 左键：绘制态下画；路/航/河层用控制点绘制
-      if (e.button === 0 && (drawActive || canPaint || pathEdit) && !spaceDown) {
+      if (e.button === 0 && (drawActive || pathEdit) && !spaceDown) {
         if (pathEdit) {
           const rect = canvas.getBoundingClientRect();
           const sx = e.clientX - rect.left;
@@ -1283,7 +1287,7 @@
         return;
       }
       // 始终更新笔刷位置 = 鼠标屏幕坐标（绘制命中仍用 llAt）
-      if ((drawActive || canPaint) && !pathEdit) {
+      if (drawActive && !pathEdit) {
         const rect = canvas.getBoundingClientRect();
         brushSx = e.clientX - rect.left;
         brushSy = e.clientY - rect.top;
@@ -1397,7 +1401,7 @@
     onwheel={(e) => {
       e.preventDefault();
       // Alt+滚轮：改笔刷半径
-      if (e.altKey && (drawActive || canPaint)) {
+      if (e.altKey && drawActive) {
         const d = e.deltaY > 0 ? -0.15 : 0.15;
         onradius?.(Math.max(0.3, Math.min(8, brushRadiusDeg + d)));
         return;
