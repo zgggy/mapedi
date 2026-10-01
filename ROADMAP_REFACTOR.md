@@ -43,7 +43,9 @@
   - **`render/patchQueues.ts`（新）**：三队列（pieceInvalidations/heightDeltas/piecePatches）+ 同键 Δ 合成从 store 私有字段抽为模块单例（rev.ts 同款先例）；**Viewport 的 3 处 `editor.consume*` 改直接模块导入 = 渲染不再反向 import store 私有队列**（验收项 ✓）；store 1749 定向失效改 `queuePieceInvalidation`。
   - **三失联清账**：`canPaint` 死 prop 物理删（prop+类型+5 处 `(drawActive || canPaint)`，App 从未传入）；`panningMode` 死成员 `'cam'` 删（只赋过 `'content'/null`）；`onpaint` 丢参**已在第十四轮速修包修复**（本项闭合）。
   - **验收（浏览器实测）**：显隐切换经新管线（👁→🚫 翻转+撤销回弹、零 console 错）；高度笔画画 -10→撤销回 61；**队列 E2E**：commit 同步窥探 deltas=8/patches=3（入列）→ 让帧后队列排空（渲染经模块消费）→ 撤销正常；tsc/svelte-check 0；store 2045→1900 行。
-- **☐ 5-b CommandService / GenerationService / Persistence / DrawController 分包**：history 门面+命令 CRUD、生成管线、持久化、绘制会话归位；抽 `MapTransform` / `ViewportController`。
+- **✓ 5-b1 Persistence（自动保存机械出库，2026-10-01 第二十二轮）**：`app/autosaveService.ts`（新，~140 行）——2s 防抖+epoch 作废+Worker 派发（busy/latest-wins）+DataCloneError 规范化重试+同步降级链+drain 等待器整体出库；Ctx 注入 world/snapPaths/autosaveAt/status（`$state` 写仍在 store 闭包）；store 留 `scheduleAutosave()` 门面 + `replaceWorld/clearAutosave` 走 `invalidate()/drainQueue()/drain()`。**验收（浏览器实测）**：显隐触碰→2s 防抖→Worker→回显 3:51:36→3:51:59；IDB 实读 at 新鲜/cells 100000/regions 162 **且无 cellClimate/biome**（步骤4 不落盘回归 ✓）；撤销复原零错。**注**：clearAutosave 未实跑（删用户存档=破坏性），机械移植+tsc 兑底。
+- **☐ 5-b2 CommandService / GenerationService / DrawController 分包**：history 门面+命令 CRUD、生成管线、绘制会话归位。
+- **☐ 5-b3 Viewport 侧**：抽 `MapTransform` / `ViewportController`（坐标变换/相机）。
 - **☐ 5-c App 转发器瘦身**：~75 个 on* 回调收敛（与 UI 重构线协调，勿单方面改 prop 面）。
 - **验收（总）**：各模块独立可测；App 不再是回调转发器；渲染不反向 import store。
 

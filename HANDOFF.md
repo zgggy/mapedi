@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十一轮 步骤 5-a 批。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十二轮 5-b1 批。**
 
 ## 先读
 
@@ -16,7 +16,13 @@
 
 用户九点：① 缩进无视觉效果→button 内最左侧短竖线 ② 缩进/提升顺序乱（未变成上一个图层的子图层）③ 元素面板无缩进/提升两钮 ④ 展开后为空→直接不能展开 ⑤ ul 与 panel 左右间距再小 ⑥ 图层/元素列表不能滚动（连续三轮）⑦ 结构定稿（创建行文本框兼搜索+🎲+加，拉满同 button 宽；两面板同构；独立搜索行退役）⑧ 任何模式 button 上无操作控件，滑块只在高度元素展开内容 ⑨ （隐含）检查/绘制模式展开各含一个高度滑块。
 
-## 当前状态（第二十一轮完成并提交（git log 头）；在案提交：… → `e61be00` 1-c → `8cdc575` 步骤4 → 第二十一轮 5-a）
+## 当前状态（第二十二轮完成并提交（git log 头）；在案提交：… → `8cdc575` 步骤4 → `d629a99` 5-a → 第二十二轮 5-b1）
+
+- **✓ 第二十二轮（2026-10-01，还债 5-b1：自动保存机械出库）**：
+  - **`app/autosaveService.ts`（新 ~140 行）**：2s 防抖+epoch 作废+Worker 派发（busy/latest-wins）+DataCloneError 平面化重试+同步降级链+drain 等待器整体出库；Ctx={world/snapPaths/autosaveAt/status}（**$state 写仍走 store 闭包**）；Worker URL `../persist/saveWorker.ts` 从 app/ 出发同深度不变。
+  - **store**：删 saveTimer/saveEpoch/saveQueue/saveWorker* 七字段 + scheduleAutosave/saveDrain/releaseSaveWaiters/ensureSaveWorker/dispatchSave/saveSync 六方法体；留 `scheduleAutosave()` 门面；`replaceWorld/clearAutosave` 改 `autosave.invalidate()/drainQueue()/drain()`；孤儿 import（idbSave/serializeWorld）清。store 1900→1810。
+  - **验收**：显隐触碰→防抖 2s→Worker→回显 3:51:36→3:51:59；**IDB 实读** at 新鲜/cells=100000/regions=162/无 cellClimate/biome（步骤4 回归✓）；Ctrl+Z 复原；tsc/svelte-check 0。**注**：clearAutosave 未实跑（删用户存档=破坏性，机械移植+tsc 兜底）；DataCloneError 重试=1-b 已验收逻辑原样搬运。
+  - **步骤 5 子包进度**：5-a ✓ / **5-b1 ✓** / 5-b2 ☐（CommandService/Generation/DrawController）/ 5-b3 ☐（MapTransform/ViewportController）/ 5-c ☐。
 
 - **✓ 第二十一轮（2026-10-01，还债步骤 5-a：失效管线与队列出库 + 失联清账）**：
   - **`app/changePipeline.ts`（183 行新模块）**：touch* 七方法 + markHeightDirty/flushHeightRegions + 高度脏状态出库；`PipelineCtx` 注入 world/setWorld/notify/scheduleAutosave（**$state 写入留在 store 文件内闭包**——Svelte 按声明文件编译状态写）；store 留同名薄门面=调用点零改动；删死字段 heightNotifyQueued。
@@ -91,7 +97,7 @@
 
 1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
 2. ~~1-c~~ **已收口（第十九轮）**：闭包清零、undo/redo 返回命令+store 类型分发；残余=Set/Map 载荷 JSON 编解码（历史面板持久化时补）+ 高度撤销 continentId 标签漂移（预存已登记）。
-3. 还债步骤 **1 ✓ / 2 ✓ / 3 ✓ / 4 ✓ / 5 ◐（5-a ✓，剩 5-b/5-c）/ 6 ◐**、步骤 7 大扫除（顺带判 climate/astro 孤儿 + nature.ts 死码 + 路网再生成设计）。
+3. 还债步骤 **1 ✓ / 2 ✓ / 3 ✓ / 4 ✓ / 5 ◐（5-a ✓、5-b1 ✓，剩 5-b2 命令/生成/绘制、5-b3 Viewport 变换、5-c App 回调）/ 6 ◐**、步骤 7 大扫除（顺带判 climate/astro 孤儿 + nature.ts 死码 + 路网再生成设计）。
 4. ~~两面板创建行共用 newName~~ **已拆**（第十二轮：各面板局部 text 独立过滤）；全局 newName 现只服务子级 CreateBox。
 5. 同类 stale 潜力点按 view 快照模式逐步收编（DisplayStylePanel 内部直读 style 的模板等——见 ROADMAP_REFACTOR 已知问题表）。
 6. **专属色/外交 = UI 已删、数据层 legacy 保留**：`Region.exclusiveColor`、`core/diplomacy.ts`、piece 传递与 regionOps 自动填充仍在（无 UI 入口）——若要"概念彻底消失"需动渲染/序列化，待用户拍板再清。
@@ -130,5 +136,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 步骤 5-b（CommandService/Generation/Persistence/DrawController 分包 + MapTransform/ViewportController）**→ 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除（climate/astro 孤儿、core/nature.ts 死码、路网再生成设计）。历史面板（1-c 前置已清）等用户点名。
+- **默认下一包 = 步骤 5-b2（CommandService/GenerationService/DrawController 分包）**→ 5-b3 MapTransform/ViewportController → 5-c App 回调瘦身（与 UI 重构线协调）→ 步骤 7 大扫除（climate/astro 孤儿、core/nature.ts 死码、路网再生成设计）。历史面板（1-c 前置已清）等用户点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。

@@ -1,6 +1,6 @@
 import type { LayerRenderConfig, Region } from '../core/types';
 import { defaultLayerRenderConfig } from '../core/types';
-import { createWorld, deserializeWorld, serializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
+import { createWorld, deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { runCascade, CASCADE_LABELS } from '../core/generate/registry';
 import { installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateCellIndex } from '../core/index/cellIndex';
@@ -26,6 +26,7 @@ import {
   history,
 } from '../core/history';
 import { ChangePipeline } from './changePipeline';
+import { AutosaveService } from './autosaveService';
 import { queuePieceInvalidation } from '../render/patchQueues';
 import { setRegionColor } from '../core/regionOps';
 import { createRng } from '../core/rng';
@@ -92,7 +93,7 @@ import { applyHeightmapFile } from '../core/heightmap';
 // tests/validate.test.ts 保留为业务规则载体；还债步骤 1 后以「自动校验 + toast」
 // 形态回归（规则清单见设计稿附录 A）。
 import { defaultClimate, type ClimateParams, type LonLat, type World } from '../core/types';
-import { idbLoad, idbSave } from '../persist/storage';
+import { idbLoad } from '../persist/storage';
 import { SOFT_MAX_DENSITY, HARD_MAX_DENSITY } from '../core/world';
 import {
   cascadeEnabled,
@@ -296,9 +297,6 @@ export class EditorStore {
   /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即发现全部副作用，
    *  含 replace 剥他人 / split 新建 / flood steal——undo 腐蚀修复的核心，2026-09-30 还债1-①） */
   private strokeSnap: Map<string, number[]> | null = null;
-  private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  private saveEpoch = 0;
-  private saveQueue: Promise<void> = Promise.resolve();
   private generationSeq = 0;
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
@@ -328,6 +326,20 @@ export class EditorStore {
     scheduleAutosave: () => this.scheduleAutosave(),
   });
 
+  /** 自动保存机械（还债 5-b1）：防抖/epoch/Worker 派发/降级链——状态回显经闭包注入 */
+  private readonly autosave = new AutosaveService({
+    get world() {
+      return worldRaw;
+    },
+    snapPaths: (w) => EditorStore.snapPaths(w),
+    setAutosaveAt: (v) => {
+      ui.autosaveAt = v;
+    },
+    setStatus: (v) => {
+      ui.status = v;
+    },
+  });
+
   /** 几何/拓扑变化：全量失效（投影、拾取、索引、边界环） */
   touchWorld() {
     this.pipeline.touchWorld();
@@ -335,8 +347,7 @@ export class EditorStore {
 
   /** Replace a project atomically; no selection or cached geometry belongs to the new world. */
   private replaceWorld(world: World) {
-    clearTimeout(this.saveTimer);
-    this.saveEpoch++;
+    this.autosave.invalidate();
     history.clear();
     this.world = world;
     ui.projectEpoch++;
@@ -577,107 +588,7 @@ export class EditorStore {
   }
 
   scheduleAutosave() {
-    if (!this.world) return;
-    clearTimeout(this.saveTimer);
-    const world = this.world;
-    const epoch = this.saveEpoch;
-    this.saveTimer = setTimeout(() => {
-      if (epoch !== this.saveEpoch || world !== this.world) return;
-      this.dispatchSave(world);
-    }, 2000);
-  }
-
-  // —— 自动保存 Worker（2026-10-01 还债步骤 3：主线程脱 stringify/idb）——
-  private saveWorker: Worker | null = null;
-  private saveWorkerDown = false;
-  private saveBusy = false;
-  private saveQueuedWorld: World | null = null;
-  private saveWaiters: (() => void)[] = [];
-
-  /** 等待在途保存完成（clearAutosave 等场景） */
-  private saveDrain(): Promise<void> {
-    if (!this.saveBusy) return Promise.resolve();
-    return new Promise((res) => this.saveWaiters.push(res));
-  }
-
-  private releaseSaveWaiters(): void {
-    const ws = this.saveWaiters;
-    this.saveWaiters = [];
-    for (const w of ws) w();
-  }
-
-  private ensureSaveWorker(): Worker | null {
-    if (this.saveWorkerDown) return null;
-    if (this.saveWorker) return this.saveWorker;
-    try {
-      const wk = new Worker(new URL('../persist/saveWorker.ts', import.meta.url), { type: 'module' });
-      wk.onmessage = (e: MessageEvent<{ ok: boolean; error?: string }>) => {
-        this.saveBusy = false;
-        if (e.data.ok) this.autosaveAt = new Date().toLocaleTimeString();
-        else this.status = '自动保存失败，请导出项目备份';
-        const next = this.saveQueuedWorld;
-        this.saveQueuedWorld = null;
-        if (next) this.dispatchSave(next);
-        else this.releaseSaveWaiters();
-      };
-      wk.onerror = () => {
-        // Worker 级故障 → 降级同步链（保数据优先）+ 可见提示
-        this.saveWorkerDown = true;
-        this.saveBusy = false;
-        this.status = '自动保存 Worker 不可用，已降级本地保存';
-        const next = this.saveQueuedWorld;
-        this.saveQueuedWorld = null;
-        this.releaseSaveWaiters();
-        if (next) void this.saveSync(next);
-      };
-      this.saveWorker = wk;
-      return wk;
-    } catch {
-      this.saveWorkerDown = true;
-      return null;
-    }
-  }
-
-  /** 派发保存：busy → 最新世界排队（latest-wins）；Worker 不可用/不可克隆 → 同步降级 */
-  private dispatchSave(world: World): void {
-    const wk = this.ensureSaveWorker();
-    if (!wk) {
-      void this.saveSync(world);
-      return;
-    }
-    if (this.saveBusy) {
-      this.saveQueuedWorld = world;
-      return;
-    }
-    this.saveBusy = true;
-    try {
-      wk.postMessage({ id: Date.now(), world });
-    } catch (err) {
-      // 常见：world.paths.points 混入 $state 代理 → 先规范化平面拷贝重试一次
-      try {
-        if (world.paths?.length) world.paths = EditorStore.snapPaths(world);
-        wk.postMessage({ id: Date.now(), world });
-        return;
-      } catch {
-        this.saveBusy = false;
-        this.saveWorkerDown = true;
-        this.status = `自动保存降级本地（${String(err).slice(0, 60)}）`;
-        void this.saveSync(world);
-      }
-    }
-  }
-
-  /** 降级兜底：旧同步链（环境无 Worker / DataCloneError 时保数据） */
-  private saveSync(world: World): void {
-    this.saveQueue = this.saveQueue.then(async () => {
-      try {
-        await idbSave(serializeWorld(world, { stripSharedEdges: true }));
-        this.autosaveAt = new Date().toLocaleTimeString();
-      } catch {
-        this.status = '自动保存失败，请导出项目备份';
-      }
-      this.releaseSaveWaiters();
-    });
+    this.autosave.schedule();
   }
 
   async tryRestore(): Promise<boolean> {
@@ -1850,10 +1761,9 @@ export class EditorStore {
 
   async clearAutosave() {
     const { idbClear } = await import('../persist/storage');
-    clearTimeout(this.saveTimer);
-    this.saveEpoch++;
-    await this.saveQueue;
-    await this.saveDrain();
+    this.autosave.invalidate();
+    await this.autosave.drainQueue();
+    await this.autosave.drain();
     await idbClear();
     this.status = '已清除自动保存';
   }
