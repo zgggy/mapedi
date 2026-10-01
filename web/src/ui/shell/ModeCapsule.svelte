@@ -81,7 +81,10 @@
   .capsule:focus-visible {
     border-color: rgba(240, 195, 106, 0.7);
   }
-  /* 填色小胶囊：整块平移到激活档（大套小胶囊） */
+  /* 填色小胶囊：整块平移到激活档（大套小胶囊）。
+   * 2026-10-01 用户报障「只切换、金钮不动」：IAB/后台页 **CSS 过渡时间线会冻结**，
+   * transform 过渡停在旧档（style 已更新、computed/渲染不跟）→ 去过渡改**瞬移到位**，
+   * 任何一帧绘制即在正确档位（动画是锦上添花，位置正确是底线）。 */
   .knob {
     position: absolute;
     top: 2px;
@@ -90,9 +93,6 @@
     /* width 由行内 style 按档数计算：calc((100% - 4px) / n) */
     border-radius: 11px;
     background: linear-gradient(180deg, rgba(240, 195, 106, 0.9), rgba(216, 164, 82, 0.9));
-    transition:
-      transform 0.18s cubic-bezier(0.34, 1.3, 0.64, 1),
-      width 0.18s ease;
     pointer-events: none;
   }
   button {
@@ -118,10 +118,5 @@
   button.active {
     color: #1a1408;
     font-weight: 600;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .knob {
-      transition: none;
-    }
   }
 </style>

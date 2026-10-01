@@ -94,14 +94,9 @@
           ? world.regions.filter((x) => x.layerId === id).length
           : 0,
       description: r ? ((a?.description as string) ?? '') : meta ? `${meta.emoji} ${meta.kind}` : '',
+      // 子元素行已删（2026-10-01 拍板：子元素相关功能之后重新设计）
       extra: r
-        ? [
-            { label: 'ID', value: r.id },
-            {
-              label: '子元素',
-              value: String(world ? world.regions.filter((x) => x.parentId === r.id).length : 0),
-            },
-          ]
+        ? [{ label: 'ID', value: r.id }]
         : l
           ? [
               { label: '分类', value: catLabel(meta?.category ?? 'custom') },

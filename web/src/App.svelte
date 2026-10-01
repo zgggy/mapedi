@@ -398,12 +398,9 @@
     <!-- 元素树选中行下方（绘制模式 = WorkspaceDrawer 本地绘制参数区） -->
     {#if shell.wsMode === 'check'}
       <InspectSection {world} kind="element" id={selectedRegionId} />
-    {:else if shell.wsMode === 'gen'}
-      <!-- 元素级生成（在元素范围内重生成子元素）依赖生成引擎包：GEN_UNIFIED_DESIGN §6 -->
-      {#if selectedRegionId && world?.regions.some((r) => r.parentId === selectedRegionId)}
-        <div class="gen-pending">元素级生成（重生成其子元素）待生成引擎包落地</div>
-      {/if}
     {/if}
+    <!-- 生成模式元素展开：子元素相关功能待重新设计（2026-10-01 用户拍板先删，
+         含「元素级生成重生成子元素」占位）→ modeBodyOf(gen)=false 行不可展开 -->
   {/snippet}
 
   {#snippet layersSn()}
@@ -460,17 +457,6 @@
       editor.newName = n;
       editor.createRegion(editor.focusLayer);
     }}
-    onCreateChild={(parentId) => {
-      if (!world) return;
-      const parent = world.regions.find((r) => r.id === parentId);
-      if (!parent) return;
-      const cl = world.layers.find((l) => l.parentLayerId === parent.layerId);
-      editor.createRegion(cl?.id ?? parent.layerId, parentId);
-      // 确保父元素保持展开
-      if (!expandedIds.has(parentId)) {
-        expandedIds = new Set([...expandedIds, parentId]);
-      }
-    }}
     onRandomName={() =>
       (editor.newName = editor.randomName(
         editor.focusLayer === 'province' ? 'province' : 'country',
@@ -503,6 +489,7 @@
     {preparing}
     mode={shell.viewMode}
     autosaveAt={editor.autosaveAt}
+    copyText={editor.lastError}
     onPickElement={(id) => selectElement(id)}
   />
 

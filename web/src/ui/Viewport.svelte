@@ -988,7 +988,7 @@
     window.addEventListener('keyup', up);
     return () => {
       cancelAnimationFrame(raf);
-      cancelAnimationFrame(revealRaf);
+      revealCancel?.();
       ro.disconnect();
       if (dprMq && dprHandler) dprMq.removeEventListener('change', dprHandler);
       canvas.removeEventListener('contextmenu', stopCtx);

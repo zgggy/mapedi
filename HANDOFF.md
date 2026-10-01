@@ -12,6 +12,13 @@
 
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
+- **✓ 第二十五轮（2026-10-01 用户反馈批四件）**：
+  - **revealRaf 修复**：5-b3 换 revealCancel 时漏改 onMount cleanup → 切球面即 `ReferenceError`（用户报障）——已改 `revealCancel?.()`，来回切 4 次零错。
+  - **错误复制钮**：`main.ts` 捕获**全文含栈** → `editor.lastError`（ui 新字段）→ StatusBar 左区出错时（error 或 ⚠️ 状态）左侧 `⧉`，点击 `clipboard.writeText`（失败降级 execCommand）→ `✓` 1.5s。验收（间谍法，失焦页真剪贴板被拒）：截获=Error 全栈、按钮翻 ✓。
+  - **顶栏胶囊金钮不动**：根因=**IAB/后台页 CSS 过渡时间线冻结**（style 已更新、computed 停旧档；ModeCapsule 自 371f8d2 未改=环境性）→ `.knob` 去过渡**瞬移到位**。验收：点击后 120ms computed=96px=目标档。
+  - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
+  - 基线：tsc 0、svelte-check 0 errors。
+
 ## 当前状态（第二十四轮完成并提交（git log 头）；在案：`d629a99` 5-a → `0cfb3eb` 5-b1 → `865e3da` 5-b2 → `3d497dc` 插单 → 第二十四轮 5-b3）
 
 > 更早轮次（第十一~十七轮、1-b 路径包、渲染错乱根因、还债步骤 2/3/6、速修包、冻结 P0、第十一/十二轮）已剪至 `docs/history/HANDOFF_LOG_2026-10-01.md`（冻结）。

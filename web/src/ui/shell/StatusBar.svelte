@@ -15,6 +15,7 @@
     preparing = false,
     mode = 'view-globe',
     autosaveAt = '',
+    copyText = '',
     onPickElement,
   }: {
     hover?: {
@@ -35,16 +36,56 @@
     preparing?: boolean;
     mode?: ViewMode;
     autosaveAt?: string;
+    /** 运行错误全文（含栈）：状态栏复制按钮的载荷（缺省退回当前显示文本） */
+    copyText?: string;
     /** 悬停归属元素点击跳选（C4 ①） */
     onPickElement?: (id: string) => void;
   } = $props();
 
   const modeLabel = $derived(mode === 'view-2d' ? '✏️ 平面' : '🌐 球面');
+  /** 出错时（error 或 ⚠️ 状态）左侧出复制钮（2026-10-01 用户需求） */
+  const showCopy = $derived(!!error || status.startsWith('⚠️'));
+  let copied = $state(false);
+  async function copyErr() {
+    const text = copyText || error || status;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // 剪贴板 API 不可用（权限/非安全上下文）→ execCommand 兜底
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        ok = document.execCommand('copy');
+      } finally {
+        ta.remove();
+      }
+    }
+    if (ok) {
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    }
+  }
 </script>
 
 <div class="pill">
   <!-- 左：上下文 / 反馈 / 错误 -->
-  <span class="zone left" class:err={!!error}>{error || status}</span>
+  <span class="zone left" class:err={!!error}>
+    {#if showCopy}
+      <button
+        type="button"
+        class="cpy"
+        title={copied ? '已复制' : '复制错误信息'}
+        onclick={copyErr}
+      >{copied ? '✓' : '⧉'}</button>
+    {/if}
+    {error || status}
+  </span>
 
   <!-- 中：悬停数据 -->
   <span class="zone mid">
@@ -120,6 +161,23 @@
   .left.err {
     color: #f0a0a0;
     font-weight: 600;
+  }
+  /* 错误复制钮：状态栏最左（2026-10-01） */
+  .cpy {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border-radius: 7px;
+    width: 18px;
+    height: 16px;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .cpy:hover {
+    background: rgba(255, 255, 255, 0.14);
   }
   .mid {
     flex: 1 1 auto;

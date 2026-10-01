@@ -8,14 +8,12 @@
    */
   import { tick } from 'svelte';
   import type { Region, World } from '../../core/types';
-  import { LAYER_META } from '../workbench/layerMeta';
   import { rebuildHeightIntervalElements } from '../../core/layer/heightElements';
   import { childLayerIdOf } from '../../core/regionOps';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
-  import CreateBox from './CreateBox.svelte';
   import { ROW_EST, VIRTUAL_MIN, listWindow } from './virtualList';
   import { measureSlot } from './liftDrag';
   import OrganizeRow from './OrganizeRow.svelte';
@@ -34,7 +32,6 @@
     onPaintValue,
     onRadius,
     onCreate,
-    onCreateChild,
     onRandomName,
     onNewName,
     onOrganize,
@@ -59,7 +56,6 @@
     onPaintValue?: (id: string, value: number) => void;
     onRadius?: (v: number) => void;
     onCreate?: (name: string) => void;
-    onCreateChild?: (parentId: string) => void;
     /** 随机名（返回生成的名字，顶层文本框回填；同时写全局供子级创建框） */
     onRandomName?: () => string;
     onNewName?: (v: string) => void;
@@ -79,7 +75,7 @@
 
   /**
    * 过滤器 = 本面板创建行文本（2026-10-01 用户定：两面板各自只搜自己，互不影响）。
-   * 顶层创建行用局部 text；展开内的子级 CreateBox 仍走全局 newName（store 创建名）。
+   * 顶层创建行用局部 text（子级 CreateBox 已随子元素功能删除，2026-10-01）。
    */
   let text = $state('');
   const filter = $derived(text);
@@ -103,7 +99,6 @@
     depth: number;
     parentId: string | null;
     expandable: boolean;
-    kids: Node[];
   };
 
   function childLayerFor(region: Region): string | null {
@@ -113,13 +108,6 @@
   function canExpand(r: Region): boolean {
     return !!childLayerFor(r);
   }
-  function kidsOf(r: Region): Region[] {
-    if (!world) return [];
-    const cl = childLayerFor(r);
-    if (!cl) return [];
-    return world.regions.filter((x) => x.parentId === r.id && x.layerId === cl);
-  }
-
   const roots = $derived.by(() => {
     if (!world) return [] as Node[];
     const all = world.regions.filter((r) => r.layerId === focusLayer);
@@ -128,51 +116,36 @@
       const p = world.regions.find((x) => x.id === r.parentId);
       return !p || p.layerId !== focusLayer;
     });
-    const build = (r: Region, depth: number, parentId: string | null): Node => {
-      const expandable = canExpand(r);
-      return {
-        region: r,
-        depth,
-        parentId,
-        expandable,
-        kids: expandable ? kidsOf(r).reverse().map((c) => build(c, depth + 1, r.id)) : [],
-      };
-    };
+    // 2026-10-01 用户拍板：子元素显示与子级创建先删（之后重新设计）→ 节点不再嵌套
+    const build = (r: Region, depth: number, parentId: string | null): Node => ({
+      region: r,
+      depth,
+      parentId,
+      expandable: canExpand(r),
+    });
     // 列表 = 叠放的**反序**（顶部 = 后画/最高）：绘制序 = 数组序（低者先画），
     // 工作区顶部 = 数组末 = 绘制最上层（与图层面板同一约定：上 = 高）
     const tree = tops.reverse().map((r) => build(r, 0, null));
-    // 名称过滤（C4）：本体命中保留整支；子命中保留祖先路径；两者皆无则摘除
+    // 名称过滤（C4）：本级命中保留（子级行已随子元素显示一起删除）
     const q = filter.trim().toLowerCase();
     if (!q) return tree;
-    const keep = (n: Node): Node | null => {
-      if (n.region.name.toLowerCase().includes(q)) return n;
-      const kids = n.kids.map(keep).filter((x): x is Node => !!x);
-      return kids.length ? { ...n, kids } : null;
-    };
-    return tree.map(keep).filter((x): x is Node => !!x);
+    return tree.filter((n) => n.region.name.toLowerCase().includes(q));
   });
 
-  /** 展开路径上的可见行（单列网格渲染源） */
+  /** 可见行（单列网格渲染源）：子元素行已删（2026-10-01）→ 本级平铺，无递归 */
   const visibleFlat = $derived.by(() => {
     const out: { node: Node; open: boolean }[] = [];
-    const walk = (nodes: Node[]) => {
-      for (const n of nodes) {
-        const open = n.expandable && expandedIds.has(n.region.id);
-        out.push({ node: n, open });
-        if (open) walk(n.kids);
-      }
-    };
-    walk(roots);
+    for (const n of roots) {
+      out.push({ node: n, open: n.expandable && expandedIds.has(n.region.id) });
+    }
     return out;
   });
 
-  /** 单列网格的全部格：行（ItemButton）+ 展开时的建子行（CreateBox）+ 选中行后的模式展开区（panel） */
+  /** 单列网格的全部格：行（ItemButton）+ 选中行后的模式展开区（panel）。
+   *  子级建子行（CreateBox）随子元素功能一起删除（2026-10-01）。 */
   const cells = $derived.by(() => {
-    const acc: { kind: 'row' | 'create'; node: Node }[] = [];
-    for (const v of visibleFlat) {
-      acc.push({ kind: 'row', node: v.node });
-      if (v.open && v.node.expandable) acc.push({ kind: 'create', node: v.node });
-    }
+    const acc: { kind: 'row'; node: Node }[] = [];
+    for (const v of visibleFlat) acc.push({ kind: 'row', node: v.node });
     return acc;
   });
 
@@ -190,8 +163,6 @@
   const vwin = $derived(virtualMode ? listWindow(cells.length, scrollTop, listH, ROW_EST) : null);
   const vSlice = $derived(virtualMode && vwin ? cells.slice(vwin.start, vwin.end) : cells);
 
-  let enterId: string | null = $state(null);
-  let createPulseParent: string | null = $state(null);
   let listEl: HTMLElement | undefined = $state();
 
   $effect(() => {
@@ -259,23 +230,6 @@
     if (selectedRegionId) onSelect(null as unknown as string);
   }
 
-  function childNameOf(r: Region): string {
-    const cl = childLayerFor(r);
-    return cl ? (LAYER_META[cl]?.name ?? cl) : '子元素';
-  }
-
-  function handleCreateChild(parentId: string) {
-    onCreateChild?.(parentId);
-    createPulseParent = parentId;
-    queueMicrotask(() => {
-      if (selectedRegionId) enterId = selectedRegionId;
-      setTimeout(() => {
-        enterId = null;
-        createPulseParent = null;
-      }, 320);
-    });
-  }
-
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
@@ -333,10 +287,9 @@
 
   /** 该行模式展开区是否非空（第十一轮：展开后为空 → 直接不能展开）。
    *  组织 / 绘制（笔刷区恒有）/ 检查（InspectSection 恒有）恒非空；
-   *  生成 = 有子元素才有「元素级生成」占位，否则无内容 → 不给开合。 */
-  function modeBodyOf(id: string): boolean {
-    if (taskMode === 'organize' || taskMode === 'draw' || taskMode === 'check') return true;
-    return !!world?.regions.some((r) => r.parentId === id);
+   *  生成 = 子元素相关功能已删（2026-10-01 拍板先删、之后重设计）→ 恒不可展开。 */
+  function modeBodyOf(_id: string): boolean {
+    return taskMode !== 'gen';
   }
 </script>
 
@@ -463,16 +416,6 @@
               selectedRegionId === id && modeBodyOf(id) ? rowBody : null,
               n.depth,
             )}
-          {:else}
-            <div class="create-slot" class:pulse={createPulseParent === id}>
-              <CreateBox
-                placeholder={`新${childNameOf(n.region)}`}
-                {newName}
-                onNewName={(v) => onNewName?.(v)}
-                onRandom={() => onRandomName?.()}
-                onCreate={() => handleCreateChild(id)}
-              />
-            </div>
           {/if}
         </li>
       {/snippet}
@@ -654,25 +597,6 @@
     height: var(--ibtn-h, 40px);
     display: flex;
     align-items: center;
-  }
-  .create-slot {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    padding: 0;
-  }
-  .create-slot.pulse {
-    animation: createDrop 0.32s ease;
-  }
-  @keyframes createDrop {
-    0% {
-      transform: translateY(-8px);
-      opacity: 0.4;
-    }
-    100% {
-      transform: none;
-      opacity: 1;
-    }
   }
   .dim.pad {
     padding: 12px;

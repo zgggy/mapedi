@@ -105,6 +105,8 @@ let worldRaw: World | null = $state.raw(null);
 
 const ui = $state({
   status: '正在生成世界…',
+  /** 最近一次运行错误全文（含栈；状态栏复制按钮用，2026-10-01） */
+  lastError: '',
   generating: false,
   genProgress: 0,
   genStep: '',
@@ -208,6 +210,8 @@ export class EditorStore {
   }
   get status() { return ui.status; }
   set status(v: string) { ui.status = v; }
+  get lastError() { return ui.lastError; }
+  set lastError(v: string) { ui.lastError = v; }
   get generating() { return ui.generating; }
   set generating(v: boolean) { ui.generating = v; }
   get genProgress() { return ui.genProgress; }

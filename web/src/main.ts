@@ -14,10 +14,11 @@ function showFatal(msg: string) {
   console.error(msg);
 }
 
-/** 运行期错误：状态提示 + 继续运行（不杀死应用）；同一消息 5 秊内不重复 */
+/** 运行期错误：状态提示 + 继续运行（不杀死应用）；同一消息 5 秒内不重复。
+ *  full = 完整信息（含栈），存 editor.lastError 供状态栏复制按钮（2026-10-01）。 */
 let lastNoticeAt = 0;
 let lastNoticeMsg = '';
-function showNonFatal(msg: string) {
+function showNonFatal(msg: string, full?: string) {
   console.error(msg);
   const now = Date.now();
   if (msg === lastNoticeMsg && now - lastNoticeAt < 5000) return;
@@ -26,14 +27,18 @@ function showNonFatal(msg: string) {
   import('./app/store.svelte')
     .then((m) => {
       m.editor.status = `⚠️ 运行错误（已忽略）：${String(msg).slice(0, 120)}`;
+      m.editor.lastError = full ?? String(msg);
       m.editor.touchView();
     })
     .catch(() => {});
 }
+function errFull(e: unknown): string {
+  return e instanceof Error ? e.stack || `${e.name}: ${e.message}` : String(e);
+}
 
 // 挂载失败才是致命错误；运行期错误走状态提示
-window.addEventListener('error', (e) => showNonFatal(String(e.error ?? e.message)));
-window.addEventListener('unhandledrejection', (e) => showNonFatal(String(e.reason)));
+window.addEventListener('error', (e) => showNonFatal(String(e.error ?? e.message), errFull(e.error ?? e.message)));
+window.addEventListener('unhandledrejection', (e) => showNonFatal(String(e.reason), errFull(e.reason)));
 
 try {
   // mount 是追加不是清空：先移除启动占位，否则「启动中…」会以 fixed 全屏残留（层序错误 / 挡交互）
