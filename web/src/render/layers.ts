@@ -34,6 +34,41 @@ import type { DisplayPiece } from '../core/displayCompose';
 import { isLayerShown } from '../core/displayCompose';
 import { dataRev } from '../core/rev';
 
+// —— 装饰层缓存（2026-10-01 还债步骤6）：每层 region 列表 / cellMarker id 集
+// 原为每帧每层 `world.regions.filter` + `flatMap+Set`（GC 热源）；改为 dataRev 键控、
+// 惰性按层填充——每次数据编辑只重建可见层，帧内零分配。单线程帧内快照，读-only 消费。
+let decorRev = '';
+let decorRegionsByLayer = new Map<string, (World['regions'])[number][]>();
+let decorMarkerByLayer = new Map<string, number[]>();
+function decorRegionsOf(world: World, layerId: string): (World['regions'])[number][] {
+  const rev = dataRev();
+  if (rev !== decorRev) {
+    decorRev = rev;
+    decorRegionsByLayer = new Map();
+    decorMarkerByLayer = new Map();
+  }
+  let hit = decorRegionsByLayer.get(layerId);
+  if (!hit) {
+    hit = world.regions.filter((r) => r.layerId === layerId);
+    decorRegionsByLayer.set(layerId, hit);
+  }
+  return hit;
+}
+function decorMarkerIdsOf(world: World, layerId: string, regions: (World['regions'])[number][]): number[] {
+  const rev = dataRev();
+  if (rev !== decorRev) {
+    decorRev = rev;
+    decorRegionsByLayer = new Map();
+    decorMarkerByLayer = new Map();
+  }
+  let hit = decorMarkerByLayer.get(layerId);
+  if (!hit) {
+    hit = [...new Set(regions.flatMap((r) => r.cells))];
+    decorMarkerByLayer.set(layerId, hit);
+  }
+  return hit;
+}
+
 export interface RenderEnv {
   ctx: CanvasRenderingContext2D;
   world: World;
@@ -267,6 +302,14 @@ export interface PieceParams {
  * 元素显示参数解析（**样式链唯一实现**）。
  * 两条渲染后端只准消费本结果，禁止各自再推一遍宽度 / 颜色 / 选中放大。
  */
+// —— 每帧分配清零（2026-10-01 还债步骤6）：buildPieceParams 每帧 new Map/Set 是 GC 热源。
+// 跨帧复用（clear+重填 = 零分配）；同步不可重入——全库无「在 buildPieceParams 调用栈内
+// 再次调用它」的路径（帧渲染与 idle 预热都是同步直通）。out 保持每帧新数组（微分配，
+// 持有方跨帧保存的唯一风险点，刻意不复用）。
+const scratchRegionById = new Map<string, (World['regions'])[number]>();
+const scratchSeenFill = new Set<string>();
+const scratchSeenBound = new Set<string>();
+
 export function buildPieceParams(env: RenderEnv): PieceParams[] {
   const { world, cam, style, displayPieces, highlightRegionId } = env;
   const out: PieceParams[] = [];
@@ -281,9 +324,13 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
   const project = (ll: { lon: number; lat: number }) => projectPt(env, ll);
   const fr = frameYOf(env);
   const copies = elementCopies(env);
-  const regionById = new Map(world.regions.map((r) => [r.id, r]));
-  const seenFill = new Set<string>();
-  const seenBound = new Set<string>();
+  const regionById = scratchRegionById;
+  regionById.clear();
+  for (const r of world.regions) regionById.set(r.id, r);
+  const seenFill = scratchSeenFill;
+  seenFill.clear();
+  const seenBound = scratchSeenBound;
+  seenBound.clear();
   // 同层多件共享一次样式解析（styleOf 可能做对象合并，按件×帧重算是热路径浪费）
   const styleByLayer = new Map<string, ReturnType<typeof styleOf>>();
   const styleOnce = (id: string) => {
@@ -697,7 +744,7 @@ export const decorationsLayer: RenderLayer = {
         : isLayerShown(world, layer.id, focus);
       if (!shown) continue;
 
-      const regions = world.regions.filter((r) => r.layerId === layer.id);
+      const regions = decorRegionsOf(world, layer.id);
       // baseMesh 层的 cellMarker 遍历所有 cell，不依赖 Region
       const needsRegions = labelMode !== 'none' || coreSym !== 'none' || cellSym !== 'none' ||
         (cellMarker !== 'none' && !layer.baseMesh);
@@ -808,7 +855,7 @@ export const decorationsLayer: RenderLayer = {
             ? (function* () {
                 for (const c of world.cells) yield c.id;
               })()
-            : [...new Set(regions.flatMap((r) => r.cells))];
+            : decorMarkerIdsOf(world, layer.id, regions);
           for (const id of cellIds) {
             const cell = world.cells[id];
             if (!cell || !inView(id)) continue;

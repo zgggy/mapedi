@@ -434,6 +434,37 @@ export function deserializeWorld(json: string): World {
   }
   const version = raw.meta.formatVersion ?? 1;
   if (version < 1 || version > 2) throw new Error(`不支持的项目版本：${version}`);
+  // 结构断言（2026-10-01 还债步骤 3）：坏档必须**明确报错、不进渲染**（throw →
+  // tryRestore/runWorker 捕获 → 启动错误条；旧档不被覆盖——autosave 只写成功序列化的结果）。
+  {
+    const n = raw.cells.length;
+    for (let i = 0; i < n; i++) {
+      const c = raw.cells[i];
+      if (!c || c.id !== i) {
+        throw new Error(
+          `存档损坏：cell.id 连续性被破坏（位置 ${i}${c ? `，id=${String(c.id)}` : '，cell 缺失'}）`,
+        );
+      }
+      if (!Array.isArray(c.polygon) || c.polygon.length < 3) {
+        throw new Error(`存档损坏：cell#${i} polygon 顶点数 < 3`);
+      }
+      if (Array.isArray(c.neighbors)) {
+        for (const x of c.neighbors) {
+          if (!Number.isInteger(x) || x < 0 || x >= n) {
+            throw new Error(`存档损坏：cell#${i} 邻居越界（${String(x)}，共 ${n} 格）`);
+          }
+        }
+      }
+    }
+    for (const r of raw.regions) {
+      if (!Array.isArray(r.cells)) throw new Error(`存档损坏：元素 ${String(r.id)} 缺少 cells 数组`);
+      for (const cid of r.cells) {
+        if (!Number.isInteger(cid) || cid < 0 || cid >= n) {
+          throw new Error(`存档损坏：元素 ${String(r.id)} 引用越界 cell ${String(cid)}`);
+        }
+      }
+    }
+  }
   const paths = (raw.paths ?? []).map((p) => migrateToPathFeature(p as Record<string, unknown>));
   const world: World = {
     meta: { ...raw.meta, formatVersion: 2 },

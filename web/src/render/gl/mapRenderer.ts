@@ -292,6 +292,8 @@ export class MapGlRenderer {
   private geoCache = new WeakMap<object, Map<string, PieceGeo>>();
   private meshCache = new WeakMap<object, { buf: GpuBuf | null; geo: CellMeshGeo }>();
   private failed = false;
+  /** 上下文丢失等待恢复（区别于致命 failed：上下文回来即可整实例重建） */
+  dead = false;
 
   private constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
     this.canvas = canvas;
@@ -322,7 +324,8 @@ export class MapGlRenderer {
     // premultipliedAlpha:true 的画布：rgb 由 SRC_ALPHA 乘一次，禁止二次乘 α（否则半透明变深）
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     canvas.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault();
+      e.preventDefault(); // 必须：不阻止则浏览器不再发 restored（永久黑屏根因之一）
+      this.dead = true; // 标记「等待恢复」——由 ensureMapGl 检测上下文回来后换新实例
       this.failed = true;
       pushErr('webglcontextlost');
     });
@@ -347,6 +350,15 @@ export class MapGlRenderer {
 
   get ok(): boolean {
     return !this.failed;
+  }
+
+  /** 上下文是否丢失（Viewport 用它判断「等恢复」而不是再 getContext——见 ensureMapGl 注释） */
+  isLost(): boolean {
+    try {
+      return this.gl.isContextLost();
+    } catch {
+      return true;
+    }
   }
 
   /** 预热：为件集构建环几何/三角化缓存（切层顺滑；缓存按环对象存续） */
@@ -419,8 +431,15 @@ export class MapGlRenderer {
       w.__gpuRan = (w.__gpuRan ?? 0) + 1;
       return true;
     } catch (e) {
-      pushErr(`render: ${e}`);
-      this.failed = true;
+      if (gl.isContextLost()) {
+        // 瞬态：上下文丢失中（每帧调用必抛）→ 标记等待恢复，不当致命处理
+        this.dead = true;
+        this.failed = true;
+        pushErr('render: context lost');
+      } else {
+        pushErr(`render: ${e}`);
+        this.failed = true;
+      }
       return false;
     }
   }

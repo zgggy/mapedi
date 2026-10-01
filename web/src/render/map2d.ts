@@ -225,7 +225,16 @@ export function drawWorld(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.restore();
-  if (!glReady) return; // GL 不可用：清屏后由调用方提示，2D 不再代画
+  if (!glReady) {
+    // GL 缺席（上下文丢失/初始化失败）：铺底色后**仍画 2D 余量层**——
+    // 路径/标注/图框不依赖 GL（还债步骤 2）；bg/cells/elements 是 GL 通道，
+    // 缺席时由调用方提示条说明（Canvas2D 地图后端已归档，不代画地块）。
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = style.frameVoid ?? '#0b1018';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
+  }
 
   const rest = pipeline;
   const restT0 = performance.now();

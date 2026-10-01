@@ -16,15 +16,16 @@
 - **内容**：① 修 undo 腐蚀——**✓ 1-a**：笔画快照-diff 多元素补丁（`MultiRegionCommand`）；② 高频直改命令化——**◐ 1-b 已覆盖**：显隐（3 树连动整批）、样式、建层、保存信息（改名/描述/颜色）、外交三操作（`RegionFields/LayersVisibility/LayerStyle/AddLayer` 四纯数据命令 + `patchRegions` 快照执行器）；**1-b 剩余**：路径编辑（Viewport 8 处直改 points）、图层树拖拽排序/复制/删除、climate/astro；③ 命令纯数据化——**☐ 1-c**：`PatchRegionsCommand`/`HeightStrokeCommand` 闭包仍在（历史面板的唯一前置）。
 - **验收**：每类编辑撤销后 world 与改前**逐位一致**（"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a/1-b 已验（浏览器干净复测：撤笔画还原/显隐三态/改名列表回滚/建层消失，零错误）。
 
-### ☐ 2. GL 恢复路径（P0，单点故障）
+### ✓ 2. GL 恢复路径（P0，单点故障）——2026-10-01 完成
 
-- **内容**：`webglcontextrestored` 监听重建；异常分类（瞬态重试 vs 致命提示）；`glReady=false` 时仍画 2D 余量层（路径/地名/图框不依赖 GL）；`ensureMapGl` 允许重建 failed 实例。
-- **验收**：F12 `WEBGL_lose_context.loseContext()/restoreContext()` 后地图自愈；拔插/驱动切换不再永久黑屏。
+- **内容（已全部落地）**：① renderer `webglcontextlost`（preventDefault + `dead` 标记区分瞬态/致命）+ Viewport 挂 lost/restored 监听**主动 requestRender**（命令式渲染下恢复后无触发 = 画面停到下次交互的坑）；② `ensureMapGl` 分类：上下文丢失=瞬态提示不计失败、活着但实例 failed=2s 冷却重建、连续 3 次失败=致命提示（仍 5s 低频自试）、创建成功即复位；③ `map2d` GL 缺席时铺底色 + **2D 余量层（路径/标注/图框）照画**（cellsLayer 已是空桩，不复活 Canvas2D 地图后端）；④ 双提示条（致命/恢复中）。
+- **验收（`WEBGL_lose_context` 实测）**：事件间谍 `["lost","restored"]` 送达；丢失期「恢复中」提示即时出现、rest 管线持续绘制（24→28）、像素 98.5% 切后备底色；恢复后 **diffPrePost=0 像素级自愈**、gpu 恢复自增、提示消失；空闲对照 diff=0。
+- **测试坑（记入方法论）**：上下文丢失后 `getExtension` 返回 null——**restoreContext 句柄必须在 loseContext 之前保存**，否则恢复调不出（曾把自己页面卡在丢失态）。
 
-### ☐ 3. 存档链路硬化（P0）
+### ✓ 3. 存档链路硬化（P0）——2026-10-01 完成
 
-- **内容**：`deserializeWorld` 加结构断言（cell.id 连续性 / neighbors 越界 / polygon≥3）并明确报错；autosave 挪 Worker（当前每 2s 主线程同步 stringify 几十 MB）；失败可见化 + 重试。
-- **验收**：手工构造坏档 → 明确错误信息、不进渲染、不覆盖旧档；保存期间无主线程卡顿。
+- **内容（已落地）**：① `deserializeWorld` 结构断言——cell.id 连续性 / polygon≥3 / neighbors 越界 / region.cells 引用越界，全部**明确中文报错**（throw → tryRestore/runWorker 捕获 → 启动错误条，不进渲染；autosave 只写成功序列化的结果，旧档不被覆盖）；② **autosave 挪 Worker**（`persist/saveWorker.ts`：world 结构化克隆 → serialize+idb 全程离主线程；busy/latest-wins 排队；`saveDrain` 供 clearAutosave 等在途；Worker 不可用/DataCloneError → 旧同步链降级 + 可见提示）。
+- **验收（浏览器实测）**：坏档四项断言全中（id 连续性/邻居越界/region 引用越界均抛明确信息、好档零误杀）；保存后「已存 HH:MM:SS」正常刷新、无降级/失败提示；**主线程 longtask 峰值 250-330ms/次**（原 2s 级 = Worker 首建一次性；stringify+idb 已离线程）。**残余（诚实记录）**：`postMessage(world)` 的结构化克隆仍在主线程 ~250ms——要归零需世界数据列式化/转移缓冲，另立项。
 
 ### ☐ 4. cellClimate / biome 真相归位（P0）
 
@@ -37,10 +38,11 @@
 - **验收**：各模块独立可测；App 不再是 ~60 回调的转发器；渲染不再反向 import store 私有队列。
 - **依赖**：建议在步骤 1 之后（命令化减少拆分时的行为风险）。
 
-### ☐ 6. 热路径与缓存保险（P1）
+### ◐ 6. 热路径与缓存保险（P1）——2026-10-01 核心三项落地，两项缓发
 
-- **内容**：`borderCache` 键补 regionsRev 或运行时断言；每帧分配清零（`buildPieceParams` 每帧 new Map、decorationsLayer 每帧 filter、cellMarker 每帧重建数组）；`RegionIndex` 缓存 worldKey；世界副本数 GL/2D 统一（`map2d.ts` 与 `buildRenderEnv` 双份 dxs 收敛单源）；flip 探针降级为 debug 断言（定向包验证稳定后）。
-- **验收**：`__drawMs` 无回归；连续笔刷期 compose 缓存不再全量重算。
+- **✓ 已落地**：① `RegionIndex worldKey` → O(1)（原每次 ensure 扫全部 region.cells+拼串，拾取/悬停按帧调用=O(100k)/次 → 改 `regionsRev():长度:长度`，rev 在全部 touch* 同点 bump）；② `buildPieceParams` 每帧分配清零（regionById Map/seenFill/seenBound 跨帧 clear+复用——同步不可重入已论证，out 数组刻意保持新分配防跨帧持有）；③ decorationsLayer 每层 `regions.filter` + cellMarker `flatMap+Set` → **dataRev 键控惰性缓存**（每次编辑只重建可见层，帧内零分配）。
+- **验收**：**同状态 stash A/B（旧码 vs 新码、零交互默认态）最终 diff=0.0%**（首次 7.1% = 渐现时序，3s 后完全收敛）；帧 p50 9.7ms 无回归；tsc/svelte-check 0。
+- **✗ 缓发（含理由）**：④ 世界副本数 GL/2D 统一——副本机制是历史 bug 旋涡（硬教训1），合并需全量副本回归另立包；⑤ borderCache 键补 regionsRev——与「件环不删缓存、Δ 补丁即机制」红线冲突（键上加 rev 会把补丁作废成全量重算），运行时断言随翻转探针包一起做；⑥ flip 探针降级 debug 断言（可选项，随定向包）。
 
 ### ☐ 7. 大扫除（P2，随时可做，建议搭车）
 
@@ -58,7 +60,7 @@
 | GPU 直绘提交 | ✓ 非瓶颈 | GL 提交 0.2ms/帧；件数/环复杂度增 10× 再看 |
 | 拖动/绘制卡顿 | ✓ 包 1-4 落地 | 剩余 = 缩放动画（依赖 GPU）；红线：零瞬态折扣 |
 | 100k 生成链 | ✓ 4.8-6.9s | 可选：getProjCache 首建 Worker 化 |
-| autosave 主线程 stringify | ☐ 见还债步骤 3 | 每 2s 同步全量序列化 |
+| autosave 主线程 stringify | ✓ 步骤 3 落地 | stringify+idb 已离线程；残余=clone ~250ms/次（列式化另立项） |
 | 每帧 O(n) 分配 | ☐ 见还债步骤 6 | layers.ts 三处 + compose 单槽冲刷 |
 
 ---
@@ -70,12 +72,14 @@
 | 缩放重烘焙顿挫 ~100ms | — | 暂接受（归卡顿包 2） |
 | 球面元素填充 = cell 贴角三角扇，非 Hermite evenodd | GlobeView | 已知余量；球面中点 Hermite 填充为独立包 |
 | 球面无标签/悬停 | GlobeView | 待做 |
-| gk 投影 unproject 是坏的（死代码残骸） | `projections.ts:171-185` | 待修（拾取/标签错位） |
-| autosave 靠 `void w.cells.length` 触发，纯改高度/颜色不触发 | `App.svelte:156-162` | 待修（接近 P0） |
-| 球面视图下补丁队列无人消费、无限增长 | `Viewport:710-734` | 待修 |
+| gk 投影 unproject 是坏的（死代码残骸） | `projections.ts` | ✓（2026-10-01：前向本身 2 对 1 折叠 → 整体替换为「墨卡托·中经」x=Δλ/y=atanh(sinφ)，注入+闭式逆解 roundtrip 1e-14；UI 下拉实际只暴露 mercator/robinson，gk 属防护性修复） |
+| autosave 靠 `void w.cells.length` 触发，纯改高度/颜色不触发 | `App.svelte` | ✓（2026-10-01：`scheduleAutosave` 集中进 touch* 家族——touchWorld/touchRegions/touchRegionsIncremental/touchHeight/touchLayerView/touchPaint，2s 防抖无重复成本；加载即存已实测） |
+| 球面视图下补丁队列无人消费、无限增长 | `Viewport` 消费端 | ✓（2026-10-01：入列侧根治——piecePatch/heightDelta 同键 Δ 合成（键数=上界）、pieceInvalidations 去重；合成语义经「串行应用 ≡ 合并应用」断言） |
 | `dragPathIdx` 用位置索引，undo 后错指 | `Viewport:1002/1019` | 待修（随步骤 1 命令化） |
-| 提示文案"右键擦除"与实际行为矛盾（右键=内容平移） | `store:1208` vs `Viewport:923` | 随步骤 5 修 |
+| 提示文案"右键擦除"与实际行为矛盾（右键=内容平移） | store/Viewport/App | ✓（2026-10-01：A′「画布右键=纯位移」定案 → 擦除手势=**Shift+左键**；三层同修：paintHeight 路由接受 shift、App `onpaint` 补 alt/button 丢参、状态文案更新；浏览器实测 cell 62→0） |
 | GL scissor 与 evenodd 遮罩 1px 缝 | `mapRenderer:302` | 观察 |
+| 检查区展示值不随数据刷新（`$state.raw` 无深代理 → 模板直读可变属性/同引用派生截断失效） | `InspectSection` | ✓（2026-10-01：全部展示值收敛 `view` 快照，`rev+world` 键控输出新对象；眼睛标签三态实测跟随；**教训：raw 状态下新增展示字段必须进 view，禁模板直读可变属性**） |
+| 同类 stale 潜力点（DisplayStylePanel 内部直读 style 对象的模板、其余组件同模式） | 各组件 | 观察（按 view 快照模式逐步收编） |
 | Robinson 双周期语义并存（自洽但脆弱） | build/normalize | 观察 |
 | 无 UI/渲染集成测试 | — | 已知盲区；测试盲区与 P0 风险区重合 |
 

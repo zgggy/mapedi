@@ -1,4 +1,5 @@
 import type { CellId, LayerId, Region, RegionId, World } from '../types';
+import { regionsRev } from '../rev';
 
 export interface OverlapMember {
   id: RegionId;
@@ -110,10 +111,11 @@ export class RegionIndex {
 }
 
 function worldKey(world: World): string {
-  // regions 结构变更即失效；cells 数量影响归属全集
-  let n = 0;
-  for (const r of world.regions) n += r.cells.length;
-  return `${world.regions.length}:${n}:${world.cells.length}`;
+  // O(1)（2026-10-01 还债步骤6）：原实现每次 ensure 扫全部 region.cells 求和+拼串，
+  // 而 ensure 在拾取/悬停的 owners() 上按帧调用 = O(总归属格)/次。
+  // regionsRev 在全部 touch* 路径 bump（invalidateRegionIndex 同点调用，双保险）；
+  // 长度字段兜底结构突变（与 rev 漏配时的护栏，非替代 rev 的真相）。
+  return `${regionsRev()}:${world.regions.length}:${world.cells.length}`;
 }
 
 let idx: RegionIndex | null = null;

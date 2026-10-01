@@ -805,14 +805,89 @@
 
   // GL 直绘场景：惰性创建（显示面板切到 GPU 才建）；失败/异常整帧回退 Canvas2D（显示不降级）
   let mapGl: MapGlRenderer | null = null;
+  /** 致命：连续 3 次创建失败（上下文活着也不行）→ 强提示；仍低频自试 */
   let mapGlFailed = $state(false);
+  /** 瞬态：上下文丢失恢复中 / 初始化冷却中 → 弱提示（2026-10-01 还债步骤 2） */
+  let glTransient = $state(false);
+  let glRetryN = 0;
+  let mapGlRetryAt = 0;
+  /**
+   * GL 生命周期（还债步骤 2：单点黑屏 → 自愈路径）：
+   * - 上下文丢失：renderer 标 dead+failed（preventDefault 已在 renderer）→ 本函数每帧探测
+   *   `isContextLost()`，丢失期间只出「恢复中」提示，不累计失败；
+   * - 上下文恢复：换**全新实例**重建全部 GL 资源（程序/缓冲/纹理随旧上下文作废，重建即自愈）；
+   * - 初始化失败：2s 冷却重试，连续 3 次 → 致命提示；任何时候创建成功即复位。
+   */
   function ensureMapGl(): MapGlRenderer | null {
-    if (mapGl) return mapGl.ok ? mapGl : null;
-    if (mapGlFailed || !glCanvas) return null;
+    if (!glCanvas) return null;
+    // ⚠ 绝不能在 renderer 创建前 `getContext('webgl2')`：**首次调用者决定上下文属性**，
+    // 无参 probe 曾以默认属性建出 alpha/depth=true、stencil=false 的上下文 → renderer 的
+    // stencil:true 被静默忽略 → 轮廓 stencil/evenodd 填色掩码全废 = 渲染错乱（2026-10-01）。
+    // 丢失判定改用 renderer 自带 gl（isLost()），创建路径只走 MapGlRenderer.create。
+    if (mapGl) {
+      if (mapGl.isLost()) {
+        if (!glTransient) glTransient = true;
+        mapGl.dead = true;
+        mapGl.failed = true;
+        return null;
+      }
+      if (mapGl.ok) {
+        if (glTransient) glTransient = false;
+        return mapGl;
+      }
+    }
+    const now = performance.now();
+    if (mapGl && now < mapGlRetryAt) {
+      // 实例 failed 但上下文活着：冷却期内等待
+      if (!glTransient && !mapGlFailed) glTransient = true;
+      return null;
+    }
+    // 创建/重建（含丢失恢复后的换新实例）
     mapGl = MapGlRenderer.create(glCanvas);
-    if (!mapGl) mapGlFailed = true;
-    return mapGl;
+    if (mapGl) {
+      if (mapGlFailed || glTransient) {
+        mapGlFailed = false;
+        glTransient = false;
+      }
+      glRetryN = 0;
+      return mapGl;
+    }
+    glRetryN += 1;
+    mapGlRetryAt = now + (glRetryN >= 3 ? 5000 : 2000);
+    if (glRetryN >= 3) {
+      mapGlFailed = true;
+      glTransient = false;
+    } else {
+      glTransient = true;
+    }
+    return null;
   }
+
+  // GL 丢失/恢复要**主动触发重绘**（2026-10-01 还债步骤 2）：渲染是命令式驱动，
+  // 不挂监听的话恢复后没有任何 requestRender，画面会停到下次交互才自愈。
+  $effect(() => {
+    const c = glCanvas;
+    if (!c) return;
+    const onLost = () => {
+      glTransient = true;
+      if (mapGl) {
+        mapGl.dead = true;
+        mapGl.failed = true;
+      }
+      requestRender();
+    };
+    const onRestored = () => {
+      // 下一帧 ensureMapGl 探测 isContextLost()=false → 换全新实例重建资源
+      glTransient = true;
+      requestRender();
+    };
+    c.addEventListener('webglcontextlost', onLost);
+    c.addEventListener('webglcontextrestored', onRestored);
+    return () => {
+      c.removeEventListener('webglcontextlost', onLost);
+      c.removeEventListener('webglcontextrestored', onRestored);
+    };
+  });
 
   /** 指针捕获对已释放/合成指针抛 NotFoundError——不得炸穿 handler（运行时错误见一例修一例） */
   function capturePointer(c: HTMLCanvasElement, id: number) {
@@ -999,7 +1074,9 @@
   <!-- GL 直绘层：bg/cellsMesh/元素三通道，最底（GL 唯一后端） -->
   <canvas class="gl" bind:this={glCanvas}></canvas>
   {#if mapGlFailed}
-    <div class="gl-fail">GPU 渲染不可用（WebGL2 初始化失败）。Canvas2D 后端已归档，地图无法显示。</div>
+    <div class="gl-fail">GPU 渲染不可用（WebGL2 初始化失败）——地块与元素暂缺，路径/标注/图框仍可用；将持续低频重试。</div>
+  {:else if glTransient}
+    <div class="gl-fail">GPU 上下文丢失，恢复中…（路径/标注/图框仍可用）</div>
   {/if}
   <canvas
     bind:this={canvas}
