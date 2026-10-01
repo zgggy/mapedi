@@ -1,3 +1,4 @@
+import { GEOM_EPS, SPHERE_MIN, DEDUP_EPS } from './tolerances';
 /**
  * 球面 Voronoi：先在单位球上均匀撒点，用平分面裁剪得到球面多边形。
  * 真相始终是球面点；平面投影只用于显示。
@@ -210,7 +211,7 @@ export class Vec3Grid {
 
   /** 搜单位球上角距 ≤ radiusRad 内的点索引 */
   pointsNear(c: Vec3, radiusRad: number): number[] {
-    const rr = Math.max(radiusRad, 1e-4);
+    const rr = Math.max(radiusRad, SPHERE_MIN);
     const chord = 2 * Math.sin(Math.min(Math.PI / 2, rr / 2));
     const ring = Math.max(1, Math.min(3, Math.ceil(chord / this.cellSize) + 1));
     const cx = Math.floor(c[0] / this.cellSize);
@@ -226,7 +227,7 @@ export class Vec3Grid {
           for (const j of a) {
             const p = this.pts[j];
             const d = p[0] * c[0] + p[1] * c[1] + p[2] * c[2];
-            if (d >= cosR - 1e-12) out.push(j);
+            if (d >= cosR - GEOM_EPS) out.push(j);
           }
         }
     return out;
@@ -247,12 +248,12 @@ export function clipSphericalPolygon(
     const b = poly[(i + 1) % poly.length];
     const sa = side(a);
     const sb = side(b);
-    if (sa >= -1e-12) out.push(a);
+    if (sa >= -GEOM_EPS) out.push(a);
     if ((sa > 0 && sb < 0) || (sa < 0 && sb > 0)) {
       // 大圆 ab 与平面 n 的交：normalize( (a×b) × n )
       const e = cross(a, b);
       let t = cross(e, n);
-      if (Math.hypot(t[0], t[1], t[2]) > 1e-12) out.push(normalize(t));
+      if (Math.hypot(t[0], t[1], t[2]) > GEOM_EPS) out.push(normalize(t));
     }
   }
   return out;
@@ -300,7 +301,7 @@ export function sphericalCircumcenter(a: Vec3, b: Vec3, c: Vec3): Vec3 | null {
     [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
   );
   const len = Math.hypot(n[0], n[1], n[2]);
-  if (len < 1e-12) return null;
+  if (len < GEOM_EPS) return null;
   const pole: Vec3 = [n[0] / len, n[1] / len, n[2] / len];
   const cen: Vec3 = [a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]];
   return dot(pole, cen) >= 0 ? pole : [-pole[0], -pole[1], -pole[2]];
@@ -322,7 +323,7 @@ export interface VertexSnap {
 export function createVertexSnap(epsDot = 0.999999): VertexSnap {
   // 25k 时平均边长约 0.02rad；焊接阈须吸收浮点/对偶误差，又不能吞掉真角点
   const cell = Math.sqrt(2 * (1 - epsDot));
-  const g = Math.max(cell, 1e-4);
+  const g = Math.max(cell, SPHERE_MIN);
   const grid = new Map<string, Vec3[]>();
   const key = (v: Vec3) =>
     `${Math.floor(v[0] / g)},${Math.floor(v[1] / g)},${Math.floor(v[2] / g)}`;
@@ -403,7 +404,7 @@ function convexHullTriangles(
   let i0 = 0;
   let i1 = -1;
   for (let i = 1; i < n; i++) {
-    if (Math.hypot(pts[i][0] - pts[i0][0], pts[i][1] - pts[i0][1], pts[i][2] - pts[i0][2]) > 1e-6) {
+    if (Math.hypot(pts[i][0] - pts[i0][0], pts[i][1] - pts[i0][1], pts[i][2] - pts[i0][2]) > DEDUP_EPS) {
       i1 = i;
       break;
     }
@@ -576,7 +577,7 @@ function convexHullTriangles(
       const f = faces[cur];
       if (!f || f.dead) return -1;
       const d0 = planeDist(f, pi);
-      if (d0 > 1e-12) return cur;
+      if (d0 > GEOM_EPS) return cur;
       let best = -1;
       let bestD = d0;
       for (const [u, v] of [
@@ -639,7 +640,7 @@ function convexHullTriangles(
               const g = arr[t];
               const gf = faces[g];
               if (!gf || gf.dead) continue;
-              if (planeDist(gf, pi) > 1e-12) {
+              if (planeDist(gf, pi) > GEOM_EPS) {
                 seedFace = g;
                 break outer;
               }
@@ -666,7 +667,7 @@ function convexHullTriangles(
       for (let fi = 0; fi < faces.length; fi++) {
         const f = faces[fi];
         if (f.dead) continue;
-        if (planeDist(f, pi) > 1e-12) {
+        if (planeDist(f, pi) > GEOM_EPS) {
           f.dead = true;
           deadCnt.n++;
           stack.push(fi);
@@ -688,7 +689,7 @@ function convexHullTriangles(
         for (const g of arr) {
           const gf = faces[g];
           if (!gf || gf.dead) continue;
-          if (planeDist(gf, pi) > 1e-12) {
+          if (planeDist(gf, pi) > GEOM_EPS) {
             gf.dead = true;
             deadCnt.n++;
             stack.push(g);

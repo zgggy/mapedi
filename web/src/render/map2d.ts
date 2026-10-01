@@ -1,3 +1,4 @@
+import { SCALE_FLOOR } from '../core/tolerances';
 import type { World } from '../core/types';
 import {
   defaultProjParams,
@@ -63,11 +64,11 @@ export function buildRenderEnv(
   const copyKs = opts?.singleWorldCopy
     ? [0]
     : worldCopyKs(contentOffsetX, cam, w, proj, pcache.worldBBox);
-  const padX = 4 / Math.max(cam.scale, 1e-6);
-  const padY = 4 / Math.max(cam.scale, 1e-6);
+  const padX = 4 / Math.max(cam.scale, SCALE_FLOOR);
+  const padY = 4 / Math.max(cam.scale, SCALE_FLOOR);
   const bb = pcache.worldBBox;
-  const halfW = w / 2 / Math.max(cam.scale, 1e-6);
-  const halfH = h / 2 / Math.max(cam.scale, 1e-6);
+  const halfW = w / 2 / Math.max(cam.scale, SCALE_FLOOR);
+  const halfH = h / 2 / Math.max(cam.scale, SCALE_FLOOR);
   void padX; void padY; void bb; void halfW; void halfH;
   const env: RenderEnv = {
     ctx,

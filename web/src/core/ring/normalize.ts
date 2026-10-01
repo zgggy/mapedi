@@ -3,6 +3,7 @@
  *
  * fill / stroke 共用本模块输出，禁止在绘制侧再拆。（阴影已归档）
  */
+import { EPS_FP } from '../tolerances';
 import { unwrapXAgainst, type Pt } from '../../render/space';
 import type { PeriodAt } from './build';
 const per = (p: PeriodAt, y: number): number => (typeof p === 'function' ? p(y) : p);
@@ -117,8 +118,8 @@ function closeRingForCylindrical(
   // 不等（接缝裂）；改走经线弧 + 极线段后，每个顶点的副本位移 = scale(顶点 y)·2π，
   // 相邻副本**逐顶点重合**（极线段宽恰 = 2π·scale(edgeY)）→ 奇偶接缝精确。
   // 圆柱族 scale≡1：经线 = 竖直线、极线 = 横线 → 退化为原矩形几何，零差异。
-  const lam0 = p0.x / Math.max(1e-9, scaleAt(p0.y)); // 断点经度（窗口内可超 ±π）
-  const lamN = (p0.x + winding * pp) / Math.max(1e-9, scaleAt(p0.y)); // = lam0 + winding·2π
+  const lam0 = p0.x / Math.max(EPS_FP, scaleAt(p0.y)); // 断点经度（窗口内可超 ±π）
+  const lamN = (p0.x + winding * pp) / Math.max(EPS_FP, scaleAt(p0.y)); // = lam0 + winding·2π
   const N = 8; // 经线弧插值（副本重合只依赖顶点共享，插值精度无关紧要）
   const span = edgeY - p0.y;
   const mid: Pt[] = [];

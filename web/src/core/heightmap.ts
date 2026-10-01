@@ -1,3 +1,4 @@
+import { MIN_RATIO } from './tolerances';
 import type { World } from '../core/types';
 import { assignContinents } from '../core/height';
 
@@ -34,12 +35,12 @@ export async function applyHeightmapFile(
     if (invert) v = 1 - v;
     if (v >= sea) {
       // 陆地 0–1
-      const t = (v - sea) / Math.max(1e-6, 1 - sea);
+      const t = (v - sea) / Math.max(MIN_RATIO, 1 - sea);
       cell.height = Math.min(1, 0.05 + t * 0.95);
       cell.isOcean = false;
       land++;
     } else {
-      const t = v / Math.max(1e-6, sea);
+      const t = v / Math.max(MIN_RATIO, sea);
       cell.height = -Math.min(1, t) * 0.8;
       cell.isOcean = true;
       ocean++;

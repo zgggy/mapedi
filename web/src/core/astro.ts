@@ -8,6 +8,7 @@
  *
  * 数值为架空世界设定，不强制与真实天文一致。
  */
+import { EPS_FP } from './tolerances';
 import type { ClimateParams } from './types';
 
 export interface OrbitParams {
@@ -267,7 +268,7 @@ export function keplerPoint(
   for (let k = 0; k < 10; k++) {
     const f = E - e * Math.sin(E) - M;
     const fp = 1 - e * Math.cos(E);
-    if (Math.abs(fp) < 1e-9) break;
+    if (Math.abs(fp) < EPS_FP) break;
     E -= f / fp;
   }
   // 轨道平面（焦点在原点）：x = a(cos E - e), z = a√(1-e²) sin E

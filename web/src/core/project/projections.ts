@@ -1,3 +1,4 @@
+import { GEOM_EPS } from '../tolerances';
 import type { LonLat } from '../types';
 import { PROJ_LAT_MAX } from './mercator';
 
@@ -212,7 +213,7 @@ export function unproject(
       const φ1 = c.lat * D2R;
       const λ0 = c.lon * D2R;
       const ρ = Math.hypot(x, y);
-      if (ρ < 1e-12) return { ...c };
+      if (ρ < GEOM_EPS) return { ...c };
       const cAng = ρ;
       const sinC = Math.sin(cAng);
       const cosC = Math.cos(cAng);

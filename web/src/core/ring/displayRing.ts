@@ -8,6 +8,7 @@
  *
  * fill / stroke **只**吃 DisplayRing，禁止分叉预处理。（阴影已归档）
  */
+import { GEOM_EPS } from '../tolerances';
 import type { Pt } from '../../render/space';
 
 /** 边界环：曲线过边中点 pts，中点处切线 = 边（verts = 转角） */
@@ -109,7 +110,7 @@ export function pointInRing(x: number, y: number, pts: Pt[]): boolean {
     const yi = pts[i].y;
     const xj = pts[j].x;
     const yj = pts[j].y;
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi) {
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + GEOM_EPS) + xi) {
       inside = !inside;
     }
   }

@@ -9,6 +9,7 @@
  * 闭合语义只来自 hermite（willClose），不在此另立规则：
  * outline 模式遇 virtualFrom 跨界尾巴是**开环**，强制闭合 = 横跨地图的直线（「横线」bug）。
  */
+import { GEOM_EPS } from '../../core/tolerances';
 import type { DisplayRing } from '../../core/ring/displayRing';
 import { sampleMidRing } from '../../core/ring/hermite';
 import { triangulateRings, trianglesMatchRings } from './triangulate';
@@ -114,7 +115,7 @@ export function ringGeo(
   if (willClose && pts.length > 1) {
     const a = pts[0];
     const b = pts[pts.length - 1];
-    if (Math.abs(a.x - b.x) < 1e-12 && Math.abs(a.y - b.y) < 1e-12) pts.pop();
+    if (Math.abs(a.x - b.x) < GEOM_EPS && Math.abs(a.y - b.y) < GEOM_EPS) pts.pop();
   }
   if (mode === 'outline' ? pts.length < 2 : pts.length < 3) return null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;

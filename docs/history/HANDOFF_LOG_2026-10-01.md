@@ -47,3 +47,21 @@
   - 基线：tsc 0、svelte-check 0 errors（5 既有 warnings）；**测试未跑**（纪律）。
 - 第十轮 `2ddc6ce`+`bed0880`：组织模式/拖动退役/样式批（详见 docs/UI_REFACTOR §9；其缩进语义标注已被第十一轮定稿推翻）。
 
+
+## 追加归档（2026-10-01 第三十轮剪出）
+
+- **✓ 第十九轮（2026-10-01，还债 1-c 命令纯数据化——步骤 1 三子项全清）**：
+  - **删**：`PatchRegionsCommand`（死码零引用——store.patchRegions 实产 `RegionFieldsCommand`）；`HeightStrokeCommand`（afterApply/afterRevert 闭包）合并入纯数据 `HeightCellsCommand`；连带删 commitStroke 死变量 `topoChanged`。
+  - **分发**：`History.undo/redo` 改返回**被执命令或 null**；store 新增私有 `historyEffect(cmd, dir)`——高度笔画 undo→`flushHeightRegions(交换样本)+touchHeight(true)`、redo→`flushHeightRegions(原样本)+touchHeight(false)`（**区间/landsea 归属=派生数据，不重算=归属过期**，这是必须分发而不是只 touchWorld 的原因）；非高度命令零副作用直通。
+  - **契约变化**：undo/redo 返回 boolean→`EditCommand|null`；`tests/historyMulti` 5 断言适配（toBe(true/false)→toBeTruthy/toBeNull，业务规则未变）。
+  - **验收**：高度笔画（顶峰 61 三笔）画→撤销→重做——cell 高度/海陆旗/区域成员**逐位回滚**（hD=oD=rD=0，重做对 s1 全 0）；常规建层撤销 15→16→15→16；console/overlay 零错；tsc/svelte-check 0。
+  - **stash A/B 法证预存**：`git stash` 回旧码跑同流程，undo cD=8792/分区等价/redo 全 0 **与新码逐位相同** → `continentId` 标签+region 数组序漂移是**预存行为**（分区等价、真值精确），已登记 ROADMAP 已知问题表；新旧码行为保持。
+  - **1-c 边界（诚实记录）**：JSON round-trip 残余=快照类命令载荷含 Set/Map（历史面板会话内运行不需序列化，持久化时补编解码）。
+
+- **✓ 第十八轮（2026-10-01，1-b 收尾：复制/删除命令化 + 拖拽死码清理，浏览器全链验收）**：
+  - **命令化**：`copyItem` 层支 → `history.run(world, new AddLayerCommand(copy,'复制图层'))`、元素支 → `new CreateRegionCommand(copy,'复制元素', idx+1)`（**新增 `at` 参数**：复制插原位之后）；`deleteItem` 层支 → 新 **`DeleteLayerCommand`**（ctor 快照层定义+其 regions（cells/Set/Map 深拷贝）+renderCfg；apply=删、revert=全量恢复；`alreadyApplied:true` 执行后入栈）。
+  - **死码**：store `dragLayer/dragRegion`/DropHint import（十轮拖动退役后零调用）、LayersPanel+App 死 prop `onMoveLayer` 一并删除。
+  - **验收**：元素复制（右键「复制一个」9行→Ctrl+Z 回8，副本消失）✓；图层复制（15→16→15）✓；建层→右键删除→Ctrl+Z 恢复（15→16→15→16）✓；全程零 error overlay；测试层已清理（终态 15 原始行）。tsc/svelte-check 0 errors。
+  - **1-b 收口**：剩 climate/astro（无 UI 写入口=孤儿，归步骤 7 判定）、道路端点 `endpointOverrides`（region 域，随 1-c 核对）。**下一包 = 1-c 命令纯数据化（历史面板唯一前置）**。
+  - **测试坑**：编辑后 HMR 整页重载会把整段 evaluate 拖到 32s 超时（两次误判为 copy 死循环）→ 先跑活体探针（页内自旋 50ms）再分步执行；本 runtime **globals 不跨 evaluate 调用**，每次都要重挂 setupBrowserRuntime。
+

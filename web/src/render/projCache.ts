@@ -1,3 +1,4 @@
+import { PROJ_WRAP_EPS } from '../core/tolerances';
 import type { LonLat, World } from '../core/types';
 import {
   project,
@@ -32,7 +33,7 @@ function vertKey(ll: LonLat): string {
   let lon = ll.lon;
   while (lon > 180) lon -= 360;
   while (lon < -180) lon += 360;
-  if (Math.abs(lon) >= 180 - 1e-2) lon = 180;
+  if (Math.abs(lon) >= 180 - PROJ_WRAP_EPS) lon = 180;
   return `${Math.round(lon * 100)},${Math.round(ll.lat * 100)}`;
 }
 

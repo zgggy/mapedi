@@ -4,6 +4,7 @@
  * 没有 owner 概念：Region / DisplayPiece / 海岸 都是 `cellIds` 的边界。
  * 顶点拓扑只来自 `world.sharedEdges`（由 cell.polygon 导出）。
  */
+import { KEY_QUANT, WRAP_EPS, GEOM_EPS } from '../tolerances';
 import type { CellId, LonLat, World } from '../types';
 import { unwrapXAgainst, wrapPeriod, type Pt } from '../../render/space';
 import { alignVerts, type MidRing } from './displayRing';
@@ -40,8 +41,8 @@ export function lonlatKey(ll: LonLat): string {
   let lon = ll.lon;
   while (lon > 180) lon -= 360;
   while (lon < -180) lon += 360;
-  if (Math.abs(lon) >= 180 - 1e-3) lon = 180;
-  return `${Math.round(lon * 1000)},${Math.round(ll.lat * 1000)}`;
+  if (Math.abs(lon) >= 180 - WRAP_EPS) lon = 180;
+  return `${Math.round(lon * KEY_QUANT)},${Math.round(ll.lat * KEY_QUANT)}`;
 }
 
 /** lonlatKey 的数值版（**同分桶**：同一 0.001° 网格 + ±180 缝归一）——热路径用，免字符串 */
@@ -49,8 +50,8 @@ export function lonlatNumKey(ll: LonLat): number {
   let lon = ll.lon;
   while (lon > 180) lon -= 360;
   while (lon < -180) lon += 360;
-  if (Math.abs(lon) >= 180 - 1e-3) lon = 180;
-  return (Math.round(lon * 1000) + 180000) * 360001 + (Math.round(ll.lat * 1000) + 90000);
+  if (Math.abs(lon) >= 180 - WRAP_EPS) lon = 180;
+  return (Math.round(lon * KEY_QUANT) + 180000) * 360001 + (Math.round(ll.lat * KEY_QUANT) + 90000);
 }
 
 export function edgeMidpoint(p0: Pt, p1: Pt, period: PeriodAt = Math.PI * 2): Pt {
@@ -282,7 +283,7 @@ export function chainEdgesToMidpointRings(
         for (let i = 0; i < nE; i++) {
           const pp = per(period, pts[i].y);
           const score = Math.abs(wrapPeriod(pts[i].x, pp)) / pp;
-          if (score > bestScore + 1e-12) {
+          if (score > bestScore + GEOM_EPS) {
             bestScore = score;
             cut = i;
           }
@@ -403,7 +404,7 @@ export function chainEdgesToMidpointRings(
         const w = rep.get(edges[j].k1) ?? edges[j].p1;
         const outAng = angleOf(k, w);
         let off = inAng - outAng;
-        while (off <= 1e-12) off += Math.PI * 2;
+        while (off <= GEOM_EPS) off += Math.PI * 2;
         while (off > Math.PI * 2) off -= Math.PI * 2;
         if (off < bestOff) { bestOff = off; best = j; }
       }

@@ -2,6 +2,7 @@
  * 中点 Hermite **唯一实现**。
  * ctx 路径与 Path2D 都走 appendMidRing，禁止第二份控制柄公式。
  */
+import { MIN_SEG } from '../tolerances';
 import type { Pt } from '../../render/space';
 import { toDisplayRing, type DisplayRing, type MidRing } from './displayRing';
 
@@ -55,7 +56,7 @@ export function appendMidRing(
     let t3y = p3.y - V.y;
     const l0 = Math.hypot(t0x, t0y);
     const l3 = Math.hypot(t3x, t3y);
-    if (!(l0 > 1e-6) || !(l3 > 1e-6) || l0 > 0.45 || l3 > 0.45) {
+    if (!(l0 > MIN_SEG) || !(l3 > MIN_SEG) || l0 > 0.45 || l3 > 0.45) {
       // 远角/退化兜底：控制点伸出量以**段长**为限——角点被拉远时（坏角/跨副本角）
       // 贝塞尔不得甩尾（旧 0.3·|V−p| 会把整条边拽出长刺）
       const segLen = Math.hypot(p3.x - p0.x, p3.y - p0.y);

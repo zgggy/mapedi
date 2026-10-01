@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十九轮 步骤7 大扫除。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第三十轮 容差集中。**
 
 ## 先读
 
@@ -12,6 +12,9 @@
 
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
+
+## 当前状态（第三十轮完成，容差批待提交；在案：`8e22dac` 5-b5 → `20b3c20` 5-c → `36f7773` 步骤7 → 第三十轮 容差）
+
 - **✓ 第二十五轮（2026-10-01 用户反馈批四件）**：
   - **revealRaf 修复**：5-b3 换 revealCancel 时漏改 onMount cleanup → 切球面即 `ReferenceError`（用户报障）——已改 `revealCancel?.()`，来回切 4 次零错。
   - **错误复制钮**：`main.ts` 捕获**全文含栈** → `editor.lastError`（ui 新字段）→ StatusBar 左区出错时（error 或 ⚠️ 状态）左侧 `⧉`，点击 `clipboard.writeText`（失败降级 execCommand）→ `✓` 1.5s。验收（间谍法，失焦页真剪贴板被拒）：截获=Error 全栈、按钮翻 ✓。
@@ -19,7 +22,13 @@
   - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
   - 基线：tsc 0、svelte-check 0 errors。
 
-## 当前状态（第二十九轮完成，步骤7 批待提交；在案：`ced5e81` 5-b4 → `8e22dac` 5-b5 → `20b3c20` 5-c → 第二十九轮 步骤7）
+- **✓ 第三十轮（2026-10-01，步骤7 转包①：容差集中）**：
+  - `core/tolerances.ts` 单源 10 常量；**17 文件原值迁移零改值**——键量化 KEY_QUANT（lonlatKey/NumKey ×1000 全清）、WRAP_EPS(1e-3)/PROJ_WRAP_EPS(1e-2) 并列暴露历史分歧、GEOM_EPS(1e-12 含近零保护，全清)、EPS_FP(1e-9)、SCALE_FLOOR(cam.scale 下限 7 处全清)、MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN。
+  - **坑（已修）**：脚本把替换表达式当 import 符号名插进 14 文件（`import { Math.max(...) }` 语法炸）+ ring/ 相对路径差一级——修复法=删垃圾行按 `^import` 重插；教训=批量替换的 import 符号必须与替换对**分离建模**。
+  - 留原地（模块头注明）：一次性孤值 1e-8/1e-10/1e-15、GLSL 内字面量。
+  - 验收：tsc/svelte-check 0；冒烟=平面 hover 拾取（#70115 全字段）+球面往返×2 零错。**未跑测试**（纪律）。
+  - 存量进度：容差 ✓ / 图层名标志位 ☐ / as-unknown ☐。
+
 
 - **◐ 第二十九轮（2026-10-01，还债步骤 7 大扫除：死码/孤儿/两修复全清）**：
   - **七项死码按当日现状复核**：cellIndex **整文件删**（索引零读者，invalidate 无读者=无效失效）+ rebuildNeighborsFromSharedVerts + NamePlacement/nameStyle + cellsLayer 空桩出双管线；centerLabel/PathFeature.name 判**活**保留；Viewport 旧注释已随重构漂移无存。
@@ -86,21 +95,6 @@
   - **验收**：三态语义 mountain/-37.4° → 画-10 → ocean/2° → 撤销 → 精确回基线；首算115ms/命中0ms/变更重算111ms sameMap=false；serialize 顶层无两字段；legacy 注入兼容；road 入口自回填 207ms；tsc/svelte-check 0。
   - **两注**：仅改河流不翻 heightRev（partial regen UI 不可达，±0.15 边界）；**探针直调 generateRoads 把原 1 个 road 区域清成 0**（首都不连通全 skip=预存行为，已登记已知问题表——biome 只做正系数缩放不碰连通闸，与本改无关）。
 
-- **✓ 第十九轮（2026-10-01，还债 1-c 命令纯数据化——步骤 1 三子项全清）**：
-  - **删**：`PatchRegionsCommand`（死码零引用——store.patchRegions 实产 `RegionFieldsCommand`）；`HeightStrokeCommand`（afterApply/afterRevert 闭包）合并入纯数据 `HeightCellsCommand`；连带删 commitStroke 死变量 `topoChanged`。
-  - **分发**：`History.undo/redo` 改返回**被执命令或 null**；store 新增私有 `historyEffect(cmd, dir)`——高度笔画 undo→`flushHeightRegions(交换样本)+touchHeight(true)`、redo→`flushHeightRegions(原样本)+touchHeight(false)`（**区间/landsea 归属=派生数据，不重算=归属过期**，这是必须分发而不是只 touchWorld 的原因）；非高度命令零副作用直通。
-  - **契约变化**：undo/redo 返回 boolean→`EditCommand|null`；`tests/historyMulti` 5 断言适配（toBe(true/false)→toBeTruthy/toBeNull，业务规则未变）。
-  - **验收**：高度笔画（顶峰 61 三笔）画→撤销→重做——cell 高度/海陆旗/区域成员**逐位回滚**（hD=oD=rD=0，重做对 s1 全 0）；常规建层撤销 15→16→15→16；console/overlay 零错；tsc/svelte-check 0。
-  - **stash A/B 法证预存**：`git stash` 回旧码跑同流程，undo cD=8792/分区等价/redo 全 0 **与新码逐位相同** → `continentId` 标签+region 数组序漂移是**预存行为**（分区等价、真值精确），已登记 ROADMAP 已知问题表；新旧码行为保持。
-  - **1-c 边界（诚实记录）**：JSON round-trip 残余=快照类命令载荷含 Set/Map（历史面板会话内运行不需序列化，持久化时补编解码）。
-
-- **✓ 第十八轮（2026-10-01，1-b 收尾：复制/删除命令化 + 拖拽死码清理，浏览器全链验收）**：
-  - **命令化**：`copyItem` 层支 → `history.run(world, new AddLayerCommand(copy,'复制图层'))`、元素支 → `new CreateRegionCommand(copy,'复制元素', idx+1)`（**新增 `at` 参数**：复制插原位之后）；`deleteItem` 层支 → 新 **`DeleteLayerCommand`**（ctor 快照层定义+其 regions（cells/Set/Map 深拷贝）+renderCfg；apply=删、revert=全量恢复；`alreadyApplied:true` 执行后入栈）。
-  - **死码**：store `dragLayer/dragRegion`/DropHint import（十轮拖动退役后零调用）、LayersPanel+App 死 prop `onMoveLayer` 一并删除。
-  - **验收**：元素复制（右键「复制一个」9行→Ctrl+Z 回8，副本消失）✓；图层复制（15→16→15）✓；建层→右键删除→Ctrl+Z 恢复（15→16→15→16）✓；全程零 error overlay；测试层已清理（终态 15 原始行）。tsc/svelte-check 0 errors。
-  - **1-b 收口**：剩 climate/astro（无 UI 写入口=孤儿，归步骤 7 判定）、道路端点 `endpointOverrides`（region 域，随 1-c 核对）。**下一包 = 1-c 命令纯数据化（历史面板唯一前置）**。
-  - **测试坑**：编辑后 HMR 整页重载会把整段 evaluate 拖到 32s 超时（两次误判为 copy 死循环）→ 先跑活体探针（页内自旋 50ms）再分步执行；本 runtime **globals 不跨 evaluate 调用**，每次都要重挂 setupBrowserRuntime。
-
 ## 遗留清单（按优先级）
 
 1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
@@ -144,5 +138,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 用户点名**：历史面板（地基全就绪）/ 功能包（比例尺·指南针·测量·搜索跳转）/ 步骤7 转出的三小包（容差集中·图层名标志位·as-unknown 收敛）/ 5-c 剩余（等 UI 线）。
-- 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。
+- **默认下一包 = 三小包②图层名标志位（LayerDef 数据模型级）或③as-unknown 收敛**；或用户点名历史面板/功能包/5-c 剩余。
+- 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

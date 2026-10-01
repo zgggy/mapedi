@@ -12,6 +12,7 @@
  * 结果按「环集数组 + smooth」缓存（几何缓存层）；面积自检不通过 → 调用方走兜底路径，
  * 不在此打补丁。
  */
+import { GEOM_EPS, EPS_FP } from '../../core/tolerances';
 import type { DisplayRing, MidRing } from '../../core/ring/displayRing';
 
 /**
@@ -62,11 +63,11 @@ function cleanPoly(p: number[]): number[] {
     const x = p[i * 2];
     const y = p[i * 2 + 1];
     const m = dedup.length;
-    if (m >= 2 && Math.abs(dedup[m - 2] - x) < 1e-12 && Math.abs(dedup[m - 1] - y) < 1e-12) continue;
+    if (m >= 2 && Math.abs(dedup[m - 2] - x) < GEOM_EPS && Math.abs(dedup[m - 1] - y) < GEOM_EPS) continue;
     dedup.push(x, y);
   }
-  if (dedup.length >= 4 && Math.abs(dedup[0] - dedup[dedup.length - 2]) < 1e-12 &&
-      Math.abs(dedup[1] - dedup[dedup.length - 1]) < 1e-12) {
+  if (dedup.length >= 4 && Math.abs(dedup[0] - dedup[dedup.length - 2]) < GEOM_EPS &&
+      Math.abs(dedup[1] - dedup[dedup.length - 1]) < GEOM_EPS) {
     dedup.length -= 2;
   }
   const out: number[] = [];
@@ -76,7 +77,7 @@ function cleanPoly(p: number[]): number[] {
     const bx = dedup[i * 2], by = dedup[i * 2 + 1];
     const cx = dedup[((i + 1) % m) * 2], cy = dedup[((i + 1) % m) * 2 + 1];
     const cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-    if (Math.abs(cross) < 1e-12) continue;
+    if (Math.abs(cross) < GEOM_EPS) continue;
     out.push(bx, by);
   }
   return out.length >= 6 ? out : dedup;
@@ -203,7 +204,7 @@ export function triangulateRings(entries: RingSample[]): PieceFill | null {
           (tris[i + 4] - tris[i]) * (tris[i + 3] - tris[i + 1]),
       ) / 2;
   }
-  const denom = Math.max(Math.abs(expectArea), 1e-9);
+  const denom = Math.max(Math.abs(expectArea), EPS_FP);
   const areaOk = Math.abs(triArea - Math.abs(expectArea)) / denom < 0.02;
   return { tris, areaOk };
 }

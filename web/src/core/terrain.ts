@@ -19,6 +19,7 @@
  *   大陆尺度 → f_c（频率）；海岸破碎度 → κ；山脉强度 → μ；细节量 → δ；
  *   海底起伏 → σ；穿极大陆 → 帽开关；大陆占比/落差/平整率/侵蚀 → 后处理。
  */
+import { EPS_FP } from './tolerances';
 import type { Cell, World } from './types';
 import { isOcean } from './types';
 import { createRng, hashSeed } from './rng';
@@ -232,8 +233,8 @@ export function buildTerrain(
   const H = Math.max(10, Math.min(127, shape.relief)) / 2;
   const p = Math.max(0.01, Math.min(0.95, shape.landRatio));
   const sea = quantile(f, 1 - p);
-  let dTop = 1e-9;
-  let dBot = -1e-9;
+  let dTop = EPS_FP;
+  let dBot = -EPS_FP;
   for (let i = 0; i < n; i++) {
     const d = f[i] - sea;
     if (d > dTop) dTop = d;

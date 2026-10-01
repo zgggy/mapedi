@@ -11,6 +11,7 @@
  * - OpenLayers：数据 CRS 不动，渲染时由 view/extent 决定显示范围与 wrap。
  */
 
+import { SCALE_FLOOR } from '../core/tolerances';
 import {
   projectionFrameLat,
   projectionPeriodAt,
@@ -170,7 +171,7 @@ export function worldCopyKs(
   contentBounds?: { minX: number; maxX: number; minY: number; maxY: number },
 ): number[] {
   if (!projectionWraps(proj)) return [0];
-  const halfW = viewWidth / 2 / Math.max(cam.scale, 1e-6);
+  const halfW = viewWidth / 2 / Math.max(cam.scale, SCALE_FLOOR);
   const viewL = cam.x - halfW;
   const viewR = cam.x + halfW;
   const cL = contentBounds?.minX ?? -Math.PI;

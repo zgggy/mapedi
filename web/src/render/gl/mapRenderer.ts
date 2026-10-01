@@ -18,6 +18,7 @@
  *
  * 闭合语义只来自 hermite（geometry.ringGeo 的 willClose），此处不另立规则。
  */
+import { EPS_FP } from '../../core/tolerances';
 import type { DisplayRing } from '../../core/ring/displayRing';
 import {
   buildPieceParams,
@@ -84,7 +85,7 @@ function copyVisibleIn(
   viewL: number,
   viewR: number,
 ): boolean {
-  return maxX + hi > viewL - 1e-9 && minX + lo < viewR + 1e-9;
+  return maxX + hi > viewL - EPS_FP && minX + lo < viewR + EPS_FP;
 }
 
 /**

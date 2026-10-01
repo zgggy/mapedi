@@ -71,7 +71,8 @@
 - **✓ 两修复**：
   - **路网清空先于早退**（已知问题）：generateRoads/generateRoutes 改**校验先于清空**——合成探针双分支实测 verdict=true（早退保留既有路网 / 正常重建照常清空）；
   - **撤销后父层残留**（5-b4 发现的预存缺口）：CommandService undo/redo 补 `materializeParentCells`，且物化实现由「从父现有并=**只加不减**」改为**精确派生（父≡∪子，AGENTS §3 字面语义）**——实测 7 对父子中 6 对恒等、唯一 extra 全为历史残留本身 → 改后**自愈**（extraNow=[]）+ 撤销逐位还原（unrestored=[]）、深度 0、零错。
-- **☐ 转独立小包的三项存量（本日实测，非 grep 删除级）**：① 容差集中——数值字面量 **65 处**散布（需先归类语义再建 tolerances 模块）；② 违契图层名特判 **30 处**（landsea/height/cells 硬编码，修法=LayerDef 标志位=数据模型级改动）；③ `as unknown` 收敛 **25 处/11 文件**。
+- **✓ 三小包①容差集中（2026-10-01 第三十轮）**：`core/tolerances.ts` 单源——KEY_QUANT(1e-3 键量化)/WRAP_EPS/PROJ_WRAP_EPS（**分歧可见化**：1e-3 vs 1e-2 待拍板）/GEOM_EPS(1e-12 判等·近零)/EPS_FP(1e-9)/SCALE_FLOOR/MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN；**17 文件原值迁移、零数值改动**；裸字面量收敛（1e-12 全清、cam.scale 下限族全清、键量化×1000 全清）；一次性孤值（1e-8/1e-10/1e-15）与 GLSL 内字面量留原地（模块头注明）。
+- **☐ 剩余两小包**：② 违契图层名特判 **30 处**（landsea/height/cells 硬编码，修法=LayerDef 标志位=数据模型级改动）；③ `as unknown` 收敛 **25 处/11 文件**。
 - **验收达成部分**：grep 死码零残留 ✓；npm check 0 errors ✓（tsc/svelte-check 绿）。三项存量按拆包纪律各自立项。
 
 ---
@@ -126,6 +127,7 @@
 
 - **地图模式三按钮 + 投影动画**（墨卡托基准烘焙 + LUT 插值）：待用户拍板，见记忆与 HANDOFF 日志第五十九次前后讨论。
 - **图集三选一**：已被 ✗（见上）。
+- **全新父子层级系统设计（2026-10-02）**：`docs/HIERARCHY_DESIGN_2026-10-02.md` —— 层显示树/生成单元源/元素行政树三处真相收敛为**一片层森林 + 一片元素森林**（`parentLayerId` 单源、units=子层、桥不变量 I-bridge），并含焦点整段叠放修复、读时有效显隐、删除策略表、元素 UI 重设计（承接 2026-10-01「子元素先删之后重设计」原话）。**待拍板 D1–D8（D1 单源统一 = 地基）**；拍板后按 包1 层级内核 → 包2 显示 → 包3 生成 → 包4 元素 UI 实施。**吸收 GEN_UNIFIED_DESIGN §6 引擎包**（指针方向反转：genParent 改为从 parentLayerId 派生）。
 
 ## 六、UI 重构（设计定稿待实施）
 

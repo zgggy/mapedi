@@ -1,3 +1,4 @@
+import { SCALE_FLOOR } from '../core/tolerances';
 import type { World } from '../core/types';
 import type { StyleSet } from '../core/styles';
 import type { Camera } from './map2d';
@@ -209,7 +210,7 @@ export const frameLayer: RenderLayer = {
     const fr = getFrameRect(env);
     const fw = fr.maxX - fr.minX;
     const fh = fr.maxY - fr.minY;
-    const margin = Math.hypot(w, h) / Math.max(cam.scale, 1e-6) + 4;
+    const margin = Math.hypot(w, h) / Math.max(cam.scale, SCALE_FLOOR) + 4;
 
     // 与 Viewport.render 相同的基矩阵，避免残余 transform
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -707,7 +708,7 @@ export const decorationsLayer: RenderLayer = {
       sMin = Math.min(sMin, o);
       sMax = Math.max(sMax, o);
     }
-    const padV = 4 / Math.max(cam.scale, 1e-6);
+    const padV = 4 / Math.max(cam.scale, SCALE_FLOOR);
     const vL = cam.x - sMax - w / 2 / cam.scale - padV;
     const vR = cam.x - sMin + w / 2 / cam.scale + padV;
     const vT = cam.y + h / 2 / cam.scale + padV;
