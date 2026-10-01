@@ -228,12 +228,20 @@
     planetRoot.rotation.z = -tilt;
 
     if (showAxis) {
+      // 轴与赤道**同一变换**（2026-10-01 用户指正：轴 ⟂ 赤道——原轴线漏了倾斜，
+      // 世界竖直的轴与倾斜 23.4° 的赤道线不垂直）。旋转后轴向 = 赤道面法向。
       const geo = new THREE.BufferGeometry();
       geo.setAttribute(
         'position',
         new THREE.Float32BufferAttribute([0, -1.35, 0, 0, 1.35, 0], 3),
       );
-      overlay.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: '#e8ecf1' })));
+      const axisLine = new THREE.Line(
+        geo,
+        new THREE.LineBasicMaterial({ color: '#e8ecf1' }),
+      );
+      axisLine.rotation.z = -tilt;
+      overlay.add(axisLine);
+      // 赤道线
       const pts: number[] = [];
       for (let i = 0; i <= 72; i++) {
         const a = (i / 72) * Math.PI * 2;
@@ -247,6 +255,21 @@
       );
       eqLine.rotation.z = -tilt;
       overlay.add(eqLine);
+      // 下弦弧：世界系（不倾斜）XZ 平面、半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、
+      // 同款青色细线；只画朝向相机的前半（默认机位略俯视 → 呈星球下方对称半圆 = "下弦"）。
+      // 挂 overlay（非 meshHolder）→ 不随地球自转；相机环绕（鼠标拖动）时随视角转动。
+      const arc: number[] = [];
+      for (let i = 0; i <= 72; i++) {
+        const a = (i / 72) * Math.PI; // z = sin(a) ≥ 0：前半
+        arc.push(Math.cos(a) * 1.3, 0, Math.sin(a) * 1.3);
+      }
+      const ag = new THREE.BufferGeometry();
+      ag.setAttribute('position', new THREE.Float32BufferAttribute(arc, 3));
+      const arcLine = new THREE.Line(
+        ag,
+        new THREE.LineBasicMaterial({ color: '#7ec8e3', transparent: true, opacity: 0.65 }),
+      );
+      overlay.add(arcLine);
     }
 
     if (showEcliptic) {
