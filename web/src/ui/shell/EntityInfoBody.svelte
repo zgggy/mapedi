@@ -1,76 +1,45 @@
 <script lang="ts">
   /**
-   * 信息面板内容体（图层信息 / 元素信息共用）：名称 / 颜色 / 描述 / 外交 / 相邻 / 保存。
-   * 基本色与主元素一致；子元素不可改基本色。专属色 = 边框内阴影。
+   * 信息面板内容体（图层/元素共用，2026-10-01 用户定稿）：
+   * **统一、紧凑**——只保留通用项（名称/颜色/描述/相邻/保存 + 调用方 extra 行）。
+   * 外交（附庸/敌对/同盟）与专属色已删（画蛇添足，元素只做统一的东西）；
+   * 不放解释性文字；无内嵌框（容器由 ExpandPanel 统一）。
    */
   let {
     name = '',
     basicColor = '',
-    exclusiveColor = '',
     basicEditable = true,
     cellCount = 0,
     description = '',
     neighbors = [] as { id: string; name: string; color: string }[],
     extra = [] as { label: string; value: string }[],
-    readonlyCount = true,
-    showDiplomacy = false,
-    suzerainId = null as string | null,
-    peers = [] as { id: string; name: string; color: string }[],
-    enemyIds = [] as string[],
-    allyIds = [] as string[],
     onSave,
-    onSetSuzerain,
-    onToggleEnemy,
-    onToggleAlly,
   }: {
     name?: string;
     basicColor?: string;
-    exclusiveColor?: string;
     basicEditable?: boolean;
     cellCount?: number;
     description?: string;
     neighbors?: { id: string; name: string; color: string }[];
     extra?: { label: string; value: string }[];
-    readonlyCount?: boolean;
-    showDiplomacy?: boolean;
-    suzerainId?: string | null;
-    peers?: { id: string; name: string; color: string }[];
-    enemyIds?: string[];
-    allyIds?: string[];
-    onSave?: (patch: {
-      name?: string;
-      color?: string;
-      exclusiveColor?: string;
-      description?: string;
-    }) => void;
-    onSetSuzerain?: (id: string | null) => void;
-    onToggleEnemy?: (id: string) => void;
-    onToggleAlly?: (id: string) => void;
+    onSave?: (patch: { name?: string; color?: string; description?: string }) => void;
   } = $props();
 
   let editName = $state('');
   let editBasic = $state('');
-  let editExcl = $state('');
   let editDesc = $state('');
-  let editSuz = $state('');
   let editKey = $state('');
 
   // 目标切换（选中另一个元素/图层）时重置编辑副本
   $effect(() => {
-    const key = `${name}|${basicColor}|${exclusiveColor}|${suzerainId ?? ''}`;
+    const key = `${name}|${basicColor}|${description}`;
     if (key !== editKey) {
       editKey = key;
       editName = name;
       editBasic = basicColor;
-      editExcl = exclusiveColor;
       editDesc = description;
-      editSuz = suzerainId ?? '';
     }
   });
-
-  function peerById(id: string) {
-    return peers.find((p) => p.id === id);
-  }
 </script>
 
 <div class="body">
@@ -79,124 +48,46 @@
     <input value={editName} oninput={(e) => (editName = e.currentTarget.value)} />
   </label>
 
-  <div class="field-row">
-    <label class="field">
-      <span>基本颜色</span>
-      <input
-        type="color"
-        value={editBasic || '#888888'}
-        disabled={!basicEditable}
-        title={basicEditable ? '与主元素一致' : '子元素不可单独修改基本色'}
-        oninput={(e) => (editBasic = e.currentTarget.value)}
-      />
-    </label>
-    <label class="field">
-      <span>专属颜色</span>
-      <input
-        type="color"
-        value={editExcl || '#000000'}
-        oninput={(e) => (editExcl = e.currentTarget.value)}
-      />
-    </label>
-  </div>
-  <p class="hint">专属色用于边框内阴影，仅作用于本元素。</p>
-  {#if !basicEditable}
-    <p class="hint">基本色跟随主元素，请在主元素上修改。</p>
-  {/if}
-
   <label class="field">
-    <span>占据地块</span>
-    <input type="number" value={cellCount} readonly={readonlyCount} />
+    <span>颜色</span>
+    <input
+      type="color"
+      value={editBasic || '#888888'}
+      disabled={!basicEditable}
+      oninput={(e) => (editBasic = e.currentTarget.value)}
+    />
   </label>
+
+  <div class="ex-row"><span class="lb">地块</span><span>{cellCount}</span></div>
 
   <label class="field">
     <span>描述</span>
-    <textarea rows="3" value={editDesc} oninput={(e) => (editDesc = e.currentTarget.value)}></textarea>
+    <textarea rows="2" value={editDesc} oninput={(e) => (editDesc = e.currentTarget.value)}></textarea>
   </label>
 
-  {#if showDiplomacy && peers.length}
-    <div class="diplo">
-      <label class="field">
-        <span>宗主国（附庸于）</span>
-        <select
-          value={editSuz}
-          onchange={(e) => {
-            const v = e.currentTarget.value || null;
-            editSuz = v ?? '';
-            onSetSuzerain?.(v);
-          }}
-        >
-          <option value="">— 独立 —</option>
-          {#each peers as p (p.id)}
-            <option value={p.id}>{p.name}</option>
-          {/each}
-        </select>
-      </label>
-      <div class="field">
-        <span>同层外交</span>
-        <ul class="diplo-list">
-          {#each peers as p (p.id)}
-            <li>
-              <span class="dot" style="background:{p.color}"></span>
-              <span class="pn">{p.name}</span>
-              <button
-                type="button"
-                class="chip"
-                class:on={enemyIds.includes(p.id)}
-                title="敌对"
-                onclick={() => onToggleEnemy?.(p.id)}
-              >敌对</button>
-              <button
-                type="button"
-                class="chip"
-                class:on={allyIds.includes(p.id)}
-                title="同盟"
-                onclick={() => onToggleAlly?.(p.id)}
-              >同盟</button>
-            </li>
-          {/each}
-        </ul>
-        {#if suzerainId && peerById(suzerainId)}
-          <p class="hint">当前附庸于「{peerById(suzerainId)?.name}」</p>
-        {/if}
-      </div>
-    </div>
-  {/if}
-
   {#if extra.length}
-    <div class="extra">
-      {#each extra as row (row.label)}
-        <div class="ex-row"><span class="lb">{row.label}</span><span>{row.value}</span></div>
-      {/each}
-    </div>
+    {#each extra as row (row.label)}
+      <div class="ex-row"><span class="lb">{row.label}</span><span>{row.value}</span></div>
+    {/each}
   {/if}
 
   {#if neighbors.length}
-    <div class="field">
-      <span>相邻元素</span>
-      <ul class="nbr">
+    <div class="ex-row nbr-row">
+      <span class="lb">相邻</span>
+      <span class="nbr">
         {#each neighbors as n (n.id)}
-          <li>
-            <span class="dot" style="background:{n.color}"></span>
-            <span>{n.name}</span>
-          </li>
+          <span class="nb"><span class="dot" style="background:{n.color}"></span>{n.name}</span>
         {/each}
-      </ul>
+      </span>
     </div>
   {:else}
-    <div class="field"><span>相邻元素</span><div class="hint">无</div></div>
+    <div class="ex-row"><span class="lb">相邻</span><span>—</span></div>
   {/if}
 
   <button
     type="button"
     class="primary"
-    onclick={() =>
-      onSave?.({
-        name: editName,
-        color: basicEditable ? editBasic : undefined,
-        exclusiveColor: editExcl,
-        description: editDesc,
-      })}
+    onclick={() => onSave?.({ name: editName, color: basicEditable ? editBasic : undefined, description: editDesc })}
   >
     保存
   </button>
@@ -204,14 +95,13 @@
 
 <style>
   .body {
-    padding: 10px 12px 12px;
     font-size: 12px;
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-bottom: 8px;
+    gap: 3px;
+    margin-bottom: 5px;
     color: var(--text-dim);
     font-size: 11px;
   }
@@ -222,102 +112,45 @@
   .field input:disabled {
     opacity: 0.45;
   }
-  .field-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  .hint {
-    margin: 0 0 8px;
-    font-size: 10px;
-    color: var(--text-dim);
-  }
-  .extra {
-    margin-bottom: 8px;
-  }
   .ex-row {
     display: flex;
     gap: 8px;
     font-size: 11px;
-    margin-bottom: 2px;
+    margin-bottom: 3px;
+    line-height: 1.5;
   }
   .ex-row .lb {
     color: var(--text-dim);
-    min-width: 4em;
+    min-width: 3em;
+    flex: 0 0 auto;
   }
-  .nbr {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 120px;
-    overflow: auto;
-  }
-  .nbr li {
+  .nbr-row .nbr {
     display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    min-width: 0;
+  }
+  .nb {
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    min-height: 22px;
+    gap: 4px;
   }
   .dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
+    flex: 0 0 auto;
   }
   .primary {
     width: 100%;
-    margin-top: 4px;
+    margin-top: 3px;
     background: rgba(196, 123, 58, 0.4);
     border: 1px solid var(--panel-border);
     border-radius: 7px;
     color: inherit;
-    padding: 6px;
+    padding: 4px;
     cursor: pointer;
     font: inherit;
-  }
-  .diplo {
-    margin-bottom: 8px;
-    padding-top: 4px;
-    border-top: 1px solid var(--panel-border);
-  }
-  .diplo select {
-    color: var(--text);
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    padding: 4px 6px;
-  }
-  .diplo-list {
-    list-style: none;
-    margin: 4px 0 0;
-    padding: 0;
-    max-height: 140px;
-    overflow: auto;
-  }
-  .diplo-list li {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 26px;
-  }
-  .diplo-list .pn {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .chip {
-    border: 1px solid var(--panel-border);
-    background: transparent;
-    color: var(--text-dim);
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-size: 10px;
-    cursor: pointer;
-  }
-  .chip.on {
-    color: var(--text);
-    border-color: rgba(240, 195, 106, 0.7);
-    background: rgba(240, 195, 106, 0.15);
+    font-size: 11px;
   }
 </style>

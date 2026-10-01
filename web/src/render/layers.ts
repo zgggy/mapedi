@@ -371,8 +371,6 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
     if (needBound && !sel) seenBound.add(dp.key);
 
     const region = regionById.get(rid);
-    const excl =
-      region?.exclusiveColor || defaultExclusiveColor(region?.color ?? '#888888');
     const strokeCol = region ? darkenHex(region.color, 0.7) : elColor;
     // 选中：边界必须可见（颜色覆盖为专属色，宽度给已配置宽），与「选中元素最顶」配套
     const strokeW = (sel || elOn) ? (bw * (sel ? 1.6 : 1)) / cam.scale : 0;

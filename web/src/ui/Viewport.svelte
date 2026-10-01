@@ -30,6 +30,7 @@
     screenToContentLonLat,
     unwrapXAgainst,
     contentOffsetAt,
+    worldCopyKs,
     worldToScreenX,
     worldToScreenY,
   } from '../render/space';
@@ -188,7 +189,33 @@
     if (!n) return;
     x /= n;
     y /= n;
-    const drawDx = contentOffsetAt(projection, y, contentOffsetX);
+    // 对准**当前可见的那份副本**（2026-10-01 用户反馈）：右键平移整圈后可见副本是 k≠0
+    // 那份，若仍按 k=0 算会把相机解算到"原件位置"的空地。取渲染同口径的可见 k 集
+    // （worldCopyKs：非回绕投影恒 [0]），在其中选离相机最近的一份。
+    let drawDx = contentOffsetAt(projection, y, contentOffsetX);
+    {
+      const ks = worldCopyKs(contentOffsetX, cam, wpx, projection);
+      if (ks.length > 1 || (ks[0] ?? 0) !== 0) {
+        // 元素级绘制会再展开 k±1（layers.elementCopies）：候选同口径扩一圈再取最近
+        const cand = new Set<number>();
+        for (const k of ks) {
+          cand.add(k - 1);
+          cand.add(k);
+          cand.add(k + 1);
+        }
+        let best = drawDx;
+        let bestD = Infinity;
+        for (const k of cand) {
+          const d = contentOffsetAt(projection, y, contentOffsetX + k * Math.PI * 2);
+          const dist = Math.abs(x + d - cam.x);
+          if (dist < bestD) {
+            bestD = dist;
+            best = d;
+          }
+        }
+        drawDx = best;
+      }
+    }
     const sx = worldToScreenX(x, cam, wpx, drawDx);
     const sy = worldToScreenY(y, cam, hpx);
     // 可见区 = 减去左轨（railW）与底部状态栏

@@ -15,14 +15,12 @@ import {
   DeleteRegionCommand,
   HeightStrokeCommand,
   MultiRegionCommand,
-  type EditCommand,
   RegionFieldsCommand,
   LayersVisibilityCommand,
   LayerStyleCommand,
   AddLayerCommand,
   RegionsOrderCommand,
   LayersOrderCommand,
-  CompositeCommand,
   LayerFieldsCommand,
   SetCenterCommand,
   history,
@@ -329,6 +327,7 @@ export class EditorStore {
     invalidateBorderCache();
     bumpAllRev();
     this.world = this.world ? { ...this.world } : this.world;
+    this.scheduleAutosave();
     this.notify();
   }
 
@@ -363,6 +362,7 @@ export class EditorStore {
     bumpRegionsRev();
     materializeParentCells(this.world!);
     this.world = this.world ? { ...this.world } : this.world;
+    this.scheduleAutosave();
     this.notify();
   }
 
@@ -379,6 +379,7 @@ export class EditorStore {
     bumpRegionsRev();
     materializeParentCells(this.world!);
     this.world = this.world ? { ...this.world } : this.world;
+    this.scheduleAutosave();
     this.notify();
   }
 
@@ -402,6 +403,7 @@ export class EditorStore {
     bumpRegionsRev();
     this.heightGeomDirty = true;
     this.world = this.world ? { ...this.world } : this.world;
+    this.scheduleAutosave();
     this.notify();
   }
 
@@ -418,7 +420,7 @@ export class EditorStore {
     // 【绘制模型】区间归属只在松手时一次重算；Δ 交给渲染侧打件环补丁
     if (samples && samples.length) {
       const deltas = updateHeightIntervalElements(this.world, samples);
-      if (deltas.length) this.pendingHeightDeltas.push(...deltas);
+      for (const d of deltas) this.queueHeightDelta(d);
     } else {
       rebuildHeightIntervalElements(this.world);
     }
@@ -454,7 +456,7 @@ export class EditorStore {
         for (const id of now) added.push(id);
       }
       if (added.length || removed.length) {
-        this.pendingPiecePatches.push({ setKey: `piece:landsea:${r.id}:0`, added, removed });
+        this.queuePiecePatch(`piece:landsea:${r.id}:0`, added, removed);
       }
     }
     this.heightGeomDirty = false;
@@ -481,6 +483,36 @@ export class EditorStore {
     return out;
   }
 
+  /** 同键 Δ 合成入列：球面视图不消费队列时「键数=上界」，杜绝无限增长（2026-10-01 已知问题） */
+  private queuePiecePatch(setKey: string, added: number[], removed: number[]): void {
+    const same = this.pendingPiecePatches.find((p) => p.setKey === setKey);
+    if (!same) {
+      this.pendingPiecePatches.push({ setKey, added: [...added], removed: [...removed] });
+      return;
+    }
+    const add = new Set(same.added);
+    const rem = new Set(same.removed);
+    for (const c of added) { rem.delete(c); add.add(c); }
+    for (const c of removed) { add.delete(c); rem.add(c); }
+    same.added = [...add];
+    same.removed = [...rem];
+  }
+
+  /** 高度区间 Δ 同键（layerId+regionId）合成入列 */
+  private queueHeightDelta(d: import('../core/layer/heightElements').HeightIntervalDelta): void {
+    const same = this.pendingHeightDeltas.find((x) => x.layerId === d.layerId && x.regionId === d.regionId);
+    if (!same) {
+      this.pendingHeightDeltas.push({ layerId: d.layerId, regionId: d.regionId, added: [...d.added], removed: [...d.removed] });
+      return;
+    }
+    const add = new Set(same.added);
+    const rem = new Set(same.removed);
+    for (const c of d.added) { rem.delete(c); add.add(c); }
+    for (const c of d.removed) { add.delete(c); rem.add(c); }
+    same.added = [...add];
+    same.removed = [...rem];
+  }
+
   consumePiecePatches(): { setKey: string; added: number[]; removed: number[] }[] | null {
     if (!this.pendingPiecePatches.length) return null;
     const out = this.pendingPiecePatches;
@@ -491,6 +523,8 @@ export class EditorStore {
   private touchPaint() {
     invalidateRegionIndex();
     this.paintFrame++;
+    // 笔画中每帧防抖排队自动保存（scheduleAutosave 自带 2s debounce）
+    this.scheduleAutosave();
     if (this.paintFrame % 3 === 0) {
       this.world = this.world ? { ...this.world } : this.world;
       this.notify();
@@ -788,37 +822,23 @@ export class EditorStore {
   }
 
   /**
-   * 视觉列表（组织模式用，与 UI 渲染同序）：数组**反序**（顶=数组末=叠放高），
-   * 根在前、子递归（子也取视觉序）——与 WorkspaceDrawer/LayersPanel 的 reverse 树一致。
+   * 图层显示列表（组织模式用，**与 LayersPanel 渲染同序**）：根在前、子递归，
+   * 兄弟取 layers 数组出现序 = 面板自上而下。
+   * 第十一轮修正（2026-09-30）：旧 visualItems 对图层也 reverse（顶=数组末），
+   * 与图层面板（顶=数组首）相反 → 「视觉上一个」取成了下一行，缩进/提升锚点错位、顺序乱。
+   * 图层显示 = 数组前序 DFS（父必在子前、同级保持数组序）——这是本方法与
+   * indent/unindent「只改 parent、不动数组序」推理的不变量。
    */
-  private visualItems(
-    kind: 'layer' | 'region',
-    scope?: string,
-  ): { id: string; parentId: string | undefined }[] {
+  private layerDisplayList(): { id: string; parentId: string | undefined }[] {
     const w = this.world;
     if (!w) return [];
-    const items =
-      kind === 'layer'
-        ? w.layers.map((l) => ({
-            id: l.id,
-            parentId:
-              l.parentLayerId && w.layers.some((x) => x.id === l.parentLayerId)
-                ? l.parentLayerId
-                : undefined,
-          }))
-        : w.regions
-            .filter((r) => r.layerId === scope)
-            .map((r) => ({
-              id: r.id,
-              parentId:
-                r.parentId && w.regions.some((x) => x.id === r.parentId && x.layerId === scope)
-                  ? r.parentId
-                  : undefined,
-            }));
-    const rev = [...items].reverse();
+    const layers = w.layers;
+    const validParent = (p: string | undefined) =>
+      p && layers.some((x) => x.id === p) ? p : undefined;
+    const items = layers.map((l) => ({ id: l.id, parentId: validParent(l.parentLayerId) }));
     const out: { id: string; parentId: string | undefined }[] = [];
     const walk = (pid: string | undefined) => {
-      for (const k of rev) {
+      for (const k of items) {
         if (k.parentId !== pid) continue;
         out.push(k);
         walk(k.id);
@@ -828,146 +848,81 @@ export class EditorStore {
     return out;
   }
 
-  /** 世界数组把 self 移到 afterId 之后（组织模式的序调整） */
-  private relocateAfter(kind: 'layer' | 'region', selfId: string, afterId: string): void {
-    const w = this.world;
-    if (!w) return;
-    const arr = kind === 'layer' ? (w.layers as { id: string }[]) : (w.regions as { id: string }[]);
-    const from = arr.findIndex((x) => x.id === selfId);
-    if (from < 0) return;
-    const [item] = arr.splice(from, 1);
-    const to = arr.findIndex((x) => x.id === afterId);
-    arr.splice(to < 0 ? arr.length : to + 1, 0, item);
-  }
-
   /**
-   * 缩进（组织模式）：挂到**视觉上一个元素**的链尾——上一个已有子元素则
-   * 「做它的子元素的子元素，如果还有依次往下」= 沿视觉第一个子下钻到链尾（防环）。
-   * 图层（parentLayerId）/元素（Region.parentId）通用；字段 + 数组序一条组合命令。
+   * 缩进（组织模式 · 图层，2026-10-01 语义 v2 用户定稿）：
+   * 目标 = **面板中的视觉上一行**——它要么就是上一个同级（对方无子 → 成为其子），
+   * 要么就是上一个同级子树的链尾（对方有子 → 沿子下钻直到"没有子元素的父元素"，
+   * 视觉上一行按构造必为叶子父）。
+   * 「只触发一次关系计算」：一次 layerDisplayList + 一次 parentLayerId 写 +
+   * 单条 LayerFieldsCommand；**数组序不动**（前序不变量保证位置零漂移、叠放零影响）。
+   * 元素树的缩进已随按钮退役，本方法只服务图层。
    */
   indentItem(id: string): void {
     const w = this.world;
     if (!w) return;
-    const isLayer = w.layers.some((l) => l.id === id);
-    const kind: 'layer' | 'region' = isLayer ? 'layer' : 'region';
-    const reg = isLayer ? null : w.regions.find((r) => r.id === id);
-    const scope = reg?.layerId;
-    const vis = this.visualItems(kind, scope);
-    const idx = vis.findIndex((x) => x.id === id);
-    if (idx <= 0) {
-      this.status = '已是第一个元素，无处缩进';
+    if (!w.layers.some((l) => l.id === id)) {
+      this.status = '缩进只适用于图层';
       return;
     }
-    const prev = vis[idx - 1];
-    // 链尾下钻：视觉第一个子，直到无子（防环：不许回到自己）
-    let tail = prev;
-    for (let guard = 0; guard < 10000; guard++) {
-      const kid = vis.find((x) => x.parentId === tail.id && x.id !== id);
-      if (!kid) break;
-      tail = kid;
+    const vis = this.layerDisplayList();
+    const idx = vis.findIndex((x) => x.id === id);
+    if (idx <= 0) {
+      this.status = '已是第一个图层，无处缩进';
+      return;
     }
-    if (tail.id === id) return;
-    const layersB = w.layers.map((l) => l.id);
-    const regionsB = w.regions.map((r) => r.id);
-    const children: EditCommand[] = [];
-    if (kind === 'layer') {
-      const l = w.layers.find((x) => x.id === id)!;
-      const beforeParent = l.parentLayerId;
-      l.parentLayerId = tail.id;
-      children.push(
-        new LayerFieldsCommand(
-          [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: tail.id } }],
-          '缩进',
-        ),
-      );
-      this.relocateAfter('layer', id, tail.id);
-      const layersA = w.layers.map((x) => x.id);
-      children.push(new LayersOrderCommand(layersB, layersA, '缩进'));
-      this.touchWorld();
-    } else if (reg) {
-      const beforeParent = reg.parentId;
-      reg.parentId = tail.id;
-      children.push(
-        new RegionFieldsCommand(
-          [{ id, before: { parentId: beforeParent }, after: { parentId: tail.id } }],
-          '缩进',
-        ),
-      );
-      this.relocateAfter('region', id, tail.id);
-      const regionsA = w.regions.map((x) => x.id);
-      children.push(new RegionsOrderCommand(regionsB, regionsA, '缩进'));
-      this.touchRegions();
-    } else return;
-    history.run(w, new CompositeCommand(children, '缩进'), { alreadyApplied: true });
+    const above = vis[idx - 1];
+    const l = w.layers.find((x) => x.id === id)!;
+    const beforeParent = l.parentLayerId;
+    if ((beforeParent ?? undefined) === above.id) {
+      this.status = '已在上一个图层之下';
+      return;
+    }
+    l.parentLayerId = above.id;
+    history.run(
+      w,
+      new LayerFieldsCommand(
+        [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: above.id } }],
+        '缩进',
+      ),
+      { alreadyApplied: true },
+    );
+    this.touchWorld();
     this.status = '已缩进（Ctrl+Z 可撤销）';
   }
 
   /**
-   * 提升（缩进反向）：成为视觉上一个元素的同级并处其后；**上一个还有父元素则再次提升，
-   * 直到上一个没有父元素**（上溯到最老祖先 anchor → 自己升为根、数组排 anchor 之后）。
-   * 按用户字面解析（中间链式 / 根级多元素）——见设计稿标注，待复核。
+   * 提升（缩进反向 · 图层，2026-10-01 语义 v2 用户定稿）：**一次点击直接到顶层**
+   * ——「提升之后若同时还有父元素和同级元素，需要再次提升」= 逐级上溯但结果一次算出：
+   * parentLayerId 直接置空（顶层），不做循环逐跳。
+   * 原理同缩进：layers 数组保持前序不动，改 parent 后本图层随数组锚点自然排在
+   * 原祖先子树之后的顶层位置——叠放序零影响；单条命令一次撤销。
    */
   unindentItem(id: string): void {
     const w = this.world;
     if (!w) return;
-    const isLayer = w.layers.some((l) => l.id === id);
-    const kind: 'layer' | 'region' = isLayer ? 'layer' : 'region';
-    const reg = isLayer ? null : w.regions.find((r) => r.id === id);
-    const scope = reg?.layerId;
-    const vis = this.visualItems(kind, scope);
-    const idx = vis.findIndex((x) => x.id === id);
-    if (idx <= 0) {
-      this.status = '已是第一个元素';
+    const l = w.layers.find((x) => x.id === id);
+    if (!l) {
+      this.status = '提升只适用于图层';
       return;
     }
-    const self = vis[idx];
-    if (!self.parentId) {
-      this.status = '已是顶层元素，无处提升';
+    const hasParent =
+      !!l.parentLayerId && w.layers.some((x) => x.id === l.parentLayerId);
+    if (!hasParent) {
+      this.status = '已是顶层图层，无处提升';
       return;
     }
-    let prev = vis[idx - 1];
-    const parentOf = (pid: string | undefined) => (pid ? vis.find((x) => x.id === pid) : undefined);
-    let guard = 0;
-    while (prev.parentId && guard++ < 10000) {
-      const p = parentOf(prev.parentId);
-      if (!p) break;
-      prev = p;
-    }
-    const anchor = prev; // prev 的最老祖先（无父）——与之同级=根级；排其后
-    if (anchor.id === id) return;
-    const layersB = w.layers.map((l) => l.id);
-    const regionsB = w.regions.map((r) => r.id);
-    const children: EditCommand[] = [];
-    if (kind === 'layer') {
-      const l = w.layers.find((x) => x.id === id)!;
-      const beforeParent = l.parentLayerId;
-      l.parentLayerId = anchor.parentId;
-      children.push(
-        new LayerFieldsCommand(
-          [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: l.parentLayerId } }],
-          '提升',
-        ),
-      );
-      this.relocateAfter('layer', id, anchor.id);
-      const layersA = w.layers.map((x) => x.id);
-      children.push(new LayersOrderCommand(layersB, layersA, '提升'));
-      this.touchWorld();
-    } else if (reg) {
-      const beforeParent = reg.parentId;
-      reg.parentId = anchor.parentId;
-      children.push(
-        new RegionFieldsCommand(
-          [{ id, before: { parentId: beforeParent }, after: { parentId: reg.parentId } }],
-          '提升',
-        ),
-      );
-      this.relocateAfter('region', id, anchor.id);
-      const regionsA = w.regions.map((x) => x.id);
-      children.push(new RegionsOrderCommand(regionsB, regionsA, '提升'));
-      this.touchRegions();
-    } else return;
-    history.run(w, new CompositeCommand(children, '提升'), { alreadyApplied: true });
-    this.status = '已提升（Ctrl+Z 可撤销）';
+    const beforeParent = l.parentLayerId;
+    l.parentLayerId = undefined;
+    history.run(
+      w,
+      new LayerFieldsCommand(
+        [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: undefined } }],
+        '提升',
+      ),
+      { alreadyApplied: true },
+    );
+    this.touchWorld();
+    this.status = '已提升至顶层（Ctrl+Z 可撤销）';
   }
 
   /**
@@ -1253,6 +1208,9 @@ export class EditorStore {
           layer.visible = false;
           // 父链可能被点亮，保持原状即可（不回滚父，避免误关）——**净变化入栈**（否则撤销缺账）
           commitVis();
+          // 父链 visible 已被写 true：必须失效显示缓存/换 world 身份，否则
+          // 「眼睛=显示中但地图没画」（2026-10-01 用户反馈的断点）
+          this.touchLayerView();
           this.status = '最多同时显示 3 个图层树（父+子占 1 席）';
           this.notify();
           return;
@@ -1327,6 +1285,7 @@ export class EditorStore {
   private touchLayerView() {
     bumpRegionsRev();
     this.world = this.world ? { ...this.world } : this.world;
+    this.scheduleAutosave();
     this.notify();
   }
 
@@ -1547,7 +1506,7 @@ export class EditorStore {
       addMode: true,
     };
     const iv = intervalById(this.heightIntervalId);
-    this.status = `高度绘制 · ${iv?.name ?? ''} ${this.heightPaintValue ?? iv?.min ?? 0}：左键刷值 · 右键擦除 · Esc 退出`;
+    this.status = `高度绘制 · ${iv?.name ?? ''} ${this.heightPaintValue ?? iv?.min ?? 0}：左键刷值 · Shift+左键擦除 · Esc 退出`;
   }
 
   setHeightInterval(intervalId: string) {
@@ -1596,7 +1555,8 @@ export class EditorStore {
       const resolved = resolveDrawTarget(this.world, this.draw);
     if (!resolved) return null;
     if (resolved === 'height') {
-      return this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 ? 'right' : 'left');
+      // 擦除 = 右键或 Shift+左键（A′契约画布右键=纯位移，Shift 是可达的擦除手势）
+      return this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 || shift ? 'right' : 'left');
     }
     const pointer = button === 2 || shift ? 'right' : 'left';
     const hits = cellsInBrush(this.world, lon, lat, this.draw.radiusDeg);
@@ -1648,7 +1608,7 @@ export class EditorStore {
         this.heightTouched!.add(id);
       }
     }
-    // 【v2 语义】笔刷只写「选定值」（右键擦除为 0）；拖动中零重算，只回传命中供色块高亮
+    // 【v2 语义】笔刷只写「选定值」（擦除 → pointer right → 写 0）；拖动中零重算，只回传命中供色块高亮
     const paintValue = this.heightPaintValue ?? intervalById(this.heightIntervalId)?.min ?? 0;
     setHeightStroke(this.world, hits, paintValue, pointer === 'right');
     for (const id of hits) {
@@ -1705,7 +1665,10 @@ export class EditorStore {
       if (this.world) {
         for (const id of dirty) {
           const r = this.world.regions.find((x) => x.id === id);
-          if (r) this.pendingPieceInvalidations.push(`piece:${r.layerId}:${r.id}:`);
+          if (r) {
+            const key = `piece:${r.layerId}:${r.id}:`;
+            if (!this.pendingPieceInvalidations.includes(key)) this.pendingPieceInvalidations.push(key);
+          }
         }
       }
     } else {
@@ -1894,8 +1857,8 @@ export class EditorStore {
 
   /**
    * 世界改名（设计稿 D2）：只写 meta，不碰几何/归属缓存。
-   * **必须显式 scheduleAutosave**——现有保存只被 `cells.length`/`regions.length` 变化触发，
-   * 纯 meta 改动不会自动存盘（ROADMAP 已登记该缺陷）。
+   * **必须显式 scheduleAutosave**——数据类保存已集中到 touch* 家族（2026-10-01 修漏存缺陷），
+   * 纯 meta 只走 touchView，故此处仍需显式排队。
    */
   renameWorld(name: string) {
     if (!this.world) return;

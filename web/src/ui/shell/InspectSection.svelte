@@ -8,9 +8,9 @@
    */
   import type { World } from '../../core/types';
   import { LAYER_META } from '../workbench/layerMeta';
-  import { diplomacyBadge, enemiesOf, alliesOf, suzerainOf, setSuzerain, toggleEnemy, toggleAlly } from '../../core/diplomacy';
   import EntityInfoBody from './EntityInfoBody.svelte';
   import DisplayStylePanel from './DisplayStylePanel.svelte';
+  import CapsuleSlider from './CapsuleSlider.svelte';
   import { editor } from '../../app/store.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
 
@@ -25,49 +25,19 @@
     id: string | null;
   } = $props();
 
-  const region = $derived(
-    kind === 'element' && id && world ? (world.regions.find((r) => r.id === id) ?? null) : null,
-  );
-  const layer = $derived(
-    kind === 'layer' && id && world ? (world.layers.find((l) => l.id === id) ?? null) : null,
-  );
-  const styleLayerId = $derived(kind === 'element' ? (region?.layerId ?? '') : (id ?? ''));
-  const layerMeta = $derived(
-    kind === 'layer'
-      ? ((LAYER_META[id ?? ''] ?? {
-          emoji: '📄',
-          name: layer?.name ?? id ?? '',
-          kind: layer?.kind ?? '',
-          category: 'custom',
-        }) as { emoji: string; name: string; kind: string; category: string })
-      : null,
-  );
+  const catLabel = (c: string) =>
+    c === 'cell' ? '依赖地块' : c === 'free' ? '不依赖地块' : '自定义';
 
-  // —— 元素组装（原 ElementInfoPanel 逻辑搬运）——
-  const basicColor = $derived(() => {
-    if (!region || !world) return '#888888';
-    if (!region.parentId) return region.color;
-    return world.regions.find((r) => r.id === region.parentId)?.color ?? region.color;
-  });
-  const basicEditable = $derived(region ? !region.parentId : true);
-  const showDiplo = $derived(!!region && !region.parentId && region.layerId === 'country');
-  const diploPeers = $derived(
-    world && region
-      ? world.regions
-          .filter((r) => r.layerId === region.layerId && r.id !== region.id && !r.parentId)
-          .map((r) => ({ id: r.id, name: r.name, color: r.color }))
-      : [],
-  );
-
-  function neighborsOf(reg: NonNullable<typeof region>): { id: string; name: string; color: string }[] {
-    if (!world?.sharedEdges) return [];
+  /** 邻接（纯函数版：显式传 world，避免闭包同引用截断） */
+  function neighborsOfWorld(w: World | null, reg: { id: string; cells: number[] }): { id: string; name: string; color: string }[] {
+    if (!w?.sharedEdges) return [];
     const own = new Set(reg.cells);
     const ownerOfCell = new Map<number, string>();
-    for (const r of world.regions) {
+    for (const r of w.regions) {
       for (const c of r.cells) if (!ownerOfCell.has(c)) ownerOfCell.set(c, r.id);
     }
     const hit = new Set<string>();
-    for (const [key] of world.sharedEdges) {
+    for (const [key] of w.sharedEdges) {
       const [i, j] = key.split('-').map(Number);
       const aIn = own.has(i);
       const bIn = own.has(j);
@@ -75,118 +45,155 @@
       const otherId = ownerOfCell.get(aIn ? j : i);
       if (otherId && otherId !== reg.id) hit.add(otherId);
     }
-    return [...hit].slice(0, 20).map((id) => {
-      const r = world!.regions.find((x) => x.id === id)!;
-      return { id, name: r?.name ?? id, color: r?.color ?? '#666' };
+    return [...hit].slice(0, 20).map((xid) => {
+      const r = w.regions.find((x) => x.id === xid)!;
+      return { id: xid, name: r?.name ?? xid, color: r?.color ?? '#666' };
     });
+  }
+
+  /**
+   * 展示快照（2026-10-01 根因修复）：`worldRaw = $state.raw`（无深代理）→ 模板/派生对
+   * 普通对象属性（layer.visible / region.hidden / name / …）的读取**不被追踪**；中间派生
+   * 输出同引用还会把失效信号截断（world 身份换了也白换）→ 眼睛标签等「数据翻了、界面不跟」。
+   * 修法：所有展示值收敛到本快照——依赖 `rev`（每次 touch* notify 必 +1）与 `world` 身份，
+   * 输出**全新对象** → 下游模板/props 必然重算刷新。新增展示字段一律进这里，禁止在模板里
+   * 直读 world/region/layer 的可变属性。
+   */
+  const rev = $derived(editor.rev);
+  const view = $derived.by(() => {
+    void rev;
+    const r = kind === 'element' && id && world ? (world.regions.find((x) => x.id === id) ?? null) : null;
+    const l = kind === 'layer' && id && world ? (world.layers.find((x) => x.id === id) ?? null) : null;
+    const meta = kind === 'layer' ? (LAYER_META[id ?? ''] ?? null) : null;
+    const a = r?.attributes;
+    const basic = !r
+      ? '#888888'
+      : !r.parentId
+        ? r.color
+        : (world?.regions.find((x) => x.id === r.parentId)?.color ?? r.color);
+    const heightIv =
+      r && a && a.kind === 'interval'
+        ? {
+            lo: typeof a.lo === 'number' ? a.lo : 0,
+            hi: typeof a.hi === 'number' ? a.hi : 1,
+            min: typeof a.min === 'number' ? a.min : (typeof a.lo === 'number' ? a.lo : 0),
+          }
+        : null;
+    const styleId = r ? (r.layerId ?? '') : (id ?? '');
+    return {
+      regionId: r?.id ?? null,
+      layerId: l?.id ?? null,
+      hidden: r ? !!r.hidden : null,
+      layerVisible: l ? !!(l.visible ?? defaultLayerVisible(l)) : null,
+      name: r ? r.name : l ? l.name || meta?.name || id || '' : '',
+      basicColor: basic,
+      basicEditable: r ? !r.parentId : true,
+      cellCount: r
+        ? r.cells.length
+        : l && world
+          ? world.regions.filter((x) => x.layerId === id).length
+          : 0,
+      description: r ? ((a?.description as string) ?? '') : meta ? `${meta.emoji} ${meta.kind}` : '',
+      extra: r
+        ? [
+            { label: 'ID', value: r.id },
+            {
+              label: '子元素',
+              value: String(world ? world.regions.filter((x) => x.parentId === r.id).length : 0),
+            },
+          ]
+        : l
+          ? [
+              { label: '分类', value: catLabel(meta?.category ?? 'custom') },
+              { label: 'ID', value: id ?? '' },
+              {
+                label: '子层',
+                value: String(world ? world.layers.filter((x) => x.parentLayerId === id).length : 0),
+              },
+            ]
+          : [],
+      neighbors: r && world ? neighborsOfWorld(world, r) : [],
+      heightIv,
+      styleId,
+      styleName: world?.layers.find((x) => x.id === styleId)?.name ?? styleId,
+      styleCfg: styleId ? editor.layerStyleConfig(styleId) : null,
+      parentId: r?.parentId ?? null,
+    };
+  });
+
+  /** 每元素涂改值（初始 = 区间 min）；滑块联动 setHeightPaint（第十一轮） */
+  const paintValues = $state<Record<string, number>>({});
+  function onHeightSlider(rid: string, v: number) {
+    paintValues[rid] = v;
+    editor.setHeightPaint(rid, v);
   }
 
   function saveElement(patch: {
     name?: string;
     color?: string;
-    exclusiveColor?: string;
     description?: string;
   }) {
-    if (!region) return;
+    if (!view.regionId || !world) return;
+    const rid = view.regionId;
     // 1-b：经字段快照执行器入栈（改名/描述/颜色可撤销）
     editor.patchRegions('保存信息', () => {
-      if (patch.name) region.name = patch.name;
-      if (patch.color && !region.parentId) region.color = patch.color;
-      if (patch.exclusiveColor !== undefined) region.exclusiveColor = patch.exclusiveColor || undefined;
+      const reg = world.regions.find((x) => x.id === rid);
+      if (!reg) return;
+      if (patch.name) reg.name = patch.name;
+      if (patch.color && !reg.parentId) reg.color = patch.color;
       if (patch.description !== undefined)
-        region.attributes = { ...region.attributes, description: patch.description };
+        reg.attributes = { ...reg.attributes, description: patch.description };
     });
     editor.status = '已保存（Ctrl+Z 可撤销）';
-  }
-
-  function catLabel(c: string) {
-    return c === 'cell' ? '依赖地块' : c === 'free' ? '不依赖地块' : '自定义';
   }
 </script>
 
 <div class="ins">
   <!-- 显隐开关（第八轮拍板：眼睛从行按钮移入检查模式展开区；临时安置） -->
-  {#if kind === 'element' && region}
-    <button type="button" class="vis-toggle" onclick={() => editor.toggleItemHidden(region.id)}>
-      {region.hidden ? '🚫 已隐藏 · 点击显示' : '👁 显示中 · 点击隐藏'}
+  {#if kind === 'element' && view.regionId}
+    <button type="button" class="vis-toggle" onclick={() => editor.toggleItemHidden(view.regionId!)}>
+      {view.hidden ? '🚫 已隐藏 · 点击显示' : '👁 显示中 · 点击隐藏'}
     </button>
-  {:else if kind === 'layer' && layer}
-    <button type="button" class="vis-toggle" onclick={() => editor.toggleLayerVisible(layer.id)}>
-      {(layer.visible ?? defaultLayerVisible(layer))
-        ? '👁 图层显示中 · 点击隐藏'
-        : '🚫 图层已隐藏 · 点击显示'}
+  {:else if kind === 'layer' && view.layerId}
+    <button type="button" class="vis-toggle" onclick={() => editor.toggleLayerVisible(view.layerId!)}>
+      {view.layerVisible ? '👁 图层显示中 · 点击隐藏' : '🚫 图层已隐藏 · 点击显示'}
     </button>
   {/if}
-  {#if kind === 'element' && region}
+  <!-- 第十一轮：高度（区间）元素展开内容带涂改滑块（不分模式；其他元素永不含高度滑块） -->
+  {#if view.regionId && view.heightIv}
+    <div class="hsl">
+      <span class="hsl-lb">高度</span>
+      <CapsuleSlider
+        min={view.heightIv.lo}
+        max={view.heightIv.hi}
+        step={1}
+        value={paintValues[view.regionId] ?? view.heightIv.min}
+        label="{view.name} 涂改高度"
+        width={130}
+        onInput={(v) => onHeightSlider(view.regionId!, v)}
+      />
+    </div>
+  {/if}
+  {#if kind === 'element' && view.regionId}
     <EntityInfoBody
-      name={region.name}
-      basicColor={basicColor()}
-      exclusiveColor={region.exclusiveColor ?? ''}
-      basicEditable={basicEditable}
-      cellCount={region.cells.length}
-      description={(region.attributes?.description as string) ?? ''}
-      neighbors={neighborsOf(region)}
-      extra={[
-        { label: 'ID', value: region.id },
-        { label: '子元素', value: String(world ? world.regions.filter((r) => r.parentId === region.id).length : 0) },
-        ...(showDiplo
-          ? [
-              { label: '附庸', value: String(world ? world.regions.filter((r) => suzerainOf(r) === region.id).length : 0) },
-              { label: '外交', value: diplomacyBadge(world!, region) ?? '—' },
-            ]
-          : []),
-      ]}
-      showDiplomacy={showDiplo}
-      suzerainId={suzerainOf(region)}
-      peers={diploPeers}
-      enemyIds={enemiesOf(region)}
-      allyIds={alliesOf(region)}
-      onSetSuzerain={(sid) => {
-        if (!world) return;
-        // 1-b：外交 attributes 变更经字段快照入栈（可撤销）；失败时无净变化=不入栈
-        let ok = false;
-        editor.patchRegions('外交 · 附庸', () => {
-          ok = setSuzerain(world, region.id, sid);
-        });
-        editor.status = ok
-          ? sid
-            ? '已设附庸（Ctrl+Z 可撤销）'
-            : '已解除附庸（Ctrl+Z 可撤销）'
-          : '无法建立附庸（同层 / 禁止成环）';
-      }}
-      onToggleEnemy={(oid) => {
-        if (!world) return;
-        editor.patchRegions('外交 · 敌对', () => {
-          toggleEnemy(world, region.id, oid);
-        });
-        editor.status = '已更新敌对关系（Ctrl+Z 可撤销）';
-      }}
-      onToggleAlly={(oid) => {
-        if (!world) return;
-        editor.patchRegions('外交 · 同盟', () => {
-          toggleAlly(world, region.id, oid);
-        });
-        editor.status = '已更新同盟关系（Ctrl+Z 可撤销）';
-      }}
+      name={view.name}
+      basicColor={view.basicColor}
+      basicEditable={view.basicEditable}
+      cellCount={view.cellCount}
+      description={view.description}
+      neighbors={view.neighbors}
+      extra={view.extra}
       onSave={saveElement}
     />
-  {:else if kind === 'layer' && layer && layerMeta}
+  {:else if kind === 'layer' && view.layerId}
     <EntityInfoBody
-      name={layer.name || layerMeta.name}
+      name={view.name}
       basicColor="#6b7c93"
-      exclusiveColor=""
       basicEditable={false}
-      cellCount={world ? world.regions.filter((r) => r.layerId === id).length : 0}
-      description={`${layerMeta.emoji} ${layerMeta.kind}`}
+      cellCount={view.cellCount}
+      description={view.description}
       neighbors={[]}
-      extra={[
-        { label: '分类', value: catLabel(layerMeta.category) },
-        { label: 'ID', value: id ?? '' },
-        {
-          label: '子层',
-          value: String(world ? world.layers.filter((l) => l.parentLayerId === id).length : 0),
-        },
-      ]}
+      extra={view.extra}
       onSave={() => {
         editor.status = '图层信息只读（图层名由数据决定）';
         editor.notify();
@@ -196,15 +203,14 @@
     <p class="dim">{kind === 'element' ? '尚未选中元素。' : '尚未聚焦图层。'}</p>
   {/if}
 
-  {#if styleLayerId}
+  {#if view.styleId && view.styleCfg}
     <div class="sty">
-      <div class="sty-hd">显示参数</div>
       <DisplayStylePanel
         embedded
-        layerId={styleLayerId}
-        layerName={world?.layers.find((l) => l.id === styleLayerId)?.name ?? styleLayerId}
-        cfg={editor.layerStyleConfig(styleLayerId)}
-        onChange={(patch) => editor.setLayerStyle(styleLayerId, patch)}
+        layerId={view.styleId}
+        layerName={view.styleName}
+        cfg={view.styleCfg}
+        onChange={(patch) => editor.setLayerStyle(view.styleId, patch)}
       />
     </div>
   {/if}
@@ -233,15 +239,20 @@
     background: rgba(255, 255, 255, 0.1);
     color: var(--text);
   }
-  .sty {
-    border-top: 1px solid var(--panel-border);
-    margin-top: 4px;
-  }
-  .sty-hd {
-    font-size: 10px;
+  /* 高度涂改滑块行（第十一轮） */
+  .hsl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0 2px;
+    font-size: 11px;
     color: var(--text-dim);
-    letter-spacing: 0.5px;
-    padding: 6px 8px 0;
+  }
+  .hsl-lb {
+    flex: 0 0 auto;
+  }
+  .sty {
+    margin-top: 6px;
   }
   .dim {
     margin: 0;

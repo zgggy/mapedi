@@ -1,8 +1,10 @@
 <script lang="ts">
   /**
-   * 行按钮（2026-09-30 第十轮：**拖动已退役**，组织模式替代）——外壳/开合/body/限高
+   * 行按钮（2026-09-30 第十轮：**拖动已退役**，组织模式替代；第十一轮：**行内控件退役**——
+   * button 上不再有任何操作控件，滑块只在展开内容里）——外壳/开合/body/限高
    * 全部 = ExpandPanel（header 槽放原交互按钮）；本组件只管头部交互（单击/双击/右键）
    * 与头部内容；眼睛在检查模式展开区（InspectSection）。等高按头部 .txt 测量。
+   * depth > 0 = 缩进行：button 内最左侧一根短竖线（缩进的唯一视觉标识，用户定）。
    */
   import type { Snippet } from 'svelte';
   import ExpandPanel from './ExpandPanel.svelte';
@@ -12,14 +14,13 @@
     logoColor = '',
     name = '',
     desc = '',
-    badge = '',
+    depth = 0,
     selected = false,
     open = false,
     content,
     onClick,
     onDblclick,
     onMenu,
-    control,
   }: {
     /** 图层 logo（emoji） */
     logo?: string;
@@ -28,7 +29,8 @@
     name: string;
     /** 可选简介 */
     desc?: string;
-    badge?: string;
+    /** 树深度（>0 显示缩进短竖线） */
+    depth?: number;
     /** 选中：金色外框 */
     selected?: boolean;
     /** 本行展开态（选中/聚焦驱动；open 时原地长出 content） */
@@ -39,8 +41,6 @@
     onDblclick?: () => void;
     /** 右键菜单（坐标 + 目标） */
     onMenu?: (e: MouseEvent) => void;
-    /** 可选控件（高度元素 = 胶囊滑块） */
-    control?: Snippet;
   } = $props();
 </script>
 
@@ -60,6 +60,9 @@
         onMenu?.(e);
       }}
     >
+      {#if depth > 0}
+        <span class="dbar" aria-hidden="true"></span>
+      {/if}
       {#if logoColor}
         <span class="logo swatch" style="background:{logoColor}"></span>
       {:else if logo}
@@ -70,21 +73,7 @@
         {#if desc}
           <span class="desc">{desc}</span>
         {/if}
-        {#if badge}
-          <span class="badge" title={badge}>{badge}</span>
-        {/if}
       </span>
-      {#if control}
-        <span
-          class="ctl no-drag"
-          onpointerdown={(e) => e.stopPropagation()}
-          onclick={(e) => e.stopPropagation()}
-          ondblclick={(e) => e.stopPropagation()}
-          oncontextmenu={(e) => e.stopPropagation()}
-        >
-          {@render control()}
-        </span>
-      {/if}
       {#if content}
         <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
       {/if}
@@ -121,6 +110,14 @@
   }
   .ibtn:hover {
     background: rgba(255, 255, 255, 0.04);
+  }
+  /* 缩进短竖线（第十一轮：button 内最左侧；depth > 0 才有） */
+  .dbar {
+    flex: 0 0 auto;
+    width: 2px;
+    height: 12px;
+    border-radius: 1px;
+    background: rgba(240, 195, 106, 0.55);
   }
   /* 展开箭头（把手语言） */
   .caret {
@@ -168,23 +165,5 @@
     font-size: 10px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
-  }
-  .badge {
-    flex: 0 0 auto;
-    font-size: 10px;
-    padding: 1px 5px;
-    border-radius: 999px;
-    background: rgba(240, 195, 106, 0.15);
-    border: 1px solid rgba(240, 195, 106, 0.4);
-    max-width: 6em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ctl {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 6px;
   }
 </style>

@@ -31,7 +31,7 @@ export const PROJ_META: Record<
   robinson: { name: '罗宾森（两极内收）', emoji: '🧭' },
   behrmann: { name: '贝尔曼', emoji: '📐' },
   aeqd: { name: '等距方位', emoji: '🎯' },
-  gk: { name: '高斯-克吕格', emoji: '📏' },
+  gk: { name: '墨卡托·中经', emoji: '📏' }, // 原「高斯-克吕格」为克拉索夫斯基残骸（前向 2 对 1 折叠），2026-10-01 换为可逆单带实现
   globe: { name: '球面 3D', emoji: '🌐' },
 };
 
@@ -160,14 +160,14 @@ export function project(
       return { x, y };
     }
     case 'gk': {
-      // 单带：横轴墨卡托近似（中央经线 params.centralMeridian）
+      // 单带柱面（墨卡托纬 + 相对中央经线的经差）——2026-10-01 替换原「克拉索夫斯基近似」
+      // 残骸：旧式 x=artanh(cosφ·sinλ), y=atan(tanφ/cosλ) 关于 (φ,λ)↔(−φ,π−λ) 2 对 1 折叠
+      // （渲染重叠 + 逆解无解）。本实现注入、逆解闭式，且尊重 params.centralMeridian
+      // （mercator 分支不带中经线偏移，故本项保留区分价值）。
       const λ = (p.lon - params.centralMeridian) * D2R;
       const φ = p.lat * D2R;
-      const B = Math.cos(φ) * Math.sin(λ);
-      // 克拉索夫斯基近似用简单公式
-      const x = 0.5 * Math.log((1 + B) / (1 - B));
-      const y = Math.atan(Math.tan(φ) / Math.cos(λ));
-      return { x, y };
+      const sinφ = Math.max(-1 + 1e-15, Math.min(1 - 1e-15, Math.sin(φ)));
+      return { x: λ, y: 0.5 * Math.log((1 + sinφ) / (1 - sinφ)) };
     }
     case 'globe':
       // 2D 视图下 globe 退化为 equirect
@@ -226,21 +226,10 @@ export function unproject(
       return { lon: λ * R2D, lat: φ * R2D };
     }
     case 'gk': {
-      const φ = Math.atan(Math.sinh(y) * 0 + Math.tan(y) * 1); // 近似
-      // y = atan(tan(φ)/cos(λ)) — 无闭式，用迭代少量
-      let lam = 0;
-      for (let i = 0; i < 8; i++) {
-        // x = 0.5 ln((1+B)/(1-B)) => B = tanh(x)
-        const B = Math.tanh(x);
-        lam = Math.asin(Math.max(-1, Math.min(1, B / Math.max(1e-9, Math.cos(φ)))));
-        void lam;
-        break;
-      }
-      const B = Math.tanh(x);
-      const λ = Math.asin(Math.max(-1, Math.min(1, B)));
-      // y = atan(tan(φ)/cos(λ)) => tan(φ) = tan(y)*cos(λ)
-      const phi = Math.atan(Math.tan(y) * Math.cos(λ));
-      return { lon: λ * R2D + params.centralMeridian, lat: phi * R2D };
+      // 与 project 精确互逆：λ = x，φ = asin(tanh y)
+      const lon = x * R2D + params.centralMeridian;
+      const lat = Math.asin(Math.tanh(y)) * R2D;
+      return { lon, lat };
     }
     case 'globe':
       return { lon: x * R2D, lat: y * R2D };

@@ -1,12 +1,12 @@
 <script lang="ts">
   /**
-   * 图层段（左轨内的图层子面板，设计稿 §3.2）：
-   * - header 常驻：`[⊟ 收起整轨] 当前聚焦层（emoji·名·eye·元素数） [展开/收起]`
-   * - 展开：CreateRow + 单列网格 ItemButton 行（内滚由左轨段负责，§3.1 双滚动模型）
-   * 行 = 眼睛（显隐）+ 图层 logo + 名称；单击聚焦（C1：不进绘制）；双击打开显示参数。
-   * 右键菜单：显示/隐藏、上移一层、下移一层、复制一个、删除。
-   * 拖动 = 长按进度条解锁 → 整个按钮被拿起来（浮动件跟指针）→ 目标格与下方元素让一格
-   *（transform + 过渡动画）→ 松手触发重排重算。
+   * 图层段（左轨内的图层子面板，设计稿 §3.2；第十一轮结构定稿）：
+   * - ul = 创建行（新图层文本框**兼过滤器** + 🎲 + ➕，拉满与 button 同宽）
+   *   → 图层行（缩进行 button 内最左侧一根短竖线；li 左垫 = depth×14）。
+   * - 行 = 图层 logo + 名称；单击聚焦（C1：不进绘制）+ 原地展开模式区。
+   * - 组织模式行展开区 = 上移/下移/缩进/提升（缩进=成为上一个同级的子图层）。
+   * - 内滚：.grid overflow-y auto（第十一轮根治「不能滚动」）。
+   * 右键菜单：复制一个、删除。
    */
   import { tick } from 'svelte';
   import { LAYER_META } from '../workbench/layerMeta';
@@ -21,11 +21,9 @@
   let {
     world,
     focusLayer = 'cells',
-    newName = '',
     onSelect,
     onDrawLayer,
     onAddLayer,
-    onNewName,
     onRandomName,
     onMoveLayer,
     onCopyLayer,
@@ -36,7 +34,6 @@
   }: {
     world: World | null;
     focusLayer?: string;
-    newName?: string;
     /** 工作区模式（组织 = 上移/下移/缩进/提升面板，替代已退役的拖动） */
     taskMode?: 'check' | 'gen' | 'draw' | 'organize';
     /** 组织四操作（App 转发 store） */
@@ -45,9 +42,10 @@
     onSelect?: (id: string) => void;
     /** 选中（C1：单击只聚焦，不进绘制） */
     onDrawLayer?: (id: string) => void;
-    onAddLayer?: () => void;
-    onNewName?: (v: string) => void;
-    onRandomName?: () => void;
+    /** 创建（带本面板文本；store 内部清空自身 newName） */
+    onAddLayer?: (name: string) => void;
+    /** 随机名（返回生成的名字，本面板回填文本框） */
+    onRandomName?: () => string;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
     onMoveLayer?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
@@ -57,6 +55,9 @@
     /** 聚焦行下方的模式展开区（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     expandPanel?: import('svelte').Snippet;
   } = $props();
+
+  /** 本面板私有创建/搜索文本（2026-10-01 用户定：两面板各自只搜自己，互不影响） */
+  let text = $state('');
 
   type Meta = { emoji: string; name: string; kind: string; category: string; pending?: boolean };
 
@@ -105,6 +106,57 @@
     };
     walk(null, 0);
     return out;
+  });
+
+  /**
+   * 创建行文本 = 过滤器（第十一轮结构定稿：搜索并入创建行，独立搜索行退役）。
+   * 规则与元素过滤同构：本体命中保留整支；子命中保留祖先路径。
+   */
+  const shownRows = $derived.by(() => {
+    const q = text.trim().toLowerCase();
+    if (!q) return rows;
+    type Row = (typeof rows)[number];
+    const children = new Map<string | null, Row[]>();
+    for (const r of rows) {
+      let arr = children.get(r.parentId);
+      if (!arr) {
+        arr = [];
+        children.set(r.parentId, arr);
+      }
+      arr.push(r);
+    }
+    const keep = (r: Row): Row[] => {
+      if (r.meta.name.toLowerCase().includes(q)) {
+        const all: Row[] = [];
+        const add = (x: Row) => {
+          all.push(x);
+          for (const k of children.get(x.id) ?? []) add(k);
+        };
+        add(r);
+        return all;
+      }
+      const kept: Row[] = [];
+      for (const k of children.get(r.id) ?? []) kept.push(...keep(k));
+      return kept.length ? [r, ...kept] : [];
+    };
+    const out: Row[] = [];
+    for (const r of children.get(null) ?? []) out.push(...keep(r));
+    return out;
+  });
+
+  /** 组织四钮禁用判定（按过滤后的显示列表，2026-10-01 语义 v2）：
+   *  prev/next = 同 parentId 邻居（上移/下移）；
+   *  canIndent = 存在视觉上一行且当前父 ≠ 上一行（缩进目标 = 视觉上一行，无则禁用/无操作）。 */
+  const sibFlags = $derived.by(() => {
+    const m = new Map<string, { prev: boolean; next: boolean; canIndent: boolean }>();
+    shownRows.forEach((r, i) => {
+      const prev = shownRows.slice(0, i).some((x) => x.parentId === r.parentId);
+      const next = shownRows.slice(i + 1).some((x) => x.parentId === r.parentId);
+      const above = i > 0 ? shownRows[i - 1] : null;
+      const canIndent = !!above && r.parentId !== above.id;
+      m.set(r.id, { prev, next, canIndent });
+    });
+    return m;
   });
 
 
@@ -162,28 +214,37 @@
       <div class="create">
     <CreateRow
       placeholder="新图层"
-      {newName}
-      onNewName={(v) => onNewName?.(v)}
-      onRandom={() => onRandomName?.()}
-      onCreate={() => onAddLayer?.()}
+      newName={text}
+      onNewName={(v) => (text = v)}
+      onRandom={() => {
+        const n = onRandomName?.();
+        if (n) text = n;
+      }}
+      onCreate={() => {
+        onAddLayer?.(text);
+        text = '';
+      }}
     />
   </div>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <ul class="grid" role="list" bind:this={listEl} onclick={onBlankClick}>
-    {#each rows as row, i (row.id)}
+    {#each shownRows as row, i (row.id)}
       <li
         class="cell"
         class:open={focusLayer === row.id}
         data-row-id={row.id}
-        style="padding-left:0"
+        style="padding-left:{row.depth * 14}px"
       >
         <!-- 第八轮：行按钮自身 = 把手（聚焦行原地展开）；显隐眼睛在检查模式展开区 -->
         <!-- 第十轮：组织模式 = OrganizeRow（上移/下移/缩进/提升，替代拖动） -->
         {#snippet rowOrg()}
+          {@const sib = sibFlags.get(row.id) ?? { prev: false, next: false, canIndent: false }}
           <OrganizeRow
             name={row.meta.name}
-            first={rows[0]?.id === row.id}
+            first={!sib.prev}
+            last={!sib.next}
             top={!row.parentId}
+            indentable={sib.canIndent}
             onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', row.id)}
             onIndent={() => onOrganize?.('indent', row.id)}
             onUnindent={() => onOrganize?.('unindent', row.id)}
@@ -192,9 +253,14 @@
         <ItemButton
           logo={row.meta.emoji}
           name={row.meta.name}
+          depth={row.depth}
           selected={focusLayer === row.id}
           open={focusLayer === row.id}
-          content={focusLayer === row.id ? (taskMode === 'organize' ? rowOrg : expandPanel) : null}
+          content={focusLayer === row.id && taskMode !== 'draw'
+            ? taskMode === 'organize'
+              ? rowOrg
+              : expandPanel
+            : null}
           onClick={() => handleSelect(row.id)}
           onMenu={(e) => openMenu(e, row.id)}
         />
@@ -226,19 +292,25 @@
   }
   .create {
     flex: 0 0 auto;
-    padding: 4px 2px; /* 与列表同宽；第十轮：去分割线 */
+    padding: 4px 1px; /* 与列表同宽；第十一轮：左右间距再调小 */
   }
   /* 单列网格：一格 = 一个 ItemButton（与工作区列表同 padding/gap：2026-09-30 紧凑统一） */
   .grid {
     flex: 1;
     min-height: 0;
+    overflow-y: auto; /* 第十一轮根治：图层列表此前无 overflow → wheel 不滚 */
+    scrollbar-width: none;
     list-style: none;
     margin: 0;
-    padding: 2px; /* 第十轮：边距 = 原 1/3（用户定） */
+    padding: 1px; /* 第十一轮：左右间距再调小（用户定） */
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;
     align-content: start;
+  }
+  .grid::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
   .cell {
     margin: 0;

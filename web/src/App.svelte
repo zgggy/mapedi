@@ -134,7 +134,12 @@
       return;
     }
     const id = selectedRegionId!;
-    if (editor.draw.active && editor.draw.targetRegionId === id) return;
+    // 幂等护栏必须覆盖高度会话（2026-10-01 冻结 P0 根因）：startHeightDraw 存的
+    // targetRegionId = `__height__:${id}`，旧护栏只比裸 id 永不命中 → 每轮 effect 重跑都
+    // endDraw()(touchWorld 换 world 身份)→startDraw → world 变再弄脏自己 → 批处理重入
+    // 不收敛 → 全场冻结。普通元素 target=裸 id 命中即收敛（故只有高度触发）。
+    const target = editor.draw.targetRegionId;
+    if (editor.draw.active && (target === id || target === `__height__:${id}`)) return;
     if (editor.draw.active) editor.endDraw();
     const path = world!.paths?.find((p) => p.id === id);
     if (path) {
@@ -290,7 +295,8 @@
           onzoom={(z) => (zoomScale = z)}
           onwarm={(done) => (preparing = !done)}
           onpick={pickElement}
-          onpaint={(lon, lat, shift, ctrl) => editor.paint(lon, lat, shift, ctrl)}
+          onpaint={(lon, lat, shift, ctrl, alt, button) =>
+            editor.paint(lon, lat, shift, ctrl, alt, button)}
           onradius={(v) => {
             editor.draw = { ...editor.draw, radiusDeg: v };
           }}
@@ -405,7 +411,6 @@
   <LayersPanel
     {world}
     {focusLayer}
-    newName={editor.newName}
     onSelect={(id) => {
       if (!id) {
         editor.clearLayerSelection();
@@ -419,8 +424,7 @@
     }}
     onOrganize={organize}
     taskMode={shell.wsMode}
-    onAddLayer={() => editor.addLayer()}
-    onNewName={(v) => (editor.newName = v)}
+    onAddLayer={(n) => editor.addLayer(n)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
     expandPanel={layerExpand}
     onMoveLayer={(id, dir) => editor.moveItemStep(id, dir)}
@@ -453,7 +457,8 @@
     onRadius={(v) => {
       editor.draw = { ...editor.draw, radiusDeg: v };
     }}
-    onCreate={() => {
+    onCreate={(n) => {
+      editor.newName = n;
       editor.createRegion(editor.focusLayer);
     }}
     onCreateChild={(parentId) => {
@@ -467,11 +472,10 @@
         expandedIds = new Set([...expandedIds, parentId]);
       }
     }}
-    onRandomName={() => {
-      editor.newName = editor.randomName(
+    onRandomName={() =>
+      (editor.newName = editor.randomName(
         editor.focusLayer === 'province' ? 'province' : 'country',
-      );
-    }}
+      ))}
     onNewName={(n) => (editor.newName = n)}
     onOrganize={organize}
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}

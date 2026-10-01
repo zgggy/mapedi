@@ -1,18 +1,16 @@
 <script lang="ts">
   /**
-   * 工作区：PanelShell 壳 + 单列网格 ItemButton 行。
-   * 行 = 眼睛 + 元素色 + 名称（+ 可选控件：区间元素 = 胶囊滑块）。
-   * 选中即进入绘制；空白点击/Esc/完成退出。
-   * 右键菜单：显示/隐藏、上移一层、下移一层、复制一个、删除。
-   * 拖动 = 长按进度条解锁 → 整个按钮被拿起来（浮动件跟指针）→ 目标格与下方元素让一格
-   *（transform + 过渡动画）→ 松手触发重排重算。
+   * 元素面板（左栏，第十一轮结构定稿）：ul = 创建行（新元素文本框**兼过滤器** + 🎲 + ➕，
+   * 拉满与 button 同宽）→ 元素行（缩进行 button 内短竖线；li 左垫 = depth×14）。
+   * 行上无任何操作控件（行内滑块已退役）；滑块只在高度（区间）元素的展开内容里。
+   * 选中即进入绘制；空白点击/Esc 收起。右键菜单：复制一个、删除。
+   * 内滚：.grid overflow-y auto。组织模式展开区只有上移/下移（无缩进/提升）。
    */
   import { tick } from 'svelte';
   import type { Region, World } from '../../core/types';
   import { LAYER_META } from '../workbench/layerMeta';
   import { rebuildHeightIntervalElements } from '../../core/layer/heightElements';
   import { childLayerIdOf } from '../../core/regionOps';
-  import { diplomacyBadge } from '../../core/diplomacy';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
@@ -57,12 +55,13 @@
     taskMode?: 'check' | 'gen' | 'draw' | 'organize';
     onSelect: (id: string | null) => void;
     onDelete: (id: string) => void;
-    /** 区间型元素滑块联动：滑动即选定该元素 + 涂改值 = 滑块数字（仅绘制模式行内显示） */
+    /** 区间型元素滑块联动：涂改值 = 滑块数字（滑块在展开内容，第十一轮） */
     onPaintValue?: (id: string, value: number) => void;
     onRadius?: (v: number) => void;
-    onCreate?: () => void;
+    onCreate?: (name: string) => void;
     onCreateChild?: (parentId: string) => void;
-    onRandomName?: () => void;
+    /** 随机名（返回生成的名字，顶层文本框回填；同时写全局供子级创建框） */
+    onRandomName?: () => string;
     onNewName?: (v: string) => void;
     /** 组织模式四操作（拖动已退役，2026-09-30） */
     onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string) => void;
@@ -78,15 +77,12 @@
     mode?: 'plane' | 'globe';
   } = $props();
 
-  /** 元素名搜索（C4/2026-09-30：默认收起为 🔍 按钮，点击展开搜索框） */
-  let filter = $state('');
-  let searchOpen = $state(false);
-  let searchEl: HTMLInputElement | undefined = $state();
-  function toggleSearch() {
-    searchOpen = !searchOpen;
-    if (searchOpen) queueMicrotask(() => searchEl?.focus());
-    else filter = '';
-  }
+  /**
+   * 过滤器 = 本面板创建行文本（2026-10-01 用户定：两面板各自只搜自己，互不影响）。
+   * 顶层创建行用局部 text；展开内的子级 CreateBox 仍走全局 newName（store 创建名）。
+   */
+  let text = $state('');
+  const filter = $derived(text);
 
   const isHeight = $derived(focusLayer === 'height');
   const isFreeLayer = $derived(
@@ -226,14 +222,14 @@
     const min = typeof a.min === 'number' ? a.min : lo;
     return { lo, hi, min };
   }
-  /** 每元素涂改值（初始 = 区间 min）——$state 保证滑块值回显 */
+  /** 每元素涂改值（初始 = 区间 min）——$state 保证滑块值回显。
+   *  第十一轮：滑块从 button 移入展开内容（行已选中，不再 handleSelect 触发开合）。 */
   const paintValues = $state<Record<string, number>>({});
   function paintValueOf(id: string, attrs: { min: number }): number {
     return paintValues[id] ?? attrs.min;
   }
-  function onSliderInput(id: string, v: number) {
+  function onSliderValue(id: string, v: number) {
     paintValues[id] = v;
-    handleSelect(id);
     onPaintValue?.(id, v);
   }
 
@@ -280,10 +276,6 @@
     });
   }
 
-  function diploBadgeOf(r: Region): string {
-    return world && focusLayer === 'country' ? (diplomacyBadge(world, r) ?? '') : '';
-  }
-
   // —— 右键菜单 ——
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
@@ -322,15 +314,29 @@
     return () => mo.disconnect();
   });
 
-  // —— 组织模式（2026-09-30 第十轮：替代拖动）——
-  /** 视觉第一个元素（缩进无目标）与顶层判定（提升无目标）；路径无层级 → 两操作禁用 */
-  function organizeFlagsOf(id: string): { first: boolean; top: boolean } {
+  // —— 组织模式（2026-09-30 第十轮：替代拖动；第十一轮：同级判定 + 元素只留上移/下移）——
+  /** 同级判定（按显示列表）：first = 无上一个同级（上移禁用）；last = 无下一个同级（下移禁用）；
+   *  top = 顶层（元素面板已不渲染提升钮，保留占位）。 */
+  function organizeFlagsOf(id: string): { first: boolean; last: boolean; top: boolean } {
     if (isFreeLayer) {
-      return { first: pathItems[0]?.id === id, top: true };
+      const i = pathItems.findIndex((p) => p.id === id);
+      return { first: i <= 0, last: i < 0 || i >= pathItems.length - 1, top: true };
     }
-    const first = visibleFlat[0]?.node.region.id === id;
+    const idx = visibleFlat.findIndex((v) => v.node.region.id === id);
+    if (idx < 0) return { first: true, last: true, top: true };
+    const pid = visibleFlat[idx].node.parentId;
+    const first = !visibleFlat.slice(0, idx).some((v) => v.node.parentId === pid);
+    const last = !visibleFlat.slice(idx + 1).some((v) => v.node.parentId === pid);
     const r = world?.regions.find((x) => x.id === id);
-    return { first: !!first, top: !r?.parentId };
+    return { first, last, top: !r?.parentId };
+  }
+
+  /** 该行模式展开区是否非空（第十一轮：展开后为空 → 直接不能展开）。
+   *  组织 / 绘制（笔刷区恒有）/ 检查（InspectSection 恒有）恒非空；
+   *  生成 = 有子元素才有「元素级生成」占位，否则无内容 → 不给开合。 */
+  function modeBodyOf(id: string): boolean {
+    if (taskMode === 'organize' || taskMode === 'draw' || taskMode === 'check') return true;
+    return !!world?.regions.some((r) => r.parentId === id);
   }
 </script>
 
@@ -342,55 +348,41 @@
   <!-- 第七轮：身份行已删（首行 = 新元素 CreateRow）；面板名与开合由左栏 ExpandPanel 承担 -->
   <div class="sec-root">
     <div class="ws" onclick={onBlankClick}>
-      <!-- 空态（图层行再点=取消聚焦后回此态）；创建/搜索仅聚焦且平面编辑时可见 -->
+      <!-- 空态（图层行再点=取消聚焦后回此态）；创建行常驻（聚焦时）——文本框兼过滤器 -->
       {#if !focusLayer}
         <p class="dim-pad">点击左侧图层查看或创建其元素</p>
-      {:else if mode === 'plane' && !isHeight}
+      {:else}
         <div class="create">
           <CreateRow
             placeholder="新元素"
-            {newName}
-            onNewName={(v) => onNewName?.(v)}
-            onRandom={() => onRandomName?.()}
-            onCreate={() => onCreate?.()}
-          />
-        </div>
-      {/if}
-      {#if focusLayer}
-      <div class="filter">
-        {#if searchOpen}
-          <input
-            type="search"
-            placeholder="搜索元素…"
-            bind:this={searchEl}
-            bind:value={filter}
-            onkeydown={(e) => {
-              if (e.key === 'Escape') {
-                e.stopPropagation();
-                toggleSearch();
-              }
+            newName={text}
+            canCreate={mode === 'plane' && !isHeight}
+            onNewName={(v) => (text = v)}
+            onRandom={() => {
+              const n = onRandomName?.();
+              if (n) text = n;
+            }}
+            onCreate={() => {
+              onCreate?.(text);
+              text = '';
             }}
           />
-          <button type="button" class="search-x" title="收起搜索" onclick={toggleSearch}>✕</button>
-        {:else}
-          <button type="button" class="search-open" onclick={toggleSearch}>🔍 搜索元素</button>
-        {/if}
-      </div>
+        </div>
       {/if}
 
       {#snippet itemBtn(
         id: string,
         name: string,
         color: string,
-        badge: string,
         ia: { lo: number; hi: number; min: number } | null,
         open: boolean,
         body: import('svelte').Snippet | null,
+        depth: number,
       )}
         <ItemButton
           logoColor={color}
           name={name}
-          badge={badge}
+          {depth}
           selected={selectedRegionId === id}
           {open}
           content={body}
@@ -399,21 +391,7 @@
             if (ia && taskMode === 'draw') onPaintValue?.(id, paintValueOf(id, ia));
           }}
           onMenu={(e) => openMenu(e, id)}
-        >
-          {#snippet control()}
-            {#if ia && taskMode === 'draw'}
-              <CapsuleSlider
-                min={ia.lo}
-                max={ia.hi}
-                step={1}
-                value={paintValueOf(id, ia)}
-                label="{name} 涂改高度"
-                width={130}
-                onInput={(v) => onSliderInput(id, v)}
-              />
-            {/if}
-          {/snippet}
-        </ItemButton>
+        />
       {/snippet}
 
       {#snippet cellNode(c: { kind: 'row' | 'create'; node: Node }, i: number)}
@@ -432,38 +410,45 @@
             {#snippet rowBody()}
               {#if taskMode === 'organize'}
                 {@const flags = organizeFlagsOf(id)}
+                <!-- 第十一轮：元素面板不提供缩进/提升（只上移/下移） -->
                 <OrganizeRow
                   name={n.region.name}
                   first={flags.first}
+                  last={flags.last}
                   top={flags.top}
                   onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', id)}
-                  onIndent={() => onOrganize?.('indent', id)}
-                  onUnindent={() => onOrganize?.('unindent', id)}
                 />
               {:else if taskMode === 'draw'}
+                <!-- 2026-10-01：去框去说明——只留控件（状态栏已有操作指引） -->
+                {@const ia = intervalAttrs(n.region)}
                 <div class="mpanel">
-                  {#if isFreeLayer}
-                    <p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p>
-                  {:else}
+                  {#if ia}
                     <label class="field inline">
-                      <span>笔刷</span>
+                      <span>高度</span>
                       <CapsuleSlider
-                        min={0.3}
-                        max={8}
-                        step={0.1}
-                        value={brushRadius}
-                        label="笔刷宽度"
+                        min={ia.lo}
+                        max={ia.hi}
+                        step={1}
+                        value={paintValueOf(id, ia)}
+                        label="{n.region.name} 涂改高度"
                         width={130}
-                        onInput={(v) => onRadius?.(v)}
+                        onInput={(v) => onSliderValue(id, v)}
                       />
-                      <span class="dim">{brushRadius.toFixed(1)}°</span>
                     </label>
-                    <p class="dim hint">
-                      {intervalAttrs(n.region)
-                        ? '左键刷选定值 · 空白点击 / Esc 收起退出'
-                        : '左键加地块 · Shift 移除 · 空白点击 / Esc 收起退出'}
-                    </p>
                   {/if}
+                  <label class="field inline">
+                    <span>笔刷</span>
+                    <CapsuleSlider
+                      min={0.3}
+                      max={8}
+                      step={0.1}
+                      value={brushRadius}
+                      label="笔刷宽度"
+                      width={130}
+                      onInput={(v) => onRadius?.(v)}
+                    />
+                    <span class="dim">{brushRadius.toFixed(1)}°</span>
+                  </label>
                 </div>
               {:else if elementPanel}
                 {@render elementPanel()}
@@ -473,10 +458,10 @@
               id,
               n.region.name,
               n.region.color,
-              diploBadgeOf(n.region),
               intervalAttrs(n.region),
               selectedRegionId === id,
-              selectedRegionId === id ? rowBody : null,
+              selectedRegionId === id && modeBodyOf(id) ? rowBody : null,
+              n.depth,
             )}
           {:else}
             <div class="create-slot" class:pulse={createPulseParent === id}>
@@ -510,20 +495,18 @@
             <li class="v-pad" style="height:{pathWin.padTop}px" aria-hidden="true"></li>
           {/if}
           {#each pathWin ? pathSlice : pathItems as p, i (p.id)}
-          <!-- 第八轮：路径行同款把手化（绘制态选中时原地展开曲线编辑提示） -->
+          <!-- 第八轮：路径行同款把手化；第十一轮：组织模式可展开（上移/下移，路径无层级）；
+               绘制模式不再有提示段落（状态栏给指引）→ 绘制态不展开 -->
           {#snippet pathBody()}
             {#if taskMode === 'organize'}
               {@const flags = organizeFlagsOf(p.id)}
               <OrganizeRow
                 name={p.name}
                 first={flags.first}
+                last={flags.last}
                 top={flags.top}
                 onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', p.id)}
-                onIndent={() => onOrganize?.('indent', p.id)}
-                onUnindent={() => onOrganize?.('unindent', p.id)}
               />
-            {:else if taskMode === 'draw'}
-              <div class="mpanel"><p class="dim hint">点曲线加点 · 拖控制点 · Esc 收起退出编辑</p></div>
             {/if}
           {/snippet}
           <li
@@ -536,10 +519,10 @@
               p.id,
               p.name,
               p.color,
-              '',
               null,
               selectedRegionId === p.id,
-              taskMode === 'draw' && selectedRegionId === p.id ? pathBody : null,
+              selectedRegionId === p.id && taskMode === 'organize' ? pathBody : null,
+              0,
             )}
           </li>
           {/each}
@@ -609,60 +592,17 @@
   }
   .create {
     flex: 0 0 auto;
-    padding: 4px 2px; /* 与列表同宽；第十轮：去分割线 */
-  }
-  /* 搜索行（按钮态 + 展开态）：默认收起为 🔍 按钮 */
-  .filter {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 2px;
-  }
-  .filter input {
-    flex: 1;
-    min-width: 0;
-    background: rgba(0, 0, 0, 0.35);
-    color: var(--text, #ddd);
-    border: 1px solid var(--panel-border);
-    border-radius: 7px;
-    padding: 3px 8px;
-    font-size: 11px;
-  }
-  .filter input:focus {
-    outline: none;
-    border-color: rgba(240, 195, 106, 0.6);
-  }
-  .search-open,
-  .search-x {
-    flex: 1;
-    text-align: left;
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-dim);
-    border: 1px solid var(--panel-border);
-    border-radius: 7px;
-    padding: 3px 8px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .search-open:hover {
-    background: rgba(255, 255, 255, 0.09);
-    color: var(--text);
-  }
-  .search-x {
-    flex: 0 0 auto;
-    text-align: center;
-    padding: 3px 7px;
+    padding: 4px 1px; /* 与列表同宽；第十一轮：左右间距再调小 */
   }
   /* 第八轮：选中行原地展开（li 高度随把手内容自适应；等高机制只测头部） */
   .cell.open {
     height: auto;
   }
   .mpanel {
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    padding: 8px;
+    /* 2026-10-01：去框去底——展开内容不套框，行间用间距 */
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
   .field.inline {
     display: flex;
@@ -681,7 +621,7 @@
     scrollbar-width: none;
     list-style: none;
     margin: 0;
-    padding: 2px; /* 第十轮：边距 = 原 1/3（用户定） */
+    padding: 1px; /* 第十一轮：左右间距再调小（用户定） */
     display: grid;
     grid-template-columns: 1fr;
     gap: 4px;
@@ -745,9 +685,5 @@
     padding: 8px 10px;
     color: var(--text-dim);
     font-size: 11px;
-  }
-
-  .hint {
-    margin: 4px 0 0;
   }
 </style>

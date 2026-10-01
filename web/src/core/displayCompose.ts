@@ -253,7 +253,9 @@ export function isLayerShown(
   void focusLayerId;
   const l = world.layers.find((x) => x.id === layerId);
   if (!l) return false;
-  if (isFreeLayer(l) || l.baseMesh) return false;
+  // baseMesh（地块网格）单独走 cells 门；自由层（路/航线/河）不再短路——
+  // 显隐唯一开关 = layer.visible（2026-10-01：「不选中但正在显示的图层要显示」）
+  if (l.baseMesh) return false;
   return isVisible(l, defaultLayerVisible(l));
 }
 

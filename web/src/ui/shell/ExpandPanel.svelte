@@ -144,4 +144,9 @@
     padding: 6px 8px; /* 统一内容内距（行内/左栏一致） */
     box-sizing: border-box;
   }
+  /* 左栏面板（grow = LeftRail 两面板专用）：ul/button 与 panel 左右间距更小（第十一轮） */
+  .acc.grow .body {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
 </style>

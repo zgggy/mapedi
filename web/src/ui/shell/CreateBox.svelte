@@ -26,17 +26,15 @@
 </div>
 
 <style>
+  /* 2026-10-01：去虚线框——子级创建行不再套框，只留内距对齐 */
   .ebox {
     position: relative;
     display: flex;
     align-items: center;
-    min-height: 28px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px dashed var(--panel-border);
+    min-height: 26px;
   }
   .create-pad {
     width: 100%;
-    padding: 3px 6px 3px 10px;
+    padding: 2px 0;
   }
 </style>
