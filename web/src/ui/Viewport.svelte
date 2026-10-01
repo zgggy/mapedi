@@ -7,7 +7,6 @@
   import {
     unproject,
     project,
-    projectionXScale,
     type ProjectionId,
     type ProjectionParams,
     defaultProjParams,
@@ -15,7 +14,6 @@
   import {
     defaultCamera,
     drawWorld,
-    screenToWorld,
     warmLayerGeometry,
     type Camera,
     type HoverInfo,
@@ -30,10 +28,17 @@
     screenToContentLonLat,
     unwrapXAgainst,
     contentOffsetAt,
-    worldCopyKs,
     worldToScreenX,
     worldToScreenY,
   } from '../render/space';
+  import {
+    zoomCamAt,
+    panCam,
+    contentPanDeltaX,
+    bestDrawDxFor,
+    revealCamTarget,
+    startCamTween,
+  } from './planeCamera';
   import {
     catmullRomPolyline,
     createPathFeature,
@@ -144,21 +149,15 @@
 
   // —— C7 有效视口（设计稿 §7 / U3）：选中元素落在遮挡区（左轨/底栏）→ 相机平移露出 ——
   // 仅在 highlightRegionId 变化时判定（untrack 隔离 cam/world 依赖，tween 不回调本 effect）
-  let revealRaf = 0;
+  // 5-b3：可见副本挑选/遮挡反解/补间在 ui/planeCamera.ts（纯函数可测），此处只聚质心。
+  let revealCancel: (() => void) | null = null;
   function tweenReveal(tx: number, ty: number) {
-    cancelAnimationFrame(revealRaf);
-    const fx = cam.x;
-    const fy = cam.y;
-    const t0 = performance.now();
-    const step = (t: number) => {
-      const k = Math.min(1, (t - t0) / 180);
-      const e = 1 - (1 - k) ** 3; // easeOutCubic
-      cam.x = fx + (tx - fx) * e;
-      cam.y = fy + (ty - fy) * e;
+    revealCancel?.();
+    revealCancel = startCamTween(cam.x, cam.y, tx, ty, (x, y) => {
+      cam.x = x;
+      cam.y = y;
       requestRender(); // 渲染是命令式驱动：只改 cam 不会自动重绘
-      if (k < 1) revealRaf = requestAnimationFrame(step);
-    };
-    revealRaf = requestAnimationFrame(step);
+    });
   }
   function revealSelection(id: string | null) {
     if (!id || !world || !viewportRoot) return;
@@ -192,48 +191,10 @@
     if (!n) return;
     x /= n;
     y /= n;
-    // 对准**当前可见的那份副本**（2026-10-01 用户反馈）：右键平移整圈后可见副本是 k≠0
-    // 那份，若仍按 k=0 算会把相机解算到"原件位置"的空地。取渲染同口径的可见 k 集
-    // （worldCopyKs：非回绕投影恒 [0]），在其中选离相机最近的一份。
-    let drawDx = contentOffsetAt(projection, y, contentOffsetX);
-    {
-      const ks = worldCopyKs(contentOffsetX, cam, wpx, projection);
-      if (ks.length > 1 || (ks[0] ?? 0) !== 0) {
-        // 元素级绘制会再展开 k±1（layers.elementCopies）：候选同口径扩一圈再取最近
-        const cand = new Set<number>();
-        for (const k of ks) {
-          cand.add(k - 1);
-          cand.add(k);
-          cand.add(k + 1);
-        }
-        let best = drawDx;
-        let bestD = Infinity;
-        for (const k of cand) {
-          const d = contentOffsetAt(projection, y, contentOffsetX + k * Math.PI * 2);
-          const dist = Math.abs(x + d - cam.x);
-          if (dist < bestD) {
-            bestD = dist;
-            best = d;
-          }
-        }
-        drawDx = best;
-      }
-    }
-    const sx = worldToScreenX(x, cam, wpx, drawDx);
-    const sy = worldToScreenY(y, cam, hpx);
-    // 可见区 = 减去左轨（railW）与底部状态栏
-    const L = railW + 16;
-    const R = wpx - 8;
-    const T = 8;
-    const B = hpx - 48;
-    if (sx >= L && sx <= R && sy >= T && sy <= B) return;
-    // 反解相机：sx = (x + drawDx - cam.x) * scale + w/2；sy = -(y - cam.y) * scale + h/2
-    // 只修正越界维度，未遮挡的维度不动（避免多余平移）
-    let tx = cam.x;
-    let ty = cam.y;
-    if (sx < L || sx > R) tx = x + drawDx - ((L + R) / 2 - wpx / 2) / cam.scale;
-    if (sy < T || sy > B) ty = y + ((T + B) / 2 - hpx / 2) / cam.scale;
-    if (tx !== cam.x || ty !== cam.y) tweenReveal(tx, ty);
+    // 对准当前可见副本（bestDrawDxFor）→ 遮挡反解（revealCamTarget）→ 补间（tweenReveal）
+    const drawDx = bestDrawDxFor(projection, x, y, contentOffsetX, cam, wpx);
+    const target = revealCamTarget(cam, x, y, drawDx, wpx, hpx, railW);
+    if (target) tweenReveal(target.tx, target.ty);
   }
   $effect(() => {
     const id = highlightRegionId;
@@ -1326,10 +1287,8 @@
         lastX = e.clientX;
         lastY = e.clientY;
         // 不 wrap：外框固定，wrap contentOffset 会让内容相对外框瞬移一个世界宽。
-        // 平移 = **转动地球经度**（重映射）：Δλ 使内容位移 scale(cam.y)·Δλ，
-        // 除以相机纬度 scale → 拖动点跟手；墨卡托 scale=1 退化为原行为。
-        const sRef = projectionXScale(projection, cam.y) ?? 1;
-        contentOffsetX += dx / (cam.scale * sRef);
+        // 平移 = 转动地球经度（增量运算在 planeCamera.contentPanDeltaX）。
+        contentOffsetX += contentPanDeltaX(dx, cam, projection);
         requestRender();
         return;
       }
@@ -1339,9 +1298,7 @@
         lastX = e.clientX;
         lastY = e.clientY;
         // 不 wrap cam.x：wrap 会在拖动中把相机扔回 [-π,π]，表现为地图瞬移
-        // y 翻转后 cam.y 增 = 内容下移（跟随鼠标）
-        const nx = cam.x - dx / cam.scale;
-        cam = { ...cam, x: nx, y: cam.y + dy / cam.scale };
+        cam = panCam(cam, dx, dy);
         requestRender();
       } else {
         hitTest(e);
@@ -1416,16 +1373,9 @@
         zoomingLive = false;
         requestRender();
       }, 150);
-      const before = screenToWorld(cam, sx, sy, rect.width, rect.height);
       const factor = e.deltaY > 0 ? 0.9 : 1.1;
-      const scale = Math.max(40, Math.min(4000, cam.scale * factor));
-      cam = { ...cam, scale };
-      const after = screenToWorld(cam, sx, sy, rect.width, rect.height);
-      cam = {
-        ...cam,
-        x: cam.x + (before.x - after.x),
-        y: cam.y + (before.y - after.y),
-      };
+      // 锚点缩放数学在 planeCamera.zoomCamAt（光标下世界点不动）
+      cam = zoomCamAt(cam, factor, sx, sy, rect.width, rect.height);
       requestRender();
     }}
   ></canvas>
