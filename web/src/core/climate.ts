@@ -1,6 +1,7 @@
 import type { CellClimate, ClimateParams, World } from './types';
 import { isLand, isOcean } from './types';
 import { createRng, hashSeed } from './rng';
+import { heightRev } from './rev';
 
 function noise1(x: number, seed: number): number {
   const i = Math.floor(x);
@@ -118,5 +119,23 @@ export function computeClimate(world: World): Map<number, CellClimate> {
     });
   }
   world.cellClimate = out;
+  computedAtRev = heightRev();
   return out;
+}
+
+/** 气候派生缓存的"算毕于"修订号（模块级：单活世界；worker 另有模块实例） */
+let computedAtRev = -1;
+
+/**
+ * 气候按需重算入口（还债步骤 4，真缓存语义）：缓存缺席或高度域已翻新才重算。
+ * cellClimate 不落盘（serializeWorld 已删），跨会话必缺席 → 加载后首读即按当前地形算；
+ * 会话内高度变更（笔画/撤销/生成）bump heightRev → 下一读重算。**读方批量前调一次**，
+ * 禁止在逐 cell 循环内调用。已知边界：仅改河流（partial river regen，当前 UI 不可达）
+ * 不翻 heightRev——降水河邻加湿沿用旧值，影响带内 ±0.15。
+ */
+export function ensureClimate(world: World): Map<number, CellClimate> {
+  if (!world.cellClimate || computedAtRev !== heightRev()) {
+    computeClimate(world);
+  }
+  return world.cellClimate!;
 }

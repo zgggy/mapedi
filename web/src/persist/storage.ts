@@ -1,5 +1,6 @@
 import { deserializeWorld, serializeWorld } from '../core/world';
 import type { World } from '../core/types';
+import { ensureBiome } from '../core/biomes';
 import { getCellSetRingsCached } from '../render/borderCache';
 import { prepareDisplayRings } from '../core/ring/normalize';
 import { sampleMidRing } from '../core/ring/hermite';
@@ -253,6 +254,8 @@ export function exportSvg(world: World, styleLand = '#3d7a4a', styleOcean = '#1a
 }
 
 export function exportGeoJson(world: World): void {
+  // biome 按需重算（还债步骤 4：不落盘真缓存，导出反映当前地形）
+  const biome = ensureBiome(world);
   const features: unknown[] = [];
   for (const cell of world.cells) {
     if (cell.polygon.length < 3) continue;
@@ -264,7 +267,7 @@ export function exportGeoJson(world: World): void {
         id: cell.id,
         height: cell.height,
         isOcean: cell.isOcean,
-        biome: world.biome?.get(cell.id) ?? null,
+        biome: biome.get(cell.id) ?? null,
       },
       geometry: { type: 'Polygon', coordinates: [ring] },
     });

@@ -1,4 +1,4 @@
-import type { Cell, World, LayerDef, ClimateParams, BiomeId, CellClimate, LayerRenderConfig, LonLat } from './types';
+import type { Cell, World, LayerDef, ClimateParams, LayerRenderConfig, LonLat } from './types';
 import { normalizeStyle } from './layer/style';
 import { generateVoronoiCells } from './voronoi';
 import { bumpGeomRev } from './rev';
@@ -401,9 +401,8 @@ export function serializeWorld(
     })),
     paths: world.paths ?? [],
     climate: world.climate,
-    cellClimate: world.cellClimate ? [...world.cellClimate.entries()] : undefined,
+    // cellClimate / biome 不落盘（还债步骤 4）：真缓存=读方 ensureClimate/ensureBiome 按当前地形重算
     astro: world.astro,
-    biome: world.biome ? [...world.biome.entries()] : undefined,
     layerRenderConfig: world.layerRenderConfig ? [...world.layerRenderConfig.entries()] : undefined,
     sharedEdges:
       !strip && world.sharedEdges ? [...world.sharedEdges.entries()] : undefined,
@@ -423,9 +422,7 @@ export function deserializeWorld(json: string): World {
     })[];
     paths?: unknown[];
     climate?: ClimateParams;
-    cellClimate?: [number, CellClimate][];
     astro?: World['astro'];
-    biome?: [number, BiomeId][];
     layerRenderConfig?: [string, unknown][];
     sharedEdges?: [string, [LonLat, LonLat]][];
   };
@@ -483,9 +480,7 @@ export function deserializeWorld(json: string): World {
     })),
     paths,
     climate: raw.climate ?? defaultClimate(),
-    cellClimate: raw.cellClimate ? new Map(raw.cellClimate) : undefined,
     astro: raw.astro,
-    biome: raw.biome ? new Map(raw.biome) : undefined,
     layerRenderConfig: (() => {
       const src = raw.layerRenderConfig;
       if (!src) return undefined;

@@ -32,6 +32,10 @@ export function dataRev(): string {
 export function geomRev(): number {
   return geom;
 }
+/** 高度/大陆拓扑域——气候·群系派生缓存（ensureClimate/ensureBiome）只订阅它 */
+export function heightRev(): number {
+  return height;
+}
 export function resetDataRev(): void {
   geom = 1;
   height = 1;

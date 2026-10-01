@@ -196,7 +196,7 @@ export function defaultClimate(): ClimateParams {
   };
 }
 
-/** 每 cell 派生气候缓存（可重算，不必当真相持久化；序列化时可选） */
+/** 每 cell 派生气候缓存（真缓存：**不落盘**，读方 ensureClimate 按当前地形重算——还债步骤 4） */
 export interface CellClimate {
   temperatureC: number;
   /** 0–1 降水指数 */
@@ -280,9 +280,9 @@ export interface World {
   /** 道路·航线·河流：过点曲线，与 cell 无关 */
   paths?: PathFeature[];
   climate: ClimateParams;
-  /** cellId → 气候派生（与 cells 对齐的稀疏表） */
+  /** cellId → 气候派生（**运行时真缓存，不落盘**；读方 ensureClimate，heightRev 失效） */
   cellClimate?: Map<CellId, CellClimate>;
-  /** cellId → 群系 */
+  /** cellId → 群系（**运行时真缓存，不落盘**；读方 ensureBiome，heightRev 失效） */
   biome?: Map<CellId, BiomeId>;
   /** 邻接 cell 对 "i-j"(i<j) → 共享 Voronoi 边两端 lonlat */
   sharedEdges?: Map<string, [LonLat, LonLat]>;

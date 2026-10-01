@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第十九轮 1-c 批。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第二十轮 还债步骤 4 批。**
 
 ## 先读
 
@@ -16,7 +16,13 @@
 
 用户九点：① 缩进无视觉效果→button 内最左侧短竖线 ② 缩进/提升顺序乱（未变成上一个图层的子图层）③ 元素面板无缩进/提升两钮 ④ 展开后为空→直接不能展开 ⑤ ul 与 panel 左右间距再小 ⑥ 图层/元素列表不能滚动（连续三轮）⑦ 结构定稿（创建行文本框兼搜索+🎲+加，拉满同 button 宽；两面板同构；独立搜索行退役）⑧ 任何模式 button 上无操作控件，滑块只在高度元素展开内容 ⑨ （隐含）检查/绘制模式展开各含一个高度滑块。
 
-## 当前状态（第十九轮完成并提交（git log 头）；在案提交：`8bdec59` 基线 → `03a7756` 渲染批 → `43ff5d1` 1-b 路径包 → `04edb7c` 1-b 收尾 → 第十九轮 1-c）
+## 当前状态（第二十轮完成并提交（git log 头）；在案提交：… → `04edb7c` 1-b 收尾 → `e61be00` 1-c → 第二十轮 步骤4）
+
+- **✓ 第二十轮（2026-10-01，还债步骤 4：cellClimate/biome 真相归位 P0，A 案）**：
+  - **实况比评审更空**：现行 unifiedGenerate 管线根本不产两字段（活世界恒空）、唯一写入口=孤儿 applyNature、消费者全 `?.`/fallback 静默降级——评审"存档带进下次会话"的过期问题实为**身份混乱**（有的档带有的不带）。
+  - **落地**：serialize/deserialize 删两字段（legacy 档字段被忽略、下次保存消失）；`rev.heightRev()` getter（原来只有 bump）；`ensureClimate`（缺席或 `computedAtRev≠heightRev` 才算，`computeClimate` 直算自动刷戳）；`biomes` 拆 `computeBiomes`（纯分类）/`generateBiomes`（+env 区域同步，签名不变）/`ensureBiome`；消费接入两处：`generateRoads` 入口、`exportGeoJson` 入口（biome 不再恒 null）。契约注释改「运行时真缓存不落盘」。
+  - **验收**：三态语义 mountain/-37.4° → 画-10 → ocean/2° → 撤销 → 精确回基线；首算115ms/命中0ms/变更重算111ms sameMap=false；serialize 顶层无两字段；legacy 注入兼容；road 入口自回填 207ms；tsc/svelte-check 0。
+  - **两注**：仅改河流不翻 heightRev（partial regen UI 不可达，±0.15 边界）；**探针直调 generateRoads 把原 1 个 road 区域清成 0**（首都不连通全 skip=预存行为，已登记已知问题表——biome 只做正系数缩放不碰连通闸，与本改无关）。
 
 - **✓ 第十九轮（2026-10-01，还债 1-c 命令纯数据化——步骤 1 三子项全清）**：
   - **删**：`PatchRegionsCommand`（死码零引用——store.patchRegions 实产 `RegionFieldsCommand`）；`HeightStrokeCommand`（afterApply/afterRevert 闭包）合并入纯数据 `HeightCellsCommand`；连带删 commitStroke 死变量 `topoChanged`。
@@ -78,7 +84,7 @@
 
 1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
 2. ~~1-c~~ **已收口（第十九轮）**：闭包清零、undo/redo 返回命令+store 类型分发；残余=Set/Map 载荷 JSON 编解码（历史面板持久化时补）+ 高度撤销 continentId 标签漂移（预存已登记）。
-3. 还债步骤 **1 ✓(内容全清) / 2 ✓ / 3 ✓ / 6 ◐**、**下一包 = 步骤 4 cellClimate 真相归位（P0）**、步骤 5 拆分、步骤 7 大扫除（顺带判 climate/astro 孤儿）。
+3. 还债步骤 **1 ✓ / 2 ✓ / 3 ✓ / 4 ✓ / 6 ◐**、**下一包 = 步骤 5 store/Viewport 拆分**、步骤 7 大扫除（顺带判 climate/astro 孤儿 + nature.ts 死码 + 路网再生成设计）。
 4. ~~两面板创建行共用 newName~~ **已拆**（第十二轮：各面板局部 text 独立过滤）；全局 newName 现只服务子级 CreateBox。
 5. 同类 stale 潜力点按 view 快照模式逐步收编（DisplayStylePanel 内部直读 style 的模板等——见 ROADMAP_REFACTOR 已知问题表）。
 6. **专属色/外交 = UI 已删、数据层 legacy 保留**：`Region.exclusiveColor`、`core/diplomacy.ts`、piece 传递与 regionOps 自动填充仍在（无 UI 入口）——若要"概念彻底消失"需动渲染/序列化，待用户拍板再清。
@@ -117,5 +123,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 还债步骤 4 cellClimate 真相归位（P0，二选一：倾向 A 真缓存=序列化不存/加载按需重算）**→ 步骤 5 store/Viewport 拆分 → 步骤 7 大扫除（顺带判 climate/astro 孤儿）。历史面板（1-c 前置已清）等用户点名。
+- **默认下一包 = 还债步骤 5 store/Viewport 拆分（P1，六模块边界+修三处失联）**→ 步骤 7 大扫除（顺带判 climate/astro 孤儿、core/nature.ts 死码、路网再生成设计）。历史面板（1-c 前置已清）等用户点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、生成引擎包（`docs/GEN_UNIFIED_DESIGN.md` 过目）、专属色数据层清理。

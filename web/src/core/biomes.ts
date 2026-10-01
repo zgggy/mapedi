@@ -1,5 +1,7 @@
 import type { BiomeId, Region, World } from './types';
 import { createRng, hashSeed } from './rng';
+import { ensureClimate } from './climate';
+import { heightRev } from './rev';
 
 export const BIOME_META: Record<
   BiomeId,
@@ -45,8 +47,11 @@ export function classifyBiome(
   return 'desert';
 }
 
-/** 生成/刷新 world.biome，并重建 environment 层 Region 聚合 */
-export function generateBiomes(world: World): Map<number, BiomeId> {
+/** 群系派生缓存的"算毕于"修订号（与气候同款模块级戳，单活世界） */
+let biomeAtRev = -1;
+
+/** 纯分类：写 world.biome（需要气候已算），**不碰 Region**——区域同步归 generateBiomes */
+export function computeBiomes(world: World): Map<number, BiomeId> {
   if (!world.cellClimate) {
     throw new Error('generateBiomes requires computeClimate first');
   }
@@ -70,8 +75,26 @@ export function generateBiomes(world: World): Map<number, BiomeId> {
     biome.set(cell.id, b);
   }
   world.biome = biome;
+  biomeAtRev = heightRev();
+  return biome;
+}
+
+/** 生成/刷新 world.biome，并重建 environment 层 Region 聚合 */
+export function generateBiomes(world: World): Map<number, BiomeId> {
+  const biome = computeBiomes(world);
   syncEnvironmentRegions(world, biome);
   return biome;
+}
+
+/**
+ * 群系按需重算入口（还债步骤 4，真缓存语义）：气候与群系戳任一落后 heightRev 即重算。
+ * biome 不落盘（serializeWorld 已删）——跨会话首读必算，会话内高度变更下一读即新地形。
+ * 读方（河网代价/GeoJSON 导出）批量前调一次，禁止逐 cell 循环内调用。
+ */
+export function ensureBiome(world: World): Map<number, BiomeId> {
+  ensureClimate(world);
+  if (!world.biome || biomeAtRev !== heightRev()) computeBiomes(world);
+  return world.biome!;
 }
 
 /** 把群系聚成 environment 层 Region（每个群系一个大陆连通块可多 Region，P5 先整类一个） */

@@ -2,6 +2,7 @@ import type { World } from '../types';
 import { createRng, hashSeed } from '../rng';
 import { gcDistanceDeg } from '../sphere';
 import { pickCell } from '../world';
+import { ensureBiome } from '../biomes';
 
 /** 陆地 A*（简化 Dijkstra），返回路径 cell 序列 */
 function pathBetween(
@@ -91,6 +92,8 @@ export function generateRoads(
   slopeCost = 2,
   forestCost = 1.2,
 ): void {
+  // 群系代价（森林/沙漠/山地系数）按**当前地形**取——缓存不落盘+rev 失效（还债步骤 4）
+  ensureBiome(world);
   world.regions = world.regions.filter((r) => r.layerId !== 'road');
   const capitals = world.regions
     .filter((r) => r.layerId === 'country' && r.centerCellId !== undefined)

@@ -27,10 +27,12 @@
 - **内容（已落地）**：① `deserializeWorld` 结构断言——cell.id 连续性 / polygon≥3 / neighbors 越界 / region.cells 引用越界，全部**明确中文报错**（throw → tryRestore/runWorker 捕获 → 启动错误条，不进渲染；autosave 只写成功序列化的结果，旧档不被覆盖）；② **autosave 挪 Worker**（`persist/saveWorker.ts`：world 结构化克隆 → serialize+idb 全程离主线程；busy/latest-wins 排队；`saveDrain` 供 clearAutosave 等在途；Worker 不可用/DataCloneError → 旧同步链降级 + 可见提示）。
 - **验收（浏览器实测）**：坏档四项断言全中（id 连续性/邻居越界/region 引用越界均抛明确信息、好档零误杀）；保存后「已存 HH:MM:SS」正常刷新、无降级/失败提示；**主线程 longtask 峰值 250-330ms/次**（原 2s 级 = Worker 首建一次性；stringify+idb 已离线程）。**残余（诚实记录）**：`postMessage(world)` 的结构化克隆仍在主线程 ~250ms——要归零需世界数据列式化/转移缓冲，另立项。
 
-### ☐ 4. cellClimate / biome 真相归位（P0）
+### ✓ 4. cellClimate / biome 真相归位（P0）——2026-10-01 完成（A 案）
 
-- **内容**：二选一——(A) 真缓存：序列化不存、加载后按需重算（与 `types.ts:193` 注释声明一致，倾向此案）；(B) 承认真相：改契约，高度变更纳入 touch 失效管线。
-- **验收**：改高度后群系/气候不再静默过期；存档中该字段的行为与文档一致。
+- **内容（A 案落地：真缓存 = 不落盘 + 按需重算）**：① `serializeWorld` 删 `cellClimate`/`biome` 两字段、`deserializeWorld` 不再读（legacy 档旧字段自然被忽略、下次保存消失）；types.ts 契约注释改为「运行时真缓存，不落盘，ensure 入口 + heightRev 失效」；② `rev.ts` 增 `heightRev()`（原只有 bump 无 getter）；③ `climate.ensureClimate(world)`——缓存缺席或 `computedAtRev !== heightRev()` 才 `computeClimate`（`computeClimate` 自身刷新戳，直调方 applyNature/测试同受管）；④ `biomes` 拆分：`computeBiomes`（纯分类写 world.biome，不碰 Region）/`generateBiomes`（=computeBiomes+syncEnvironmentRegions，签名行为不变）/`ensureBiome`（ensureClimate→戳落后即 computeBiomes）；⑤ 两处消费接入：`generateRoads` 入口 `ensureBiome`（森林/沙漠/山地代价按当前地形）、`exportGeoJson` 入口 `ensureBiome`（导出 biome 不再恒 null）。**读方批量前调一次，禁逐 cell 循环内调**（写进两处 doc 注释）。
+- **背景（评审 §1.3 的实况比评审更空**：现行生成管线（unifiedGenerate）根本不产 cellClimate/biome——活世界两字段恒空，只有孤儿 applyNature 会算；消费者全靠 `?.`/fallback 静默降级。归位后语义统一：想读就 ensure，永不过期、永不落盘。
+- **验收（浏览器实测）**：① 三态语义——cell#1 `mountain/-37.4°C` → 真实笔画画 -10（海）→ ensure 重算 `ocean/2°C` → Ctrl+Z → ensure 回 `mountain/-37.4°C` **精确基线**（撤销失效路径 ✓）；② 缓存机制——首算 115ms / 命中 0ms / 高度变更后重算 111ms 且 `sameMap=false`；③ `serializeWorld` 顶层无 `cellClimate`/`biome`（`climate` 参数保留）；④ legacy 档注入两旧字段 → deserialize 不炸、字段被忽略、世界完整；⑤ `generateRoads` 清空两缓存后直调 → 入口自回填（207ms）零错误；tsc/svelte-check 0。
+- **边界（诚实记录）**：① 仅改河流不翻 heightRev（partial river regen 当前 UI 不可达）→ 降水河邻加湿沿用旧值 ±0.15；② biome 依赖的气候参数变更走 applyNature 直算（同步刷新戳）；③ 生产 world 的 `computeBiomes` 覆盖全部 100k cell，`Map.get` 恒有值，`?? null` 仅为类型收窄。
 
 ### ☐ 5. store / Viewport 拆分（P1）
 
@@ -69,6 +71,7 @@
 
 | 问题 | 位置 | 状态 |
 |---|---|---|
+| `generateRoads` 先清空 road 区域再生成，首都不在同一陆块时 `pathBetween` 全 skip → **路网归零且无法可复**（路径层 UI 再生成=禁用待设计） | `core/generate/networks.ts`（步骤 4 验收探针直调实测：1→0；与 ensure 无关——biome 只做正系数代价缩放不碰连通闸） | 观察：归路径层再生成设计包 |
 | 高度笔画撤销后 `continentId` 标签 + region 数组序漂移（分区等价、真值 Region.cells 逐位精确；笔画期间也重排） | heightRegions/landSea 派生管线（第十九轮 A/B 证**预存**，非 1-c 引入） | 观察：派生标签非真相，用户可见性待查（叠放若受影响再修=重建后稳定序） |
 | 缩放重烘焙顿挫 ~100ms | — | 暂接受（归卡顿包 2） |
 | 球面元素填充 = cell 贴角三角扇，非 Hermite evenodd | GlobeView | 已知余量；球面中点 Hermite 填充为独立包 |
