@@ -428,6 +428,32 @@ export class AddLayerCommand implements EditCommand {
  * 元素数组序补丁（组织模式：上移/下移/缩进/提升都伴随 regions 数组序=叠放/显示序变化）。
  * 整数组 id 快照（几百 id × 2 份，便宜且对插入/删除天然稳健——只要回放时全集一致）。
  */
+/** 路径编辑（还债 1-b）：paths 整表前后快照——点列增删/拖动/显隐/顺序/增删路径统一入口。
+ *  apply/revert 各自 structuredClone：命令持有独立副本，后续直改不会污染历史。 */
+export class PathsCommand implements EditCommand {
+  private static clone(ps: NonNullable<World['paths']>): NonNullable<World['paths']> {
+    // 手动平面拷贝：path.points 经 $state 深代理，structuredClone 会 DataCloneError
+    return ps.map((p) => ({
+      ...p,
+      points: (p.points ?? []).map((q) => ({ lon: q.lon, lat: q.lat })),
+    }));
+  }
+
+  constructor(
+    public before: NonNullable<World['paths']>,
+    public after: NonNullable<World['paths']>,
+    public label = '路径编辑',
+  ) {}
+
+  apply(world: World): void {
+    world.paths = PathsCommand.clone(this.after);
+  }
+
+  revert(world: World): void {
+    world.paths = PathsCommand.clone(this.before);
+  }
+}
+
 export class RegionsOrderCommand implements EditCommand {
   constructor(
     public before: string[],

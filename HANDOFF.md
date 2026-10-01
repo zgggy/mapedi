@@ -16,7 +16,10 @@
 
 用户九点：① 缩进无视觉效果→button 内最左侧短竖线 ② 缩进/提升顺序乱（未变成上一个图层的子图层）③ 元素面板无缩进/提升两钮 ④ 展开后为空→直接不能展开 ⑤ ul 与 panel 左右间距再小 ⑥ 图层/元素列表不能滚动（连续三轮）⑦ 结构定稿（创建行文本框兼搜索+🎲+加，拉满同 button 宽；两面板同构；独立搜索行退役）⑧ 任何模式 button 上无操作控件，滑块只在高度元素展开内容 ⑨ （隐含）检查/绘制模式展开各含一个高度滑块。
 
-## 当前状态（第十六轮：渲染错乱根因已修，**未提交**——基线已提交 `8bdec59`）
+## 当前状态（第十八轮进行中，**工作区含 1-b 路径包未提交**；`8bdec59` 基线 + `03a7756` 渲染批已提交）
+
+- **✓ 1-b 路径编辑命令化（2026-10-01 完成，浏览器全链验收）**：`withPaths(label, fn)`（前后整表快照→有变化才入栈 `PathsCommand`→统一 touch）+ 控制点拖动会话 `beginPathsDrag/commitPathsDrag`（移动过程直改、up 一条命令）。覆盖：Viewport 六处（双击建线/空路径两点成线/插入/删除/拖点会话/草稿提交）、store 五处（删除/显隐/上移下移顺序/复制/新建·重命名）。**⚠ 大坑：`path.points` 经组件 `$state` 深代理 → `structuredClone` DataCloneError**——快照/apply 全改**手动平面拷贝**（{...p, points: map({lon,lat})}）；连带 autosave Worker 克隆 world 也炸 → `dispatchSave` 捕获后先 `snapPaths` 规范化重试一次（实测 Worker 保存恢复、无降级提示）。**验收**：建线 pts0→2、拖点坐标变化、撤销1 精确回拖前、撤销2 回 []、autosaveAt 正常刷新。**1-b 剩余**：图层树 dragLayer 排序、图层/元素 copyItem 命令化、climate/astro、道路端点（region 域）。
+
 
 - **⚠→✅ 渲染错乱根因（2026-10-01 用户报障 → 已修）**：本批 `ensureMapGl` 在 renderer 创建**之前**调用了无参 `glCanvas.getContext('webgl2')`——**WebGL 上下文属性由首次调用者决定**，无参默认建出 `alpha/depth=true、stencil=false` 的上下文，renderer 请求的 `stencil:true` 被静默忽略 → **轮廓 stencil/evenodd 填色掩码全废 = 渲染错乱**（复现实证：错乱会话 `getContextAttributes()` = alpha:true/depth:true/**stencil:false**）。修法：ensureMapGl 彻底不再自己 getContext，丢失判定改用 renderer 自带 `isLost()`，创建只走 `MapGlRenderer.create`（首个调用者=renderer ✓ 属性归正）。**验收：修复后 attrs = alpha:false/depth:false/stencil:true 与 renderer 请求完全一致**；沉降后统计与基线一致（meanR57/distinct≈基线），早段差异=渐现时序噪声（见方法论）。基线存档提交 `8bdec59`（第十一~十四轮+速修包，渲染批之前）。
 

@@ -16,6 +16,7 @@ import {
   HeightStrokeCommand,
   MultiRegionCommand,
   RegionFieldsCommand,
+  PathsCommand,
   LayersVisibilityCommand,
   LayerStyleCommand,
   AddLayerCommand,
@@ -794,10 +795,17 @@ export class EditorStore {
     try {
       wk.postMessage({ id: Date.now(), world });
     } catch (err) {
-      this.saveBusy = false;
-      this.saveWorkerDown = true;
-      this.status = `自动保存降级本地（${String(err).slice(0, 60)}）`;
-      void this.saveSync(world);
+      // 常见：world.paths.points 混入 $state 代理 → 先规范化平面拷贝重试一次
+      try {
+        if (world.paths?.length) world.paths = EditorStore.snapPaths(world);
+        wk.postMessage({ id: Date.now(), world });
+        return;
+      } catch {
+        this.saveBusy = false;
+        this.saveWorkerDown = true;
+        this.status = `自动保存降级本地（${String(err).slice(0, 60)}）`;
+        void this.saveSync(world);
+      }
     }
   }
 
@@ -863,8 +871,9 @@ export class EditorStore {
     // 先试路径
     const pathIdx = (this.world.paths ?? []).findIndex((p) => p.id === this.selectedRegionId);
     if (pathIdx >= 0 && this.world.paths) {
-      this.world.paths = this.world.paths.filter((p) => p.id !== this.selectedRegionId);
-      this.touchRegions();
+      this.withPaths('删除路径', () => {
+        this.world!.paths = this.world!.paths!.filter((p) => p.id !== this.selectedRegionId);
+      });
       this.status = '已删除路径';
       this.selectedRegionId = null;
       return;
@@ -894,8 +903,10 @@ export class EditorStore {
     }
     const p = (this.world.paths ?? []).find((x) => x.id === id);
     if (p) {
-      p.hidden = !p.hidden;
-      this.touchRegions();
+      this.withPaths(p.hidden ? '显示路径' : '隐藏路径', () => {
+        const t = this.world!.paths!.find((x) => x.id === id);
+        if (t) t.hidden = !t.hidden;
+      });
       this.status = p.hidden ? `已隐藏「${p.name}」` : `已显示「${p.name}」`;
     }
   }
@@ -1062,12 +1073,15 @@ export class EditorStore {
       const i = same.findIndex((x) => x.id === id);
       const j = i + dir;
       if (i < 0 || j < 0 || j >= same.length) return;
-      const arr = this.world.paths;
-      const ai = arr.indexOf(p);
-      const bi = arr.indexOf(same[j]);
-      arr[ai] = same[j];
-      arr[bi] = p;
-      this.touchRegions();
+      const nid = same[j].id;
+      this.withPaths('调整顺序', () => {
+        const arr = this.world!.paths!;
+        const ai = arr.findIndex((x) => x.id === id);
+        const bi = arr.findIndex((x) => x.id === nid);
+        if (ai < 0 || bi < 0) return;
+        arr[ai] = same[j];
+        arr[bi] = p;
+      });
       this.status = dir < 0 ? '已上移一层' : '已下移一层';
     }
   }
@@ -1095,14 +1109,16 @@ export class EditorStore {
     const p = (this.world.paths ?? []).find((x) => x.id === id);
     if (p && this.world.paths) {
       const nid = `${p.layerId}-${Date.now().toString(36)}`;
-      this.world.paths.push({
+      const copy = {
         ...p,
         id: nid,
         name: `${p.name} 副本`,
         points: p.points.map((q) => ({ ...q })),
+      };
+      this.withPaths('复制路径', () => {
+        this.world!.paths!.push(copy);
       });
       this.selectedRegionId = nid;
-      this.touchRegions();
       this.status = '已复制路径';
       return;
     }
@@ -1320,6 +1336,47 @@ export class EditorStore {
    * attributes/hidden）快照 → diff → 单命令入栈。覆盖「core 直改字段」类操作
    * （元素保存信息、外交 attributes 等）；cells 不在此域（成员变更走笔画快照-diff）。
    */
+  /** 路径整表快照：**手动平面拷贝**——points 经 $state 深代理，structuredClone 会 DataCloneError（2026-10-01 实测），必须重建纯对象。 */
+  private static snapPaths(w: World): NonNullable<World['paths']> {
+    return (w.paths ?? []).map((p) => ({
+      ...p,
+      points: (p.points ?? []).map((q) => ({ lon: q.lon, lat: q.lat })),
+    }));
+  }
+
+  /** 路径快照执行器（1-b）：fn 前后对 world.paths 整表快照 → 有变化才入栈一条 PathsCommand；统一 touch。 */
+  withPaths(label: string, fn: () => void): void {
+    if (!this.world) return;
+    const snap = () => EditorStore.snapPaths(this.world!);
+    const before = snap();
+    fn();
+    const after = snap();
+    // 写回纯对象：fn 可能把 $state 代理（pathDraft/llAt 链）存进 world——代理会炸
+    // structuredClone（autosave Worker）；规范化后 world.paths 恒为平面数据。
+    this.world.paths = after;
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      history.run(this.world, new PathsCommand(before, after, label), { alreadyApplied: true });
+    }
+    this.touchRegions();
+  }
+
+  /** 控制点拖动会话（1-b）：pointerdown 快照 / pointerup 提交——移动过程直改不入栈，一次手势一条命令 */
+  private pathsDragSnap: NonNullable<World['paths']> | null = null;
+  beginPathsDrag(): void {
+    if (this.world) this.pathsDragSnap = EditorStore.snapPaths(this.world);
+  }
+  commitPathsDrag(label = '移动控制点'): void {
+    if (!this.world || !this.pathsDragSnap) return;
+    const before = this.pathsDragSnap;
+    this.pathsDragSnap = null;
+    const after = EditorStore.snapPaths(this.world);
+    this.world.paths = after; // 拖动过程中 points 可能含代理引用 → 规范化为平面数据
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      history.run(this.world, new PathsCommand(before, after, label), { alreadyApplied: true });
+    }
+    this.touchRegions();
+  }
+
   patchRegions(label: string, fn: () => void): void {
     if (!this.world) return;
     const FIELDS = ['name', 'color', 'exclusiveColor', 'attributes', 'hidden'] as const;
@@ -1474,21 +1531,27 @@ export class EditorStore {
         (p) => p.layerId === layerId && (!p.points || p.points.length < 2),
       );
       if (existingEmpty) {
-        existingEmpty.name = name;
+        this.withPaths('重命名路径', () => {
+          existingEmpty.name = name;
+        });
         this.newName = '';
-        this.touchRegions();
         this.status = `已重命名「${name}」，在地图上点击绘制`;
         return;
       }
-      this.world.paths.push({
-        id: `${layerId}-${Date.now().toString(36)}`,
-        layerId: layerId as 'road' | 'route' | 'river',
-        name,
-        points: [],
-        color: defaultPathColor(layerId as 'road' | 'route' | 'river'),
-        attributes: {},
+      const nid = `${layerId}-${Date.now().toString(36)}`;
+      this.withPaths('新建路径', () => {
+        const w = this.world!;
+        if (!w.paths) w.paths = [];
+        w.paths.push({
+          id: nid,
+          layerId: layerId as 'road' | 'route' | 'river',
+          name,
+          points: [],
+          color: defaultPathColor(layerId as 'road' | 'route' | 'river'),
+          attributes: {},
+        });
       });
-      const pid = this.world.paths[this.world.paths.length - 1].id;
+      const pid = nid;
       this.newName = '';
       // 选中新建的路径并进入编辑，地图上画点即写入这条曲线
       this.selectedRegionId = pid;
@@ -1500,7 +1563,6 @@ export class EditorStore {
         addMode: true,
       };
       this.focusLayer = layerId;
-      this.touchRegions();
       this.status = `已添加「${name}」→ 在地图上点两下生成直线`;
       return;
     }

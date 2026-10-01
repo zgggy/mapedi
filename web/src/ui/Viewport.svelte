@@ -1083,15 +1083,18 @@
     oncontextmenu={(e) => e.preventDefault()}
     style="position:relative;z-index:1;touch-action:none;user-select:none;-webkit-user-select:none;"
     ondblclick={(e) => {
-      // 双击结束路径草稿（≥2 点时提交为正式路径）
+      // 双击结束路径草稿（≥2 点时提交为正式路径）——1-b：经 withPaths 入栈
       if (!isFreeLayer || !pathDraft || pathDraft.length < 2) return;
       const kind = focusLayer as PathKind;
-      if (!world.paths) world.paths = [];
-      const feat = createPathFeature(kind, pathDraft);
-      world.paths = world.paths.filter((x) => x.id !== `draft-${kind}`);
-      world.paths.push(feat);
+      const draft = pathDraft;
+      editor.withPaths('创建路径', () => {
+        const w = editor.world!;
+        if (!w.paths) w.paths = [];
+        const feat = createPathFeature(kind, draft);
+        w.paths = w.paths.filter((x) => x.id !== `draft-${kind}`);
+        w.paths.push(feat);
+      });
       pathDraft = null;
-      editor.touchWorld();
       requestRender();
     }}
     onpointerdown={(e) => {
@@ -1138,7 +1141,6 @@
           const sx = e.clientX - rect.left;
           const sy = e.clientY - rect.top;
           const kind = focusLayer as PathKind;
-          if (!world.paths) world.paths = [];
 
           /** 只编辑工作区当前选中的路径（1 元素 = 1 条曲线） */
           let path = activePathOfKind(kind);
@@ -1168,14 +1170,17 @@
           if (hit && world.paths[hit.pathIdx]?.layerId === kind) {
             const hitPath = world.paths[hit.pathIdx];
             if (e.shiftKey) {
-              hitPath.points = deleteControlPoint(pathPointsOf(hitPath), hit.ptIdx);
-              editor.touchWorld();
+              editor.withPaths('删除控制点', () => {
+                const hp = editor.world!.paths![hit.pathIdx];
+                if (hp) hp.points = deleteControlPoint(pathPointsOf(hp), hit.ptIdx);
+              });
               requestRender();
               return;
             }
             dragGhostPts = pathPointsOf(hitPath).map((q) => ({ ...q }));
             dragPathIdx = hit.pathIdx;
             dragPtIdx = hit.ptIdx;
+            editor.beginPathsDrag(); // 拖动会话：up 时 commitPathsDrag 一条命令
             // 点到哪条就编辑哪条
             if (highlightRegionId !== hitPath.id) {
               editor.selectedRegionId = hitPath.id;
@@ -1200,13 +1205,15 @@
               pathDraft = [ll];
             } else if (pathDraft.length === 1) {
               pathDraft = [pathDraft[0], ll];
-              path.points = [...pathDraft];
+              editor.withPaths('建立路径', () => {
+                path.points = [...pathDraft!];
+              });
               pathDraft = null;
               dragPathIdx = world.paths.indexOf(path);
               dragPtIdx = 1;
+              editor.beginPathsDrag();
               dragGhostPts = null;
               capturePointer(canvas, e.pointerId);
-              editor.touchWorld();
               requestRender();
             }
             return;
@@ -1218,11 +1225,13 @@
           if (h.dist <= pickPx) {
             dragGhostPts = pts.map((q) => ({ ...q }));
             const { points: nextPts, index } = insertControlPointOnPath(pts, h.seg, h.t);
-            path.points = nextPts;
+            editor.withPaths('添加控制点', () => {
+              path.points = nextPts;
+            });
             dragPathIdx = world.paths.indexOf(path);
             dragPtIdx = index;
+            editor.beginPathsDrag();
             capturePointer(canvas, e.pointerId);
-            editor.touchWorld();
             requestRender();
           }
           return;
@@ -1336,7 +1345,7 @@
     }}
     onpointerup={(e) => {
       if (dragPtIdx >= 0 && dragPathIdx >= 0) {
-        editor.touchWorld();
+        editor.commitPathsDrag('移动控制点');
         dragPtIdx = -1;
         dragPathIdx = -1;
         dragGhostPts = null;
