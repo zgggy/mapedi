@@ -72,7 +72,8 @@
   - **路网清空先于早退**（已知问题）：generateRoads/generateRoutes 改**校验先于清空**——合成探针双分支实测 verdict=true（早退保留既有路网 / 正常重建照常清空）；
   - **撤销后父层残留**（5-b4 发现的预存缺口）：CommandService undo/redo 补 `materializeParentCells`，且物化实现由「从父现有并=**只加不减**」改为**精确派生（父≡∪子，AGENTS §3 字面语义）**——实测 7 对父子中 6 对恒等、唯一 extra 全为历史残留本身 → 改后**自愈**（extraNow=[]）+ 撤销逐位还原（unrestored=[]）、深度 0、零错。
 - **✓ 三小包①容差集中（2026-10-01 第三十轮）**：`core/tolerances.ts` 单源——KEY_QUANT(1e-3 键量化)/WRAP_EPS/PROJ_WRAP_EPS（**分歧可见化**：1e-3 vs 1e-2 待拍板）/GEOM_EPS(1e-12 判等·近零)/EPS_FP(1e-9)/SCALE_FLOOR/MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN；**17 文件原值迁移、零数值改动**；裸字面量收敛（1e-12 全清、cam.scale 下限族全清、键量化×1000 全清）；一次性孤值（1e-8/1e-10/1e-15）与 GLSL 内字面量留原地（模块头注明）。
-- **☐ 剩余两小包**：② 违契图层名特判 **30 处**（landsea/height/cells 硬编码，修法=LayerDef 标志位=数据模型级改动）；③ `as unknown` 收敛 **25 处/11 文件**。
+- **✓ 三小包② 图层名标志位（2026-10-02 第三十一轮）**：**LayerDef 三标志**（`genStrategy: 'scatter'|'heightmap'|'elements'` 缺省 elements / `focusAfterGen` / `editsHeight`）+ `ensureBuiltinLayers` 旧档回填；读取单源 `core/layer/flags.ts`，消费点禁比 id 字符串。**landsea 身份收进 landSea 模块选择器**（landSeaLayerRegions/landSeaContinentRegions/isLandSeaLayer——非标志位，模块本职）；`isFreeLayerId` kind 版 lookup 收编 Viewport/WD/DisplayNamePanel 三处 id 三连比较。迁移 ~35 处（生成三分支/生成后聚焦/worldShape/showCellMesh/高度域 UI/flush diff/大陆中心/手动分割/默认焦点回落/建层路径分支）；死码 genLabel/isPath 删；opacity 过时注释修。**判定保留**：模块本域 id（political/heightElements/landSea 内部）、SVG 导出描边（storage 注释）、`__height__` 协议。**行为零变化**；tsc/svelte-check 0；浏览器=旧档回填读证+三分支面板+height regen focusAfterGen+球面往返零错。**未跑测试**（纪律）。
+- **☐ 剩余一小包**：③ `as unknown` 收敛 **25 处/11 文件**。
 - **验收达成部分**：grep 死码零残留 ✓；npm check 0 errors ✓（tsc/svelte-check 绿）。三项存量按拆包纪律各自立项。
 
 ---

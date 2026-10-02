@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第三十轮 容差集中。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第三十一轮 图层名标志位。**
 
 ## 先读
 
@@ -13,7 +13,14 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十轮完成，容差批待提交；在案：`8e22dac` 5-b5 → `20b3c20` 5-c → `36f7773` 步骤7 → 第三十轮 容差）
+## 当前状态（第三十一轮完成；在案：`20b3c20` 5-c → `36f7773` 步骤7 → `6a0da6d` 第三十轮 容差 → 第三十一轮 图层名标志位）
+
+- **✓ 第三十一轮（2026-10-02，步骤7 转包②：图层名标志位）**：
+  - **LayerDef 三标志（数据模型级）**：`genStrategy: 'scatter'|'heightmap'|'elements'`（缺省 elements）、`focusAfterGen`、`editsHeight`——cells/height 在 `builtinLayers` 声明，`ensureBuiltinLayers` **旧档回填**（与 kind 同策略强制同步）；读取单源 **`core/layer/flags.ts`**（genStrategyOf/editsHeightAt/defaultFocusLayerId/heightmapLayerId/editsHeightLayerId），消费点禁比 id 字符串。
+  - **landsea 身份收进 landSea 模块**（选标志位而非标志——模块本职）：`landSeaLayerRegions`/`landSeaContinentRegions`/`isLandSeaLayer` 选择器单源；`displayCompose.isFreeLayerId` = kind 版 lookup（Viewport/WD/DisplayStylePanel 三处 id 三连比较收编，DisplayName 面板补 world prop）。
+  - **迁移 ~35 处**：生成三分支（GenerateSection strategy prop/unified/generationService）、生成后聚焦（focusAfterGen，整链+单层）、worldShape 参数视图、showCellMesh（baseMesh）、高度域 UI（App 选中=区间、Viewport overlay 标签×2、WD canCreate+区间 ensure 收编 heightIntervalRegions）、flush diff/大陆中心/手动分割（选择器）、默认焦点回落（replaceWorld/删层回落=defaultFocusLayerId）、commandService 建层路径分支（isFreeLayerDef(meta)）；死码 `genLabel`/`isPath` 删；`types.ts` opacity 过时注释修正。**判定保留（注释说明）**：模块本域 id（political/heightElements/landSea 内部）、SVG 导出描边（storage 导出呈现域）、`__height__` 笔刷协议（区间元素属性驱动）。
+  - **验收**：tsc 0 / svelte-check 0 errors（5 warning 存量）；浏览器=**旧档回填读证**（恢复档 cells gs=scatter、height 三标志齐、focus=cells）+ 生成三分支面板逐一命中（撒点/生成高度图/重新生成「国家」）+ height regen（status「已重新生成：height」、焦点与 visible=focusAfterGen 路径）+ 高度层创建行禁用留搜索框 + 球面↔平面往返零错（**会话1 左轨 viewMode bug 未复现**）、`lastError` 空。**未跑测试**（纪律）。
+  - 存量进度：容差 ✓ / 图层名标志位 **✓** / as-unknown ☐。
 
 - **✓ 第二十五轮（2026-10-01 用户反馈批四件）**：
   - **revealRaf 修复**：5-b3 换 revealCancel 时漏改 onMount cleanup → 切球面即 `ReferenceError`（用户报障）——已改 `revealCancel?.()`，来回切 4 次零错。
@@ -138,5 +145,5 @@
 
 ## 下一轮候选
 
-- **默认下一包 = 三小包②图层名标志位（LayerDef 数据模型级）或③as-unknown 收敛**；或用户点名历史面板/功能包/5-c 剩余。
+- **默认下一包 = 三小包③ as-unknown 收敛（25 处/11 文件）**；或用户点名历史面板/功能包/5-c 剩余。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

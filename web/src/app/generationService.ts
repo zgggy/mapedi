@@ -7,7 +7,8 @@
  * 世代序 `seq` 与 tryRestore/importProjectFile **共享**（任何换世界的异步操作互斥过期闸）。
  */
 import type { World } from '../core/types';
-import { createWorld, HARD_MAX_DENSITY } from '../core/world';
+import { createWorld, HARD_MAX_DENSITY, builtinLayers } from '../core/world';
+import { genStrategyOf, heightmapLayerId } from '../core/layer/flags';
 import { runCascade } from '../core/generate/registry';
 import { generateWorldAsync } from '../core/generate/runGenerate';
 import { cascadeEnabled, type GenerationProfile } from '../core/generate/profile';
@@ -101,9 +102,10 @@ export class GenerationService {
     rebuildLandSeaRegions(world);
     world.astro = defaultStarSystem(seed, world.climate);
     this.ctx.replaceWorld(world);
-    // 生成后默认选中并显示高度层（产品默认：生成 → 直接看地形）
-    world.layers.find((l) => l.id === 'height')!.visible = true;
-    this.ctx.setFocusLayer('height');
+    // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
+    const fg = world.layers.find((l) => l.focusAfterGen)!;
+    fg.visible = true;
+    this.ctx.setFocusLayer(fg.id);
     this.ctx.setStatus(`${world.cells.length} 地块 · Worker`);
     this.ctx.scheduleAutosave();
     this.ctx.notify();
@@ -131,9 +133,10 @@ export class GenerationService {
     rebuildLandSeaRegions(world);
     if (seq !== this.ctx.seq) return;
     this.ctx.replaceWorld(world);
-    // 生成后默认选中并显示高度层（产品默认：生成 → 直接看地形）
-    world.layers.find((l) => l.id === 'height')!.visible = true;
-    this.ctx.setFocusLayer('height');
+    // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
+    const fg = world.layers.find((l) => l.focusAfterGen)!;
+    fg.visible = true;
+    this.ctx.setFocusLayer(fg.id);
     const ms = Math.round(performance.now() - t0);
     if (!quiet) this.ctx.setStatus(`${world.cells.length} 地块 · ${ms}ms`);
     this.ctx.scheduleAutosave();
@@ -153,17 +156,17 @@ export class GenerationService {
       params ? { [layerId]: params } : undefined,
       enabled,
     );
-    if (layerId === 'height') {
+    if (genStrategyOf(world, layerId) === 'heightmap') {
       // 「生成高度图 = 删除海陆图层[元素]」（2026-09-30 用户语义）：地形重跑后旧海陆
       // 划分失效 → 删旧建新（rebuildLandSeaRegions 全量重建派生元素）
       rebuildLandSeaRegions(world);
     }
     this.ctx.touchWorld();
-    if (layerId === 'height') {
-      // 高度重生成后默认显示并聚焦高度层（与整世界生成同规则）
-      const h = this.ctx.world?.layers.find((l) => l.id === 'height');
-      if (h) h.visible = true;
-      this.ctx.setFocusLayer('height');
+    // focusAfterGen 层（height）重生成后默认显示并聚焦（与整世界生成同规则）
+    const fg = world.layers.find((l) => l.id === layerId && l.focusAfterGen);
+    if (fg) {
+      fg.visible = true;
+      this.ctx.setFocusLayer(fg.id);
     }
     this.ctx.setStatus(`已重新生成：${layerId}`);
   }
@@ -177,9 +180,10 @@ export class GenerationService {
     this.ctx.saveGenDraftSoon();
   }
 
-  /** height profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_WORLD_SHAPE） */
+  /** heightmap 策略层 profile 参数的类型化视图（单源 = profiles；缺省 = DEFAULT_WORLD_SHAPE） */
   get worldShape(): WorldShape {
-    const p = this.ctx.profiles.find((x) => x.layerId === 'height')?.params ?? {};
+    const layers = this.ctx.world?.layers ?? builtinLayers();
+    const p = this.ctx.profiles.find((x) => x.layerId === heightmapLayerId(layers))?.params ?? {};
     const num = (k: keyof WorldShape, d: number) => (typeof p[k] === 'number' ? (p[k] as number) : d);
     const bool = (k: keyof WorldShape, d: boolean) => (typeof p[k] === 'boolean' ? (p[k] as boolean) : d);
     return {

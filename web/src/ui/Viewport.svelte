@@ -46,7 +46,8 @@
   } from '../core/paths';
   import type { DrawTool } from '../core/draw/brush';
   import { cellsInBrush } from '../core/draw/brush';
-  import { composeShownPieces } from '../core/displayCompose';
+  import { composeShownPieces, isFreeLayerId } from '../core/displayCompose';
+  import { editsHeightAt } from '../core/layer/flags';
   import type { LonLat } from '../core/types';
   import { resolveLayerStyle } from '../core/layer/config';
   import { editor } from '../app/store.svelte';
@@ -189,8 +190,11 @@
   /** 正在拖动的路径在 world.paths 中的索引 */
   let dragPathIdx = $state(-1);
 
-  const isFreeLayer = $derived(
-    focusLayer === 'road' || focusLayer === 'route' || focusLayer === 'river',
+  const isFreeLayer = $derived(isFreeLayerId(world, focusLayer));
+  /** 网格底图层（baseMesh，内置 = cells）与其焦点判定：showCellMesh 单源 */
+  const baseMeshLayer = $derived(world.layers.find((l) => l.baseMesh));
+  const focusIsBaseMesh = $derived(
+    world.layers.find((l) => l.id === focusLayer)?.baseMesh === true,
   );
   /**
    * 路径编辑：仅当 ①在路/航/河层 且 ②绘制态（工作区选中路径或已 startDraw）。
@@ -370,8 +374,8 @@
     } else {
       onhover?.(null);
     }
-    // 高度层：地块标签在覆盖层，hover 只刷 overlay
-    if (focusLayer === 'height') requestOverlay();
+    // 高度域层（editsHeight）：地块标签在覆盖层，hover 只刷 overlay
+    if (editsHeightAt(world, focusLayer)) requestOverlay();
     else requestRender();
   }
 
@@ -552,7 +556,7 @@
 
     // —— 地块高度值（仅笔刷覆盖到的 cell） ——
     const showHLabels =
-      focusLayer === 'height' &&
+      editsHeightAt(world, focusLayer) &&
       workspaceOpen &&
       brushHover &&
       drawActive &&
@@ -914,9 +918,7 @@
       progressiveBoot: !warmDone,
       styleOf: (id: string) => resolveLayerStyle(world, id),
       borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
-      showCellMesh:
-        focusLayer === 'cells' ||
-        (world.layers.find((l) => l.id === 'cells')?.visible ?? false),
+      showCellMesh: focusIsBaseMesh || (baseMeshLayer?.visible ?? false),
       hidePathId:
         pathEdit && dragPathIdx >= 0 && world.paths?.[dragPathIdx]
           ? world.paths[dragPathIdx].id

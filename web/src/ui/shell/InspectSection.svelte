@@ -204,6 +204,7 @@
         embedded
         layerId={view.styleId}
         layerName={view.styleName}
+        {world}
         cfg={view.styleCfg}
         onChange={(patch) => editor.setLayerStyle(view.styleId, patch)}
       />

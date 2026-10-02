@@ -218,6 +218,8 @@ export function exportSvg(world: World, styleLand = '#3d7a4a', styleOcean = '#1a
         parts.push(`<path d="${outlinePaths.join(' ')}" fill="none" stroke="${r.color}" stroke-width="0.7"/>`);
       }
     };
+    // SVG 导出描边策略（导出呈现域，2026-10-02 判定保留 id 检查——非叠放/生成/显隐特判，
+    // 与 country 一并对仗；若未来出现「导出角色」类 LayerDef 字段再收编）
     for (const r of world.regions) {
       if (r.layerId === 'height') drawRegionRing(r, 1);
     }

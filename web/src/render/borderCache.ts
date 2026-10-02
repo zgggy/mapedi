@@ -15,7 +15,7 @@ import { prepareDisplayRings } from '../core/ring/normalize';
 import { sampleMidRing } from '../core/ring/hermite';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
-import { landSeaKindOf } from '../core/layer/landSea';
+import { landSeaContinentRegions } from '../core/layer/landSea';
 import {
   projectionPeriodAt,
   projectionWraps,
@@ -417,10 +417,8 @@ export function getContinentCentersCached(
   if (continentCentersCache && continentCentersCache.sig === sig) {
     return continentCentersCache.centers;
   }
-  // 从 continent Regions 派生（单一真相）；kind 判定与 landSeaKindOf 同口径
-  const continentRegions = world.regions.filter(
-    (r) => r.layerId === 'landsea' && landSeaKindOf(r) === 'continent',
-  );
+  // 从 continent Regions 派生（单一真相）；选择器与 landSeaKindOf 同口径
+  const continentRegions = landSeaContinentRegions(world);
   const centers = continentRegions.map((r) => {
     const comp = r.cells;
     if (!comp.length) return { x: 0, y: 0 };

@@ -29,6 +29,15 @@ export function isFreeLayer(layer: Pick<LayerDef, 'kind' | 'id'>): boolean {
   return layer.kind === 'road' || layer.kind === 'route' || layer.kind === 'river';
 }
 
+/** 按 id 查是否自由路径层（kind 单源的 lookup 版；未知层/无 world = false——消费点禁写 id 三连比较） */
+export function isFreeLayerId(
+  world: Pick<World, 'layers'> | null | undefined,
+  layerId: string,
+): boolean {
+  const l = world?.layers.find((x) => x.id === layerId);
+  return !!l && isFreeLayer(l);
+}
+
 /** 默认全部图层隐藏（含自由层）；选中层仍可显示（选中 ≡ 显示） */
 export function defaultLayerVisible(_layer: Pick<LayerDef, 'kind' | 'id'>): boolean {
   return false;

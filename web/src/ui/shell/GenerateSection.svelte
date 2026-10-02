@@ -3,15 +3,16 @@
    * 生成模式的图层展开内容（2026-09-30 三模式重构：把手架构退役，本组件 = 纯面板体）。
    * 由工作区「生成」模式在图层树焦点行下方渲染。
    *
-   * **生成 = 针对焦点层的三层语义**：
-   * - cells 地块层 → 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
-   * - height 高度层 → 「生成高度图」：只重跑地形 + 海陆删旧建新（onRegen('height')）
-   * - 其他有 profile 的层 → 单层再生成（onRegen(layerId)；count 等 params 类型化控件）
-   * - 路径类/无 profile → 面板禁用提示（生成方法待设计）
+   * **生成 = 针对焦点层的三分支（读 `LayerDef.genStrategy`，禁比 id 字符串）**：
+   * - `scatter`（cells）→ 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
+   * - `heightmap`（height）→ 「生成高度图」：只重跑地形 + 海陆删旧建新（onRegen(layerId)）
+   * - `elements`（缺省）有 profile params → 单层再生成（onRegen；params 类型化控件）
+   * - 路径类生成方法待设计（GEN R7）：暂无专属策略值，走 elements 分支（行为保持）
    * 防误触由「须先切生成模式」承担（原 D5 长按把手随把手架构退役）。
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
   import type { WorldShape } from '../../core/layer/genTypes';
+  import type { GenStrategy } from '../../core/types';
   import { HARD_MAX_DENSITY } from '../../core/world';
 
   let {
@@ -23,6 +24,7 @@
     shape = null as WorldShape | null,
     layerId = 'height',
     layerName = '',
+    strategy = 'elements' as GenStrategy,
     layerParams = null as Record<string, number | string | boolean> | null,
     onGenerate,
     onShape,
@@ -35,27 +37,27 @@
     seedInput?: string;
     densityInput?: number;
     shape?: WorldShape | null;
-    /** 焦点层：cells=重新撒点；height=生成高度图；有 profile 的层=单层再生成；其余禁用 */
+    /** 焦点层 id（onRegen 目标；分支判定走 strategy） */
     layerId?: string;
     layerName?: string;
+    /** 该层生成策略（App 经 core/layer/flags 取，单源） */
+    strategy?: GenStrategy;
     /** 该层 profile 参数（editor.profiles 单源） */
     layerParams?: Record<string, number | string | boolean> | null;
-    /** 整世界重建（仅 cells 层走此入口） */
+    /** 整世界重建（仅 scatter 层走此入口） */
     onGenerate: (seed: number, n: number) => void;
     onShape?: (key: keyof WorldShape, value: number | string | boolean) => void;
-    /** 单层再生成（store.regenLayer；height 会连带删旧建新海陆） */
+    /** 单层再生成（store.regenLayer；heightmap 会连带删旧建新海陆） */
     onRegen?: (layerId: string) => void;
     /** 单层参数写回（store.setProfileParam，已含草稿防抖持久化） */
     onParam?: (key: string, value: number | string | boolean) => void;
   } = $props();
 
-  const isCells = $derived(layerId === 'cells');
-  const isHeight = $derived(layerId === 'height');
-  const isPath = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
-  /** 生成可用性：cells/height 恒可用；其他层需有 profile params（路径类待设计=禁用） */
-  const canGen = $derived(isCells || isHeight || (layerParams !== null && Object.keys(layerParams).length > 0));
-  const genLabel = $derived(
-    isCells ? '重新撒点' : isHeight ? '生成高度图' : isPath ? '生成（待设计）' : `生成「${layerName}」`,
+  const isScatter = $derived(strategy === 'scatter');
+  const isHeightmap = $derived(strategy === 'heightmap');
+  /** 生成可用性：scatter/heightmap 恒可用；其他层需有 profile params */
+  const canGen = $derived(
+    isScatter || isHeightmap || (layerParams !== null && Object.keys(layerParams).length > 0),
   );
 
   /** 非 height 层参数 key 的人话标签（未列出的 key 按原样显示） */
@@ -76,7 +78,7 @@
 
   function fire() {
     if (generating || !canGen) return;
-    if (isCells) onGenerate(Number(seedInput) || 1, densityInput);
+    if (isScatter) onGenerate(Number(seedInput) || 1, densityInput);
     else onRegen?.(layerId);
   }
 </script>
@@ -84,7 +86,7 @@
 <div class="wrap">
   {#if canGen}
     <div class="panel">
-      {#if isCells}
+      {#if isScatter}
         <!-- 地块层 = 重新撒点（原「总生成」语义归位到地块层） -->
         <div class="row">
           <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
@@ -120,7 +122,7 @@
             <label class="sm">侵蚀 <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} /></label>
           </div>
         {/if}
-      {:else if isHeight}
+      {:else if isHeightmap}
         <!-- 高度层 = 生成高度图（同参重跑；海陆元素随之删旧建新） -->
         <div class="row">
           <span class="title">生成高度图「{layerName}」</span>
@@ -200,7 +202,7 @@
           <div class="hint">将替换「{layerName}」现有元素（需命令重构落地后方可撤销）</div>
         {/if}
       {/if}
-      {#if generating && isCells}
+      {#if generating && isScatter}
         <div class="prog"><div class="pfill" style="width:{genProgress}%"></div><span>{genStep} {genProgress}%</span></div>
       {/if}
     </div>

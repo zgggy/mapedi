@@ -71,6 +71,17 @@ export type LabelMode = 'none' | 'name' | 'coreLabel';
 /** cell 级标记 */
 export type CellMarker = 'none' | 'id' | 'height';
 
+/**
+ * 生成策略（层身份的显式声明，替代散落的 `'cells'/'height'` id 特判）：
+ * - `scatter`：重新撒点——Voronoi 重建整世界（cells 层）
+ * - `heightmap`：地形赋高度——重跑地形场 + 派生层删旧建新（height 层）
+ * - `elements`：以单元布局/聚合（缺省；无显式声明的层都是它）
+ * 路径类（road/route/river）生成方法待设计（GEN R7），暂无专属值——
+ * 其生成面板走「有 profile params 即可再生成」的通用分支，行为不变。
+ * 读取一律经 `core/layer/flags.ts`，禁止在消费点直接比 id。
+ */
+export type GenStrategy = 'scatter' | 'heightmap' | 'elements';
+
 export interface LayerDef {
   id: LayerId;
   name: string;
@@ -80,7 +91,7 @@ export interface LayerDef {
   parentLayerId?: LayerId;
   /** 显示开关；缺省见 displayCompose.defaultLayerVisible */
   visible?: boolean;
-  /** 叠加透明度 0–1；缺省按树深度 */
+  /** 叠加透明度 0–1；缺省 0.88（见 displayCompose） */
   opacity?: number;
   /** 核心地块符号（本层元素的 coreCellId 处画什么） */
   coreSymbol?: CoreSymbol;
@@ -92,6 +103,13 @@ export interface LayerDef {
   cellMarker?: CellMarker;
   /** 纯网格底图层：不进语义叠画（如地块网格） */
   baseMesh?: boolean;
+  /** 生成策略；缺省 'elements'（见 GenStrategy） */
+  genStrategy?: GenStrategy;
+  /** 生成/重建完成后本层默认显示并成为焦点（产品默认：生成 → 看地形 = height 层） */
+  focusAfterGen?: boolean;
+  /** 本层域 = cell 高度：元素为高度区间档（派生、不可手建）、绘制刷高度值、
+   *  选中=区间档、hover/笔刷高度标签走 overlay（height 层） */
+  editsHeight?: boolean;
   allowOverlap: boolean;
   requireAdjacency: boolean;
   requireCenter: boolean;

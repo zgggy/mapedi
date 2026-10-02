@@ -18,6 +18,7 @@ import {
   type ElementStylePatch,
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
+import { defaultFocusLayerId } from '../core/layer/flags';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
@@ -477,11 +478,11 @@ export class CommandService {
         return;
       }
       const layer = this.world.layers.find((l) => l.id === id)!;
-      // 1-b：删除图层入栈（层定义+其元素+渲染配置整包恢复；undo 后焦点保持 cells——UI 态不入历史）
+      // 1-b：删除图层入栈（层定义+其元素+渲染配置整包恢复；undo 后焦点回落底图层——UI 态不入历史）
       const cmd = new DeleteLayerCommand(layer, this.world);
       cmd.apply(this.world);
       history.run(this.world, cmd, { alreadyApplied: true });
-      if (this.focusLayer === id) this.focusLayer = 'cells';
+      if (this.focusLayer === id) this.focusLayer = defaultFocusLayerId(this.world);
       this.touchWorld();
       this.status = '已删除图层';
       return;
@@ -736,7 +737,7 @@ export class CommandService {
     }
 
     // 道路/航线/河流：工作区「添加」= 建一条空曲线，再在地图上绘制控制点
-    if (layerId === 'road' || layerId === 'route' || layerId === 'river') {
+    if (isFreeLayerDef(meta)) {
       const name = this.newName.trim() || `${meta.name} ${(this.world.paths?.filter((p) => p.layerId === layerId).length ?? 0) + 1}`;
       if (!this.world.paths) this.world.paths = [];
       const existingEmpty = this.world.paths.find(

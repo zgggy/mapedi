@@ -18,6 +18,7 @@ export function builtinLayers(): LayerDef[] {
       kind: 'custom',
       modeDefault: 'view',
       baseMesh: true,
+      genStrategy: 'scatter',
       cellMarker: 'none',
       allowOverlap: true,
       requireAdjacency: false,
@@ -29,6 +30,9 @@ export function builtinLayers(): LayerDef[] {
       name: '高度',
       kind: 'height',
       modeDefault: 'edit',
+      genStrategy: 'heightmap',
+      focusAfterGen: true,
+      editsHeight: true,
       allowOverlap: true,
       requireAdjacency: false,
       requireCenter: false,
@@ -243,6 +247,12 @@ export function ensureBuiltinLayers(world: World): World {
         cur.cellMarker = 'none';
         changed = true;
       }
+      // 层身份标志位（genStrategy/focusAfterGen/editsHeight/baseMesh）：旧档缺字段 → 回填内置声明。
+      // 无 UI 入口可改，强制与内置一致（与 kind 同策略）。
+      if (b.baseMesh !== undefined && cur.baseMesh !== b.baseMesh) { cur.baseMesh = b.baseMesh; changed = true; }
+      if (b.genStrategy !== undefined && cur.genStrategy !== b.genStrategy) { cur.genStrategy = b.genStrategy; changed = true; }
+      if (b.focusAfterGen !== undefined && cur.focusAfterGen !== b.focusAfterGen) { cur.focusAfterGen = b.focusAfterGen; changed = true; }
+      if (b.editsHeight !== undefined && cur.editsHeight !== b.editsHeight) { cur.editsHeight = b.editsHeight; changed = true; }
     }
   }
   if (!world.paths) world.paths = [];

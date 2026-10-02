@@ -5,6 +5,8 @@
    */
   import type { ElementStyle, ElementStylePatch } from '../../core/layer/style';
   import { defaultElementStyle, patchElementStyle } from '../../core/layer/style';
+  import { isFreeLayerId } from '../../core/displayCompose';
+  import type { World } from '../../core/types';
   import PanelShell from './PanelShell.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
 
@@ -12,6 +14,7 @@
     open = false,
     layerId = '',
     layerName = '',
+    world = null,
     cfg,
     onChange,
     onCollapse,
@@ -22,6 +25,8 @@
     open?: boolean;
     layerId?: string;
     layerName?: string;
+    /** 层身份判定（自由路径样式）需要 kind——id 三连比较已退役 */
+    world?: World | null;
     cfg?: ElementStyle;
     onChange?: (patch: ElementStylePatch) => void;
     onCollapse?: () => void;
@@ -32,7 +37,7 @@
     embedded?: boolean;
   } = $props();
 
-  const isFreeform = $derived(layerId === 'road' || layerId === 'route' || layerId === 'river');
+  const isFreeform = $derived(isFreeLayerId(world, layerId));
   const c = $derived(patchElementStyle(cfg ?? defaultElementStyle(), {}));
 
   let debounceTimer = 0;

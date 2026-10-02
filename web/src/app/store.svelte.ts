@@ -13,6 +13,7 @@ import { createRng } from '../core/rng';
 import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
+import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID } from '../core/layer/flags';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { loadWorldAsync } from '../core/generate/runGenerate';
@@ -41,7 +42,7 @@ const ui = $state({
   seedInput: String(Math.floor(Math.random() * 1e9)),
   densityInput: DEFAULT_DENSITY,
   densityUnlocked: false,
-  focusLayer: 'cells',
+  focusLayer: DEFAULT_FOCUS_LAYER_ID,
   selectedRegionId: null as string | null,
   newName: '',
   annexPick: false,
@@ -391,7 +392,7 @@ export class EditorStore {
     history.clear();
     this.world = world;
     ui.projectEpoch++;
-    this.focusLayer = 'cells';
+    this.focusLayer = defaultFocusLayerId(world);
     this.selectedRegionId = null;
     this.draw = emptyDrawSession();
     this.annexPick = false;

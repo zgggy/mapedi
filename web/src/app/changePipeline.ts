@@ -19,7 +19,7 @@ import {
   rebuildHeightIntervalElements,
 } from '../core/layer/heightElements';
 import { heightTopologyChanged } from '../core/heightRegions';
-import { rebuildLandSeaRegions } from '../core/layer/landSea';
+import { rebuildLandSeaRegions, landSeaLayerRegions } from '../core/layer/landSea';
 import { queueHeightDelta, queuePiecePatch } from '../render/patchQueues';
 
 /** store 注入的宿主能力 */
@@ -151,13 +151,11 @@ export class ChangePipeline {
     const dirtyList = dirty && dirty.size ? [...dirty] : sampleIds;
     // rebuild 前后 diff landsea 成员 → 件环增量补丁（与高度 Δ 同型）
     const prevCells = new Map<string, Set<number>>();
-    for (const r of world.regions) {
-      if (r.layerId !== 'landsea') continue;
+    for (const r of landSeaLayerRegions(world)) {
       prevCells.set(r.id, new Set(r.cells));
     }
     rebuildLandSeaRegions(world, dirtyList ?? null);
-    for (const r of world.regions) {
-      if (r.layerId !== 'landsea') continue;
+    for (const r of landSeaLayerRegions(world)) {
       const prev = prevCells.get(r.id);
       const now = new Set(r.cells);
       const added: number[] = [];

@@ -12,6 +12,7 @@
   import LeftRail from './ui/shell/LeftRail.svelte';
   import { clearViewMemory } from './ui/viewMemory';
   import { isLayerShown } from './core/displayCompose';
+  import { genStrategyOf, editsHeightAt, editsHeightLayerId, heightmapLayerId } from './core/layer/flags';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
   import StatusBar from './ui/shell/StatusBar.svelte';
@@ -40,6 +41,8 @@
 
   const world = $derived(editor.world);
   const focusLayer = $derived(editor.focusLayer);
+  /** 焦点层生成策略（GenerateSection 三分支单源；pre-world 回落 'elements'，行展开本就需要 world） */
+  const focusStrategy = $derived(genStrategyOf(world, focusLayer));
   const draw = $derived(editor.draw);
   const selectedRegionId = $derived(editor.selectedRegionId);
   const newName = $derived(editor.newName);
@@ -53,7 +56,7 @@
     if (!draw.active || !world) return '';
     const t = draw.targetRegionId ?? '';
     const layerId = t.startsWith('__height__')
-      ? 'height'
+      ? editsHeightLayerId(world.layers)
       : (world.regions.find((r) => r.id === t)?.layerId ?? focusLayer);
     const l = world.layers.find((x) => x.id === layerId);
     if (!l) return '';
@@ -72,8 +75,8 @@
       editor.notify();
       return;
     }
-    // 高度：选中区间 = 工作区间（与其它层同一列表）
-    if (focusLayer === 'height') {
+    // 高度域层（editsHeight）：选中区间 = 工作区间（与其它层同一列表）
+    if (editsHeightAt(world, focusLayer)) {
       editor.setHeightInterval(id);
       editor.selectedRegionId = id;
       editor.notify();
@@ -363,8 +366,9 @@
         shape={editor.worldShape}
         layerId={focusLayer}
         layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
-        layerParams={focusLayer === 'height' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
-        onShape={(k, v) => editor.setProfileParam('height', k, v)}
+        strategy={focusStrategy}
+        layerParams={focusStrategy === 'heightmap' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
+        onShape={(k, v) => editor.setProfileParam(heightmapLayerId(world?.layers), k, v)}
         onRegen={(id) => editor.regenLayer(id)}
         onParam={(k, v) => editor.setProfileParam(focusLayer, k, v)}
         onGenerate={(s, n) => {

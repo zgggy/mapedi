@@ -663,11 +663,29 @@ export function rebuildLandSeaRegions(world: World, dirty?: Iterable<CellId> | n
   );
 }
 
+/**
+ * 海陆层（landsea）元素——**身份判断的模块内单源**：
+ * 外部（高度 flush diff、聚合取海等）经此取数，勿再散写 `layerId === 'landsea'`。
+ */
+export function landSeaLayerRegions(world: World): Region[] {
+  return world.regions.filter((r) => r.layerId === 'landsea');
+}
+
+/** 是否海陆层（模块拥有的身份知识对外唯一入口；id 字面量只允许出现在本模块） */
+export function isLandSeaLayer(layerId: string): boolean {
+  return layerId === 'landsea';
+}
+
 /** 海岸 = 大陆/湖泊的边界环（海洋不描） */
 export function landSeaCoastRegions(world: World): Region[] {
-  return world.regions.filter(
-    (r) => r.layerId === 'landsea' && landSeaKindOf(r) !== 'ocean' && r.cells.length > 0,
+  return landSeaLayerRegions(world).filter(
+    (r) => landSeaKindOf(r) !== 'ocean' && r.cells.length > 0,
   );
+}
+
+/** 大陆（landsea 层 kind=continent）——大陆中心/标签等外部消费的单源选择器 */
+export function landSeaContinentRegions(world: World): Region[] {
+  return landSeaLayerRegions(world).filter((r) => landSeaKindOf(r) === 'continent');
 }
 
 /**
@@ -675,9 +693,7 @@ export function landSeaCoastRegions(world: World): Region[] {
  * 顺序与 cell.continentId 索引一致（rebuildLandSeaRegions 的赋值序）。
  */
 export function continentCellGroups(world: World): CellId[][] {
-  return world.regions
-    .filter((r) => r.layerId === 'landsea' && landSeaKindOf(r) === 'continent')
-    .map((r) => r.cells);
+  return landSeaContinentRegions(world).map((r) => r.cells);
 }
 
 export { lakeMaxCells };

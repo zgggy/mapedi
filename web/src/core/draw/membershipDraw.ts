@@ -5,7 +5,7 @@
 import type { CellId, Region, World } from '../types';
 import type { PlacementRule, SplitPolicy } from '../layer/config';
 import { placementAllows } from '../layer/config';
-import { markManualSplit } from '../layer/landSea';
+import { markManualSplit, isLandSeaLayer } from '../layer/landSea';
 
 export type OverwriteMode = 'emptyOnly' | 'replace';
 
@@ -110,7 +110,7 @@ export function membershipDrawStroke(
           changes.push({ cellId: id, fromElementId: o.id, toElementId: target.id });
         }
       }
-      if (actor.layerId === 'landsea' && landSeaIsOcean(target)) markManualSplit(target);
+      if (isLandSeaLayer(actor.layerId) && landSeaIsOcean(target)) markManualSplit(target);
     }
     target.cells = [...set];
   } else if (removeMode) {
@@ -118,7 +118,7 @@ export function membershipDrawStroke(
       if (set.has(id)) {
         set.delete(id);
         changes.push({ cellId: id, fromElementId: target.id, toElementId: null });
-        if (actor.layerId === 'landsea' && landSeaIsOcean(target)) markManualSplit(target);
+        if (isLandSeaLayer(actor.layerId) && landSeaIsOcean(target)) markManualSplit(target);
       }
     }
     target.cells = [...set];

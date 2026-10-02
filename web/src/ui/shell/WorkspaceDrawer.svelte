@@ -8,7 +8,9 @@
    */
   import { tick } from 'svelte';
   import type { Region, World } from '../../core/types';
-  import { rebuildHeightIntervalElements } from '../../core/layer/heightElements';
+  import { rebuildHeightIntervalElements, heightIntervalRegions } from '../../core/layer/heightElements';
+  import { editsHeightAt } from '../../core/layer/flags';
+  import { isFreeLayerId } from '../../core/displayCompose';
   import { childLayerIdOf } from '../../core/regionOps';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
@@ -80,10 +82,8 @@
   let text = $state('');
   const filter = $derived(text);
 
-  const isHeight = $derived(focusLayer === 'height');
-  const isFreeLayer = $derived(
-    focusLayer === 'road' || focusLayer === 'route' || focusLayer === 'river',
-  );
+  const isHeight = $derived(editsHeightAt(world, focusLayer));
+  const isFreeLayer = $derived(isFreeLayerId(world, focusLayer));
 
   /** 自由路径层：列出 paths（与 cell 无关）；名称过滤（C4） */
   const pathItems = $derived(
@@ -167,13 +167,8 @@
 
   $effect(() => {
     // 只补缺失的高度区间元素；禁止依赖 world.regions 的条件重建（会无限触发）
-    if (world && isHeight) {
-      const has = world.regions.some(
-        (r) => r.layerId === 'height' && r.attributes?.kind === 'interval',
-      );
-      if (!has) {
-        rebuildHeightIntervalElements(world);
-      }
+    if (world && isHeight && heightIntervalRegions(world).length === 0) {
+      rebuildHeightIntervalElements(world);
     }
   });
 
