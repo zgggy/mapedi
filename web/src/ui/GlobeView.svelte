@@ -65,11 +65,21 @@
   let lastX = 0;
   let lastY = 0;
   const wheelOff = new THREE.Vector3();
-  const tipRight = new THREE.Vector3();
   const tipQ = new THREE.Quaternion();
   /** 拖动手感（rad/px）：左右=自转、上下=翻转 */
   const SPIN_K = 0.005;
   const TIP_K = 0.005;
+  /** 释放惯性：指数衰减速率(/s)与停机阈值(rad/s)——拨一下继续滑行（2026-10-02 用户要回惯性） */
+  const INERTIA_K = 3.0;
+  const V_CUT = 0.03;
+  /** 翻转极点限位：累计角到 ±90°（极点正对相机）即停，拖不过去（2026-10-02 用户定） */
+  const TIP_LIMIT = Math.PI / 2;
+  let spinV = 0; // 自转角速度 rad/s（释放后惯性滑行）
+  let tipV = 0; // 翻转角速度 rad/s
+  let tipAngle = 0; // 累计翻转角（绕固定屏幕水平轴的绝对量 → 可钳制）
+  const tipAxis = new THREE.Vector3(1, 0, 0); // 屏幕水平轴（相机只缩放不改方向 → 挂载时定一次）
+  let lastMoveTs = 0;
+  let prevFrameTs = 0;
 
   const home = $derived.by(() => {
     const base = astro ?? world?.astro ?? null;
@@ -353,6 +363,8 @@
       camTarget.set(g.target[0], g.target[1], g.target[2]);
     }
     camera.lookAt(camTarget);
+    // 屏幕水平轴 = lookAt 后的相机右轴（up=Y）；相机此后只缩放不改方向 → 一次定死
+    tipAxis.crossVectors(camera.up, wheelOff.copy(camera.position).sub(camTarget)).normalize();
     // 光照塑形：让高度凸起可读（平行光 + 弱补光）
     const sun = new THREE.DirectionalLight(0xffffff, 1.15);
     sun.position.set(2.2, 1.6, 2.6);
@@ -380,6 +392,9 @@
       dragId = e.pointerId;
       lastX = e.clientX;
       lastY = e.clientY;
+      spinV = 0; // 抓取即接管：清掉残余惯性
+      tipV = 0;
+      lastMoveTs = performance.now();
       try {
         renderer.domElement.setPointerCapture(e.pointerId);
       } catch {
@@ -394,16 +409,23 @@
       lastY = e.clientY;
       // 左右 → 星球绕自转轴自转（meshHolder 局部 Y = planetRoot 倾斜后的轴；
       // 台架/黄道不随——轴、赤道、支架对自转不变，正是实物地球仪手感）
+      const now = performance.now();
+      const dt = Math.max(0.001, (now - lastMoveTs) / 1000);
+      lastMoveTs = now;
       if (dx !== 0) {
-        spinT += dx * SPIN_K;
+        const dth = dx * SPIN_K;
+        spinT += dth;
         meshHolder.rotation.y = spinT;
+        spinV = spinV * 0.5 + (dth / dt) * 0.5; // 平滑估速，供释放惯性
       }
-      // 上下 → 星球系统（球+轴+赤道+支架）绕「屏幕水平轴」翻转；黄道（standGroup）不随
+      // 上下 → 星球系统（球+轴+赤道+支架）绕「屏幕水平轴」翻转；黄道（standGroup）不随。
+      // 累计角钳在 ±90°：极点翻到正对相机即到头，拖不过去。
       if (dy !== 0) {
-        wheelOff.copy(camera.position).sub(camTarget);
-        tipRight.crossVectors(camera.up, wheelOff).normalize(); // 相机右轴（up=Y → 黄道面水平基准）
-        tipQ.setFromAxisAngle(tipRight, dy * TIP_K);
-        tipGroup.quaternion.premultiply(tipQ);
+        const prev = tipAngle;
+        tipAngle = Math.min(TIP_LIMIT, Math.max(-TIP_LIMIT, tipAngle + dy * TIP_K));
+        tipQ.setFromAxisAngle(tipAxis, tipAngle);
+        tipGroup.quaternion.copy(tipQ);
+        tipV = tipV * 0.5 + ((tipAngle - prev) / dt) * 0.5; // 撞限位 → applied=0 → 速度归零
       }
     };
     const onPointerUp = (e: PointerEvent) => {
@@ -428,10 +450,35 @@
 
     const loop = () => {
       anim = requestAnimationFrame(loop);
+      const nowTs = performance.now();
+      const dt = Math.min(0.05, Math.max(0, (nowTs - prevFrameTs) / 1000));
+      prevFrameTs = nowTs;
       if (spinPreview && meshHolder) {
         const dir = prograde ? 1 : -1;
         spinT += dir * (24 / Math.max(6, rotHours)) * 0.004;
         meshHolder.rotation.y = spinT;
+      }
+      // 释放惯性（拖动中不积分：拖动由指针直驱）
+      if (dragId === null) {
+        if (spinV !== 0) {
+          spinT += spinV * dt;
+          spinV *= Math.exp(-INERTIA_K * dt);
+          if (Math.abs(spinV) < V_CUT) spinV = 0;
+          meshHolder.rotation.y = spinT;
+        }
+        if (tipV !== 0) {
+          const prev = tipAngle;
+          tipAngle = Math.min(TIP_LIMIT, Math.max(-TIP_LIMIT, tipAngle + tipV * dt));
+          if (tipAngle !== prev) {
+            tipQ.setFromAxisAngle(tipAxis, tipAngle);
+            tipGroup.quaternion.copy(tipQ);
+          }
+          const outward =
+            (tipAngle >= TIP_LIMIT && tipV > 0) || (tipAngle <= -TIP_LIMIT && tipV < 0);
+          if (outward) tipV = 0; // 撞极点：惯性也停
+          tipV *= Math.exp(-INERTIA_K * dt);
+          if (Math.abs(tipV) < V_CUT) tipV = 0;
+        }
       }
       // 相机固定（四修）：无 controls.update、无回正滚转、无逐帧弧定向——
       // 黄道水平、台架姿态全部由组结构静态保证。
