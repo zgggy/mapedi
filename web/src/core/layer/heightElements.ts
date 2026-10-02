@@ -81,7 +81,10 @@ export function rebuildHeightIntervalElements(world: World): Region[] {
 
 /**
  * 归一到**精确档**（lo ≤ h ≤ hi）：旧档嵌套累积（h≥lo）的遗留成员在此纠正。
- * 区间本就是派生数据（cells = 高度档位），元素对象/命名/顺序保留，仅重导成员。
+ * 区间本就是派生数据（cells = 高度档位），元素对象/顺序保留，仅重导成员；
+ * **名称随表单源**（2026-10-02 用户改「高平原」→「高原」——区间元素是 12 档
+ * 结构数据，名称不接受独立定制，载入即与 NAMES 对齐；副作用：若曾手动改过
+ * 档名会被表默认值覆盖）。
  */
 export function normalizeHeightIntervalElements(world: World): void {
   const els = heightIntervalRegions(world);
@@ -110,6 +113,7 @@ export function normalizeHeightIntervalElements(world: World): void {
     if (!el) return;
     el.cells = next[i];
     el.overlaps = []; // 精确档互不相交
+    el.name = iv.name; // 名称随表单源（见文件头注释）
   });
 }
 

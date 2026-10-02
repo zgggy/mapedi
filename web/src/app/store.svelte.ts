@@ -482,7 +482,7 @@ export class EditorStore {
       w = deserializeWorld(json);
     }
     if (projCache) installProjCache(projCache);
-    // 旧档区间嵌套累积（h≥lo）→ 精确档归一（成员由高度重导，对象/命名保留）
+    // 旧档区间嵌套累积（h≥lo）→ 精确档归一（成员由高度重导，对象/顺序保留，名称随表单源）
     normalizeHeightIntervalElements(w);
     ensureBuiltinLayers(w);
     if (!w.astro) w.astro = defaultStarSystem(w.meta.seed, w.climate);
