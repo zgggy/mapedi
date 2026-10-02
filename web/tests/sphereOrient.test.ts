@@ -8,9 +8,9 @@ describe('sphere orientation matches 2D map', () => {
     expect(Math.abs(z)).toBeLessThan(0.01);
   });
 
-  it('north (+lat) is -Y (canvas-like, down on screen)', () => {
+  it('north (+lat) is +Y (three.js up, aligned with 2D north-up; 2026-10-02)', () => {
     const [, y] = lonLatToVec3({ lon: 0, lat: 90 });
-    expect(y).toBeLessThan(-0.9);
+    expect(y).toBeGreaterThan(0.9);
   });
 
   it('lon 0 faces +Z (camera default)', () => {

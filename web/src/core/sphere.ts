@@ -4,16 +4,17 @@ const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
 /**
- * 球面向量：与 2D 地图同一屏幕约定。
- * - 东（+lon）→ +X（画面右）
- * - 北（+lat）→ −Y（画面下，因 Canvas +y 向下，与墨卡托绘制一致）
+ * 球面向量：与 2D 地图**同为北在上**（2026-10-02 用户指正对齐——本函数原按 Canvas
+ * +y 向下写 north→−Y，属已归档 Canvas2D 时代约定；three.js +Y 朝画面上方，故翻正）。
+ * - 北（+lat）→ +Y（画面上）
+ * - 东（+lon）→ +X（画面右；相机面向本初子午线时）
  * - 本初子午线 → +Z（默认镜头看向 lon=0）
  */
 export function lonLatToVec3(p: LonLat): [number, number, number] {
   const lon = p.lon * D2R;
   const lat = p.lat * D2R;
   const cl = Math.cos(lat);
-  return [cl * Math.sin(lon), -Math.sin(lat), cl * Math.cos(lon)];
+  return [cl * Math.sin(lon), Math.sin(lat), cl * Math.cos(lon)];
 }
 
 export function vec3ToLonLat(v: [number, number, number]): LonLat {
@@ -21,7 +22,7 @@ export function vec3ToLonLat(v: [number, number, number]): LonLat {
   const len = Math.hypot(x, y, z) || 1;
   return {
     lon: Math.atan2(x / len, z / len) * R2D,
-    lat: -Math.asin(Math.max(-1, Math.min(1, y / len))) * R2D,
+    lat: Math.asin(Math.max(-1, Math.min(1, y / len))) * R2D,
   };
 }
 
