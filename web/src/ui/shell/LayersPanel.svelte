@@ -31,7 +31,6 @@ import { isRowOrControlClick } from './shell';
     expandPanel,
     taskMode = 'check',
     onOrganize,
-    gearIds = new Set<string>(),
   }: {
     world: World | null;
     focusLayer?: string;
@@ -53,8 +52,6 @@ import { isRowOrControlClick } from './shell';
     onDeleteLayer?: (id: string) => void;
     /** 聚焦行下方的模式展开区（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     expandPanel?: import('svelte').Snippet;
-    /** L0 ⚙：有专属生成面板的层 id 集（App 按策略+profile 派生，2026-10-02 D6） */
-    gearIds?: Set<string>;
   } = $props();
 
   /** 本面板私有创建/搜索文本（2026-10-01 用户定：两面板各自只搜自己，互不影响） */
@@ -270,7 +267,6 @@ import { isRowOrControlClick } from './shell';
           depth={row.depth}
           selected={focusLayer === row.id}
           hidden={row.hidden}
-          gear={gearIds.has(row.id)}
           open={focusLayer === row.id}
           content={focusLayer === row.id && taskMode !== 'draw'
             ? taskMode === 'organize'

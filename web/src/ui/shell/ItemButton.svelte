@@ -17,7 +17,6 @@
     depth = 0,
     selected = false,
     hidden = false,
-    gear = false,
     open = false,
     content,
     onClick,
@@ -35,10 +34,8 @@
     depth?: number;
     /** 选中：金色外框 */
     selected?: boolean;
-    /** 已隐藏（L0 状态点，2026-10-02 D6 拍板：异常态才出现） */
+    /** 已隐藏（L0 可见态：**显示中才画 👁，不显示就无图标**——2026-10-03 用户定，不用 🚫） */
     hidden?: boolean;
-    /** 有专属生成面板（L0：⚙ 小标） */
-    gear?: boolean;
     /** 本行展开态（选中/聚焦驱动；open 时原地长出 content） */
     open?: boolean;
     /** 展开内容（检查/生成/绘制/组织模式区；缺省 = 纯行不可展开） */
@@ -81,11 +78,8 @@
           <span class="desc">{desc}</span>
         {/if}
       </span>
-      {#if hidden}
-        <span class="badge" title="已隐藏">🚫</span>
-      {/if}
-      {#if gear}
-        <span class="badge" title="有专属生成面板">⚙</span>
+      {#if !hidden}
+        <span class="badge" title="显示中">👁</span>
       {/if}
       {#if content}
         <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -124,7 +118,7 @@
   .ibtn:hover {
     background: rgba(255, 255, 255, 0.04);
   }
-  /* L0 隐藏态（D6）：名称压暗 + 🚫 点——异常态才出现，不给正常行加噪 */
+  /* L0 隐藏态：无眼睛即不显示（用户定），名称压暗辅助扫读 */
   .ibtn.hidden .nm {
     opacity: 0.55;
   }
