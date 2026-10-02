@@ -96,7 +96,15 @@
       description: r ? ((a?.description as string) ?? '') : meta ? `${meta.emoji} ${meta.kind}` : '',
       // 子元素行已删（2026-10-01 拍板：子元素相关功能之后重新设计）
       extra: r
-        ? [{ label: 'ID', value: r.id }]
+        ? [
+            {
+              label: '隶属',
+              value: r.parentId
+                ? (world?.regions.find((x) => x.id === r.parentId)?.name ?? r.parentId)
+                : '—',
+            },
+            { label: 'ID', value: r.id },
+          ]
         : l
           ? [
               { label: '分类', value: catLabel(meta?.category ?? 'custom') },
@@ -175,6 +183,7 @@
       basicColor={view.basicColor}
       basicEditable={view.basicEditable}
       cellCount={view.cellCount}
+      countLabel="地块"
       description={view.description}
       neighbors={view.neighbors}
       extra={view.extra}
@@ -186,6 +195,7 @@
       basicColor="#6b7c93"
       basicEditable={false}
       cellCount={view.cellCount}
+      countLabel="元素"
       description={view.description}
       neighbors={[]}
       extra={view.extra}
@@ -221,7 +231,7 @@
   .vis-toggle {
     display: block;
     width: 100%;
-    margin: 6px 0 2px;
+    margin: 4px 0 2px;
     border: 1px solid var(--panel-border);
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.05);
@@ -240,7 +250,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin: 6px 0 2px;
+    margin: 4px 0 2px;
     font-size: 11px;
     color: var(--text-dim);
   }
@@ -248,7 +258,7 @@
     flex: 0 0 auto;
   }
   .sty {
-    margin-top: 6px;
+    margin-top: 4px;
   }
   .dim {
     margin: 0;

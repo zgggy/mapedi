@@ -64,17 +64,13 @@
 </script>
 
 {#snippet inner()}
-    <div class="body">
+    <div class="body" class:emb={embedded}>
       {#if isFreeform}
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素样式。</p>
       {:else}
       <div class="grp">
-        <div class="grp-hd">边界</div>
-        <label class="r chk">
-          <input type="checkbox" checked={c.border.enabled}
-            onchange={(e) => debouncedChange({ border: { enabled: e.currentTarget.checked } })} />
-          显示
-        </label>
+        <div class="grp-hd"><span>边界</span><label class="chk"><input type="checkbox" checked={c.border.enabled}
+            onchange={(e) => debouncedChange({ border: { enabled: e.currentTarget.checked } })} />显示</label></div>
         {#if c.border.enabled}
           <label class="r">
             宽度
@@ -95,12 +91,8 @@
       </div>
 
       <div class="grp">
-        <div class="grp-hd">填充</div>
-        <label class="r chk">
-          <input type="checkbox" checked={c.fill.enabled}
-            onchange={(e) => debouncedChange({ fill: { enabled: e.currentTarget.checked } })} />
-          显示
-        </label>
+        <div class="grp-hd"><span>填充</span><label class="chk"><input type="checkbox" checked={c.fill.enabled}
+            onchange={(e) => debouncedChange({ fill: { enabled: e.currentTarget.checked } })} />显示</label></div>
         {#if c.fill.enabled}
           <label class="r">
             透明
@@ -147,20 +139,35 @@
   .body {
     padding: 8px 12px 12px;
   }
+  /* 嵌入检查展开区：去自身 padding、贴齐信息区左缘（2026-10-02 紧凑化） */
+  .body.emb {
+    padding: 2px 0 0;
+  }
   .grp {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
   .grp-hd {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     font-size: 10px;
     color: var(--text-dim);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     letter-spacing: 0.5px;
+  }
+  .grp-hd .chk {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    letter-spacing: 0;
   }
   .r {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     color: var(--text-dim);
   }
   .r input[type='range'] {
@@ -178,8 +185,5 @@
     font-variant-numeric: tabular-nums;
     color: var(--text);
     font-size: 11px;
-  }
-  .r.chk {
-    cursor: pointer;
   }
 </style>

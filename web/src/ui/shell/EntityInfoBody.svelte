@@ -10,6 +10,7 @@
     basicColor = '',
     basicEditable = true,
     cellCount = 0,
+    countLabel = '地块',
     description = '',
     neighbors = [] as { id: string; name: string; color: string }[],
     extra = [] as { label: string; value: string }[],
@@ -19,6 +20,8 @@
     basicColor?: string;
     basicEditable?: boolean;
     cellCount?: number;
+    /** 计数行标签：元素=地块（cell 数）、图层=元素（region 数） */
+    countLabel?: string;
     description?: string;
     neighbors?: { id: string; name: string; color: string }[];
     extra?: { label: string; value: string }[];
@@ -43,33 +46,34 @@
 </script>
 
 <div class="body">
-  <label class="field">
-    <span>名称</span>
-    <input value={editName} oninput={(e) => (editName = e.currentTarget.value)} />
-  </label>
-
-  <label class="field">
-    <span>颜色</span>
+  <!-- 身份行（2026-10-02 紧凑化）：名称 + 颜色 同行 -->
+  <div class="field inline">
+    <span class="lb1">名称</span>
+    <input class="nm" value={editName} oninput={(e) => (editName = e.currentTarget.value)} />
+    <span class="lb1">颜色</span>
     <input
+      class="cl"
       type="color"
       value={editBasic || '#888888'}
       disabled={!basicEditable}
       oninput={(e) => (editBasic = e.currentTarget.value)}
     />
-  </label>
+  </div>
 
-  <div class="ex-row"><span class="lb">地块</span><span>{cellCount}</span></div>
+  <!-- 短 KV 流式排布（地块/分类/ID/子层… 自动并排换行） -->
+  {#if extra.length || cellCount >= 0}
+    <div class="flow">
+      <span class="ex"><span class="lb">{countLabel}</span>{cellCount}</span>
+      {#each extra as row (row.label)}
+        <span class="ex"><span class="lb">{row.label}</span>{row.value}</span>
+      {/each}
+    </div>
+  {/if}
 
   <label class="field">
-    <span>描述</span>
+    <span class="lb1">描述</span>
     <textarea rows="2" value={editDesc} oninput={(e) => (editDesc = e.currentTarget.value)}></textarea>
   </label>
-
-  {#if extra.length}
-    {#each extra as row (row.label)}
-      <div class="ex-row"><span class="lb">{row.label}</span><span>{row.value}</span></div>
-    {/each}
-  {/if}
 
   {#if neighbors.length}
     <div class="ex-row nbr-row">
@@ -100,10 +104,33 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    margin-bottom: 5px;
+    gap: 2px;
+    margin-bottom: 4px;
     color: var(--text-dim);
     font-size: 11px;
+  }
+  .field.inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+  .field .lb1 {
+    flex: 0 0 auto;
+    min-width: 2.5em;
+  }
+  .field.inline .nm {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .field.inline .cl {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 20px;
+    padding: 1px;
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    background: transparent;
+    cursor: pointer;
   }
   .field input,
   .field textarea {
@@ -111,6 +138,24 @@
   }
   .field input:disabled {
     opacity: 0.45;
+  }
+  /* 短 KV 流：并排铺、放不下自动换行（信息不减） */
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1px 14px;
+    margin-bottom: 3px;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .ex {
+    display: inline-flex;
+    gap: 5px;
+    align-items: baseline;
+    min-width: 0;
+  }
+  .ex .lb {
+    color: var(--text-dim);
   }
   .ex-row {
     display: flex;
@@ -127,7 +172,7 @@
   .nbr-row .nbr {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 10px;
+    gap: 2px 10px;
     min-width: 0;
   }
   .nb {
@@ -143,12 +188,12 @@
   }
   .primary {
     width: 100%;
-    margin-top: 3px;
+    margin-top: 2px;
     background: rgba(196, 123, 58, 0.4);
     border: 1px solid var(--panel-border);
     border-radius: 7px;
     color: inherit;
-    padding: 4px;
+    padding: 3px;
     cursor: pointer;
     font: inherit;
     font-size: 11px;
