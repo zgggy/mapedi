@@ -255,13 +255,15 @@
       );
       eqLine.rotation.z = -tilt;
       overlay.add(eqLine);
-      // 下弦弧：世界系（不倾斜）XZ 平面、半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、
-      // 同款青色细线；只画朝向相机的前半（默认机位略俯视 → 呈星球下方对称半圆 = "下弦"）。
-      // 挂 overlay（非 meshHolder）→ 不随地球自转；相机环绕（鼠标拖动）时随视角转动。
+      // 子午支架弧（2026-10-02 用户指正：原水平「下弦」半圆应旋转 90° —— 地球仪的弯支架）：
+      // 竖直半圆（C 形，开口朝右），端点 = 南北极，与轴/赤道同一 rotation.z=-tilt 变换
+      // （端点恰落在倾斜轴的两极上，轴尖微露如纺锤）；半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、
+      // 同款青色细线；整段在正对相机的竖直平面内，相机环绕（鼠标拖动）时随视角转到侧面。
+      // 挂 overlay（非 meshHolder）→ 不随地球自转。
       const arc: number[] = [];
       for (let i = 0; i <= 72; i++) {
-        const a = (i / 72) * Math.PI; // z = sin(a) ≥ 0：前半
-        arc.push(Math.cos(a) * 1.3, 0, Math.sin(a) * 1.3);
+        const a = -Math.PI / 2 + (i / 72) * Math.PI; // 南极 → 北极
+        arc.push(-Math.cos(a) * 1.3, Math.sin(a) * 1.3, 0);
       }
       const ag = new THREE.BufferGeometry();
       ag.setAttribute('position', new THREE.Float32BufferAttribute(arc, 3));
@@ -269,6 +271,7 @@
         ag,
         new THREE.LineBasicMaterial({ color: '#7ec8e3', transparent: true, opacity: 0.65 }),
       );
+      arcLine.rotation.z = -tilt;
       overlay.add(arcLine);
     }
 

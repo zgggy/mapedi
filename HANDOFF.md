@@ -20,7 +20,7 @@
   - **landsea 身份收进 landSea 模块**（选标志位而非标志——模块本职）：`landSeaLayerRegions`/`landSeaContinentRegions`/`isLandSeaLayer` 选择器单源；`displayCompose.isFreeLayerId` = kind 版 lookup（Viewport/WD/DisplayStylePanel 三处 id 三连比较收编，DisplayName 面板补 world prop）。
   - **迁移 ~35 处**：生成三分支（GenerateSection strategy prop/unified/generationService）、生成后聚焦（focusAfterGen，整链+单层）、worldShape 参数视图、showCellMesh（baseMesh）、高度域 UI（App 选中=区间、Viewport overlay 标签×2、WD canCreate+区间 ensure 收编 heightIntervalRegions）、flush diff/大陆中心/手动分割（选择器）、默认焦点回落（replaceWorld/删层回落=defaultFocusLayerId）、commandService 建层路径分支（isFreeLayerDef(meta)）；死码 `genLabel`/`isPath` 删；`types.ts` opacity 过时注释修正。**判定保留（注释说明）**：模块本域 id（political/heightElements/landSea 内部）、SVG 导出描边（storage 导出呈现域）、`__height__` 笔刷协议（区间元素属性驱动）。
   - **验收**：tsc 0 / svelte-check 0 errors（5 warning 存量）；浏览器=**旧档回填读证**（恢复档 cells gs=scatter、height 三标志齐、focus=cells）+ 生成三分支面板逐一命中（撒点/生成高度图/重新生成「国家」）+ height regen（status「已重新生成：height」、焦点与 visible=focusAfterGen 路径）+ 高度层创建行禁用留搜索框 + 球面↔平面往返零错（**会话1 左轨 viewMode bug 未复现**）、`lastError` 空。**未跑测试**（纪律）。
-  - 存量进度：容差 ✓ / 图层名标志位 **✓** / as-unknown ☐。
+  - **插单（同轮用户点名）**：球面半圆弧**竖转 90° = 地球仪弯支架**——`GlobeView` 下弦弧几何改竖直 C 形（端点=南北极、`rotation.z=-tilt` 与轴/赤道同一变换、半径 1.30 不变），像素方位分析验收（带内青像素全左、上/下分布、S/SE/E=0 证旧横弧消失）、lastError 空。存量进度：容差 ✓ / 图层名标志位 **✓** / as-unknown ☐。
 
 - **✓ 第二十五轮（2026-10-01 用户反馈批四件）**：
   - **revealRaf 修复**：5-b3 换 revealCancel 时漏改 onMount cleanup → 切球面即 `ReferenceError`（用户报障）——已改 `revealCancel?.()`，来回切 4 次零错。
