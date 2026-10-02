@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第三十一轮 图层名标志位。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第三十二轮 球面手感+C7移除+展开区方案。**
 
 ## 先读
 
@@ -13,7 +13,14 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十一轮完成；在案：`20b3c20` 5-c → `36f7773` 步骤7 → `6a0da6d` 第三十轮 容差 → 第三十一轮 图层名标志位）
+## 当前状态（第三十二轮完成；在案：`36f7773` 步骤7 → `6a0da6d` 三十轮 → `2888b97` 三十一轮 → `e5d4946`+`3d3a9a9` 三十二轮 → 方案 `docs/EXPAND_REFACTOR` 待拍板）
+
+- **✓ 第三十二轮（2026-10-02 球面手感 + C7 移除 + 展开区方案）**：
+  - **惯性**（用户要回）：拖动按事件估速（平滑），释放后指数衰减积分滑行（INERTIA_K=3.0、V_CUT=0.03、抓取清零接管）；验收=释放 400ms 盘面仍变 32.1% → 4.6s 仍转 → 5.2s 归零停稳、台架恒 0.1%。
+  - **极点限位**（用户定）：翻转累计绝对角钳 ±90°（极点正对相机即停），固定屏幕水平轴实现，撞墙速度归零。
+  - **删 C7 点选镜头对准**（用户拍板不需要）：Viewport reveal 块/railW prop/App 传参/planeCamera 三孤儿导出（bestDrawDxFor·revealCamTarget·startCamTween）全删（−165 行）；点选「腓尼基」回归零错。
+  - **交付 `docs/EXPAND_REFACTOR_2026-10-02.md`**：8 格盘点（4 模式×图层/元素）/问题 P1–P9/原则（L0–L3 分层+重要×便捷矩阵+纵向骨架）/逐格规格/五包分期/**D1–D8 待拍板**。
+  - 基线：tsc 0、svelte-check 0 errors（第二十五轮已剪入 `docs/history/HANDOFF_LOG_2026-10-01.md`）。
 
 - **✓ 第三十一轮（2026-10-02，步骤7 转包②：图层名标志位）**：
   - **LayerDef 三标志（数据模型级）**：`genStrategy: 'scatter'|'heightmap'|'elements'`（缺省 elements）、`focusAfterGen`、`editsHeight`——cells/height 在 `builtinLayers` 声明，`ensureBuiltinLayers` **旧档回填**（与 kind 同策略强制同步）；读取单源 **`core/layer/flags.ts`**（genStrategyOf/editsHeightAt/defaultFocusLayerId/heightmapLayerId/editsHeightLayerId），消费点禁比 id 字符串。
@@ -21,13 +28,6 @@
   - **迁移 ~35 处**：生成三分支（GenerateSection strategy prop/unified/generationService）、生成后聚焦（focusAfterGen，整链+单层）、worldShape 参数视图、showCellMesh（baseMesh）、高度域 UI（App 选中=区间、Viewport overlay 标签×2、WD canCreate+区间 ensure 收编 heightIntervalRegions）、flush diff/大陆中心/手动分割（选择器）、默认焦点回落（replaceWorld/删层回落=defaultFocusLayerId）、commandService 建层路径分支（isFreeLayerDef(meta)）；死码 `genLabel`/`isPath` 删；`types.ts` opacity 过时注释修正。**判定保留（注释说明）**：模块本域 id（political/heightElements/landSea 内部）、SVG 导出描边（storage 导出呈现域）、`__height__` 笔刷协议（区间元素属性驱动）。
   - **验收**：tsc 0 / svelte-check 0 errors（5 warning 存量）；浏览器=**旧档回填读证**（恢复档 cells gs=scatter、height 三标志齐、focus=cells）+ 生成三分支面板逐一命中（撒点/生成高度图/重新生成「国家」）+ height regen（status「已重新生成：height」、焦点与 visible=focusAfterGen 路径）+ 高度层创建行禁用留搜索框 + 球面↔平面往返零错（**会话1 左轨 viewMode bug 未复现**）、`lastError` 空。**未跑测试**（纪律）。
   - **插单批（同轮用户点名，四件）**：① 球面半圆弧竖转 90°=地球仪弯支架 → 二修定稿=**绘制另一半（镜像凸右）+ 方位实时锁定**：挂 `arcHolder` 世界组（**不挂相机**，用户定）、每帧 `rotation.y=atan2(dx,dz)` 对准相机——左右拖动弧在屏幕上纹丝不动、上下拖动照常透视旋转（竖向中点恒在正对屏幕的竖直平面内）；像素验收=横拖盘面变 49.7% 而弧统计逐位不变、竖拖 yExtent 670→617→544、洋红描点证凸右；② **球面南北极翻转对齐平面「北在上」**（根因=`core/sphere.ts` 沿用已归档 Canvas2D 时代 +y 向下约定→成对翻正 `eb88373`；`sphereOrient` 测试业务规则同步更新=用户方向即新契约；northY 探针=+1）；③ 检查展开区紧凑化（身份行内联+KV 流式+样式表头并显隐开关+嵌入去 padding，`8882c6e`——**544→333px/-39%** 信息不减、新增元素「隶属」行、图层计数标签改「元素」）。⑤ **球面交互终稿·实物地球仪模型（四修，用户「不能让星球自己转吗」点醒换模型根治）**：**相机固定**（滚轮缩放=手写（精确验证 2.384→1.4754=e^−0.48），OrbitControls 退役）；**左右拖=星球绕自转轴自转**（轴/赤道/支架=台架不随转——横拖不摆回归 ✓）、**上下拖=星球系统绕屏幕水平轴翻转**（黄道 standGroup 永不转恒水平 ✓）；三轮「环绕轴 vs 屏幕姿态」互斥死结由**转物体不转相机**溶解；弧三规格在实物模型下全部成立（横拖不摆✓俯仰=刚体翻转✓默认机位中点∈屏面✓）；验收=横拖内环20.2%/台架0.4%、竖拖内环21.1%+弧像素230→21（随架翻出带）、滚轮单事件数学精确、lastError 空（合成指针 setPointerCapture 包 try 根治污染）。lastError 空。**验证法教训：截图尺寸会中途变化（1280×720→1410×1134），像素分析必须先读 w/h 且排除顶栏/状态栏青蓝 UI（否则 bbox 被钉死在框边）；1px 细线被设备像素比稀释，颜色阈值要松+细线+暗邻域三重过滤，必要时洋红描红定位；近距机位弧超扫描带→bbox 指标饱和失真（换像素计数/带内比例）；**合成 PointerEvent 在 OrbitControls setPointerCapture 处必抛（No active pointer）→ 拖动验证只能用 CUA 真指针**；连续 reload 后 viewMemory 为 null=回默认机位（可利用做确定性 A/B）**。⑥ 高度档「高平原」→「高原」：`heightIntervals.NAMES` 改表 + `normalizeHeightIntervalElements` 载入时**名称随表单源**同步（区间=派生结构数据；边界：曾手动改过的档名会被表默认覆盖）。存量进度：容差 ✓ / 图层名标志位 **✓** / as-unknown ☐。
-
-- **✓ 第二十五轮（2026-10-01 用户反馈批四件）**：
-  - **revealRaf 修复**：5-b3 换 revealCancel 时漏改 onMount cleanup → 切球面即 `ReferenceError`（用户报障）——已改 `revealCancel?.()`，来回切 4 次零错。
-  - **错误复制钮**：`main.ts` 捕获**全文含栈** → `editor.lastError`（ui 新字段）→ StatusBar 左区出错时（error 或 ⚠️ 状态）左侧 `⧉`，点击 `clipboard.writeText`（失败降级 execCommand）→ `✓` 1.5s。验收（间谍法，失焦页真剪贴板被拒）：截获=Error 全栈、按钮翻 ✓。
-  - **顶栏胶囊金钮不动**：根因=**IAB/后台页 CSS 过渡时间线冻结**（style 已更新、computed 停旧档；ModeCapsule 自 371f8d2 未改=环境性）→ `.knob` 去过渡**瞬移到位**。验收：点击后 120ms computed=96px=目标档。
-  - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
-  - 基线：tsc 0、svelte-check 0 errors。
 
 - **✓ 第三十轮（2026-10-01，步骤7 转包①：容差集中）**：
   - `core/tolerances.ts` 单源 10 常量；**17 文件原值迁移零改值**——键量化 KEY_QUANT（lonlatKey/NumKey ×1000 全清）、WRAP_EPS(1e-3)/PROJ_WRAP_EPS(1e-2) 并列暴露历史分歧、GEOM_EPS(1e-12 含近零保护，全清)、EPS_FP(1e-9)、SCALE_FLOOR(cam.scale 下限 7 处全清)、MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN。

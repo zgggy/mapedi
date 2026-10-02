@@ -65,3 +65,13 @@
   - **1-b 收口**：剩 climate/astro（无 UI 写入口=孤儿，归步骤 7 判定）、道路端点 `endpointOverrides`（region 域，随 1-c 核对）。**下一包 = 1-c 命令纯数据化（历史面板唯一前置）**。
   - **测试坑**：编辑后 HMR 整页重载会把整段 evaluate 拖到 32s 超时（两次误判为 copy 死循环）→ 先跑活体探针（页内自旋 50ms）再分步执行；本 runtime **globals 不跨 evaluate 调用**，每次都要重挂 setupBrowserRuntime。
 
+
+
+## 剪出（2026-10-02）：第二十五轮 用户反馈批四件
+
+- **✓ 第二十五轮（2026-10-01 用户反馈批四件）**：
+  - **revealRaf 修复**：5-b3 换 revealCancel 时漏改 onMount cleanup → 切球面即 `ReferenceError`（用户报障）——已改 `revealCancel?.()`，来回切 4 次零错。
+  - **错误复制钮**：`main.ts` 捕获**全文含栈** → `editor.lastError`（ui 新字段）→ StatusBar 左区出错时（error 或 ⚠️ 状态）左侧 `⧉`，点击 `clipboard.writeText`（失败降级 execCommand）→ `✓` 1.5s。验收（间谍法，失焦页真剪贴板被拒）：截获=Error 全栈、按钮翻 ✓。
+  - **顶栏胶囊金钮不动**：根因=**IAB/后台页 CSS 过渡时间线冻结**（style 已更新、computed 停旧档；ModeCapsule 自 371f8d2 未改=环境性）→ `.knob` 去过渡**瞬移到位**。验收：点击后 120ms computed=96px=目标档。
+  - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
+  - 基线：tsc 0、svelte-check 0 errors。
