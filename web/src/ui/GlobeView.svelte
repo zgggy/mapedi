@@ -45,6 +45,8 @@
   let planetRoot: THREE.Group;
   let meshHolder: THREE.Group;
   let overlay: THREE.Group;
+  /** 支架弧座：世界对象，每帧把方位角对准相机（左右拖动不摆动；不挂相机下——用户 2026-10-02 定） */
+  let arcHolder: THREE.Group;
   let contentGroup: THREE.Group;
   let anim = 0;
   let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
@@ -222,8 +224,9 @@
   }
 
   function rebuildOverlays() {
-    if (!overlay || !planetRoot) return;
+    if (!overlay || !planetRoot || !arcHolder) return;
     clearGroup(overlay);
+    clearGroup(arcHolder);
     const tilt = (tiltDeg * Math.PI) / 180;
     planetRoot.rotation.z = -tilt;
 
@@ -255,15 +258,16 @@
       );
       eqLine.rotation.z = -tilt;
       overlay.add(eqLine);
-      // 子午支架弧（2026-10-02 用户指正：原水平「下弦」半圆应旋转 90° —— 地球仪的弯支架）：
-      // 竖直半圆（C 形，开口朝右），端点 = 南北极，与轴/赤道同一 rotation.z=-tilt 变换
-      // （端点恰落在倾斜轴的两极上，轴尖微露如纺锤）；半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、
-      // 同款青色细线；整段在正对相机的竖直平面内，相机环绕（鼠标拖动）时随视角转到侧面。
-      // 挂 overlay（非 meshHolder）→ 不随地球自转。
+      // 子午支架弧（2026-10-02 用户两轮定稿）：
+      // ① 绘制**另一半**——镜像 C 形（凸向右、开口朝左），端点=南北极方向，与轴同一 -tilt；
+      // ② 挂 arcHolder（世界组，**不挂相机**）——每帧实时把 holder 方位角对准相机：
+      //    左右拖动时弧面始终正对屏幕 → 在屏幕上纹丝不动，弧的竖向中点恒落在
+      //    正对屏幕的竖直平面内；上下拖动（俯仰）照常产生透视旋转（跟着被拖动旋转）。
+      // 半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、同款青色细线；随⚙「轴」开关。
       const arc: number[] = [];
       for (let i = 0; i <= 72; i++) {
-        const a = -Math.PI / 2 + (i / 72) * Math.PI; // 南极 → 北极
-        arc.push(-Math.cos(a) * 1.3, Math.sin(a) * 1.3, 0);
+        const a = -Math.PI / 2 + (i / 72) * Math.PI; // 南极 → 北极（凸向 +X）
+        arc.push(Math.cos(a) * 1.3, Math.sin(a) * 1.3, 0);
       }
       const ag = new THREE.BufferGeometry();
       ag.setAttribute('position', new THREE.Float32BufferAttribute(arc, 3));
@@ -272,7 +276,7 @@
         new THREE.LineBasicMaterial({ color: '#7ec8e3', transparent: true, opacity: 0.65 }),
       );
       arcLine.rotation.z = -tilt;
-      overlay.add(arcLine);
+      arcHolder.add(arcLine);
     }
 
     if (showEcliptic) {
@@ -343,6 +347,8 @@
 
     overlay = new THREE.Group();
     scene.add(overlay);
+    arcHolder = new THREE.Group();
+    scene.add(arcHolder);
     planetRoot = new THREE.Group();
     scene.add(planetRoot);
     meshHolder = new THREE.Group();
@@ -360,6 +366,12 @@
         meshHolder.rotation.y = spinT;
       }
       controls.update();
+      // 支架弧实时对准相机方位（只锁左右；俯仰不锁 → 上下拖动时弧面照常透视旋转）
+      if (arcHolder) {
+        const dx = camera.position.x - controls.target.x;
+        const dz = camera.position.z - controls.target.z;
+        if (dx !== 0 || dz !== 0) arcHolder.rotation.y = Math.atan2(dx, dz);
+      }
       renderer.render(scene, camera);
     };
     loop();
