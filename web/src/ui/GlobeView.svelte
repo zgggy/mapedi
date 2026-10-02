@@ -45,8 +45,13 @@
   let planetRoot: THREE.Group;
   let meshHolder: THREE.Group;
   let overlay: THREE.Group;
-  /** 支架弧座：世界对象，每帧把方位角对准相机（左右拖动不摆动；不挂相机下——用户 2026-10-02 定） */
+  /** 支架弧座：世界对象，每帧把弧面法向对准相机的「绕轴方位分量」（左右拖动不摆动；不挂相机——用户 2026-10-02 定） */
   let arcHolder: THREE.Group;
+  /** 弧基座每帧计算的暂存（避免逐帧分配）：X=凸向、Y=自转轴、Z=X×Y */
+  const arcBasisM = new THREE.Matrix4();
+  const arcX = new THREE.Vector3();
+  const arcY = new THREE.Vector3();
+  const arcZ = new THREE.Vector3();
   let contentGroup: THREE.Group;
   let anim = 0;
   let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
@@ -258,11 +263,12 @@
       );
       eqLine.rotation.z = -tilt;
       overlay.add(eqLine);
-      // 子午支架弧（2026-10-02 用户两轮定稿）：
-      // ① 绘制**另一半**——镜像 C 形（凸向右、开口朝左），端点=南北极方向，与轴同一 -tilt；
-      // ② 挂 arcHolder（世界组，**不挂相机**）——每帧实时把 holder 方位角对准相机：
-      //    左右拖动时弧面始终正对屏幕 → 在屏幕上纹丝不动，弧的竖向中点恒落在
-      //    正对屏幕的竖直平面内；上下拖动（俯仰）照常产生透视旋转（跟着被拖动旋转）。
+      // 子午支架弧（2026-10-02 用户三轮定稿）：
+      // ① 绘制**另一半**——镜像 C 形（凸向右、开口朝左），端点 = 南北极方向（基座 Y=A 自带
+      //    23.4° 倾斜，几何不再另加 rotation.z，避免双重倾斜）；
+      // ② 挂 arcHolder（世界组，**不挂相机**）——每帧按 A 参考系定向（见渲染循环注释）：
+      //    左右（绕轴方位）拖动弧在屏幕上纹丝不动、上下（绕轴俯仰）拖动照常透视旋转，
+      //    弧的竖向中点恒落在屏幕平面内。
       // 半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、同款青色细线；随⚙「轴」开关。
       const arc: number[] = [];
       for (let i = 0; i <= 72; i++) {
@@ -275,7 +281,6 @@
         ag,
         new THREE.LineBasicMaterial({ color: '#7ec8e3', transparent: true, opacity: 0.65 }),
       );
-      arcLine.rotation.z = -tilt;
       arcHolder.add(arcLine);
     }
 
@@ -311,7 +316,13 @@
     void showAxis;
     void showEcliptic;
     void tiltDeg;
-    if (scene) rebuildOverlays();
+    if (scene) {
+      // 轴倾角改变 → 环绕轴（up）同步到新的自转轴方向
+      const t = (tiltDeg * Math.PI) / 180;
+      camera.up.set(Math.sin(t), Math.cos(t), 0);
+      controls.update();
+      rebuildOverlays();
+    }
   });
 
   onMount(() => {
@@ -332,6 +343,10 @@
     controls.maxDistance = 6;
     controls.enablePan = false;
     controls.target.set(0, 0, 0);
+    // 环绕轴 = 自转轴（2026-10-02 用户定：拖动绕自转轴旋转，而不是绕黄道垂线）——
+    // up 向量取轴方向（与轴线/赤道的 -tilt 同一变换），OrbitControls 每次 update 读 object.up。
+    const upT0 = (tiltDeg * Math.PI) / 180;
+    camera.up.set(Math.sin(upT0), Math.cos(upT0), 0);
     // 相机记忆（设计稿 §2.1-2）：球面姿态与平面相机互不覆盖
     if (viewMemory.globe) {
       const g = viewMemory.globe;
@@ -366,11 +381,27 @@
         meshHolder.rotation.y = spinT;
       }
       controls.update();
-      // 支架弧实时对准相机方位（只锁左右；俯仰不锁 → 上下拖动时弧面照常透视旋转）
+      // 支架弧（A 参考系）：平面恒含自转轴 A，法向 = 视线的 ⟂A 分量——
+      // 绕轴方位拖动 → 弧在屏幕上纹丝不动；绕轴俯仰拖动 → 照常透视压扁；
+      // 凸向 = n'×A（默认机位凸向右），竖向中点恒落在屏幕平面内（数学上 b⊥v 恒成立）。
       if (arcHolder) {
-        const dx = camera.position.x - controls.target.x;
-        const dz = camera.position.z - controls.target.z;
-        if (dx !== 0 || dz !== 0) arcHolder.rotation.y = Math.atan2(dx, dz);
+        const t = (tiltDeg * Math.PI) / 180;
+        arcY.set(Math.sin(t), Math.cos(t), 0); // 自转轴 A
+        const vx = controls.target.x - camera.position.x;
+        const vy = controls.target.y - camera.position.y;
+        const vz = controls.target.z - camera.position.z;
+        const vl = Math.hypot(vx, vy, vz) || 1;
+        const d = (vx * arcY.x + vy * arcY.y + vz * arcY.z) / vl;
+        arcZ.set(vx / vl - d * arcY.x, vy / vl - d * arcY.y, vz / vl - d * arcY.z); // n' = v⟂A
+        const nl = arcZ.length();
+        if (nl > 1e-6) {
+          arcZ.multiplyScalar(1 / nl);
+          arcX.crossVectors(arcZ, arcY); // 凸向 b = n'×A
+          arcZ.crossVectors(arcX, arcY); // Z = b×A（与 n' 反向共面，同一平面）
+          arcBasisM.makeBasis(arcX, arcY, arcZ);
+          arcHolder.quaternion.setFromRotationMatrix(arcBasisM);
+        }
+        // nl≈0（相机正压自转轴极点）时保留上一帧姿态——该点任何朝向都正对，属退化位
       }
       renderer.render(scene, camera);
     };
