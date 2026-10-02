@@ -52,6 +52,10 @@
   const arcX = new THREE.Vector3();
   const arcY = new THREE.Vector3();
   const arcZ = new THREE.Vector3();
+  /** 屏幕回正暂存（环绕轴=A、渲染姿态=Y-up 两套参考系解耦，2026-10-02 三修） */
+  const rollCur = new THREE.Vector3();
+  const rollDes = new THREE.Vector3();
+  const rollQ = new THREE.Quaternion();
   let contentGroup: THREE.Group;
   let anim = 0;
   let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
@@ -345,6 +349,7 @@
     controls.target.set(0, 0, 0);
     // 环绕轴 = 自转轴（2026-10-02 用户定：拖动绕自转轴旋转，而不是绕黄道垂线）——
     // up 向量取轴方向（与轴线/赤道的 -tilt 同一变换），OrbitControls 每次 update 读 object.up。
+    // 注意：这是**环绕参考系**；屏幕姿态另由渲染循环内的「回正滚转」锚定到黄道（见下）。
     const upT0 = (tiltDeg * Math.PI) / 180;
     camera.up.set(Math.sin(upT0), Math.cos(upT0), 0);
     // 相机记忆（设计稿 §2.1-2）：球面姿态与平面相机互不覆盖
@@ -381,9 +386,39 @@
         meshHolder.rotation.y = spinT;
       }
       controls.update();
+      // 屏幕回正（2026-10-02 用户三修：黄道恒水平，其余斜着）：
+      // 环绕仍绕自转轴（camera.up=A 供 OrbitControls 用），渲染前把相机绕视轴
+      // 滚转回 Y-up——黄道(⟂Y)投影恒为水平，轴/赤道/弧保持世界系「斜着」。
+      // 纯姿态滚转不改位置：下一帧 controls.update() 照常按 A 环绕。
+      {
+        const tR = (tiltDeg * Math.PI) / 180;
+        const ax = Math.sin(tR);
+        const ay = Math.cos(tR);
+        const fx = controls.target.x - camera.position.x;
+        const fy = controls.target.y - camera.position.y;
+        const fz = controls.target.z - camera.position.z;
+        const fl = Math.hypot(fx, fy, fz) || 1;
+        const fd = (ax * fx + ay * fy) / fl; // A·f̂（A_z=0）
+        // upCur = lookAt(up=A) 后相机 up 的⟂f̂投影 = A − (A·f̂)f̂
+        rollCur.set(ax - fd * (fx / fl), ay - fd * (fy / fl), -fd * (fz / fl));
+        // upDes = 黄道法向 Y 的⟂f̂投影（黄道恒水平的定义）
+        const yd = fy / fl;
+        rollDes.set(-yd * (fx / fl), 1 - yd * (fy / fl), -yd * (fz / fl));
+        const cl = rollCur.length();
+        const dl = rollDes.length();
+        // 退化位（视线贴自转轴或贴黄道法向）：「水平」无定义，跳过本帧滚转
+        if (cl > 1e-6 && dl > 1e-6) {
+          rollCur.multiplyScalar(1 / cl);
+          rollDes.multiplyScalar(1 / dl);
+          rollQ.setFromUnitVectors(rollCur, rollDes);
+          camera.quaternion.premultiply(rollQ);
+        }
+      }
       // 支架弧（A 参考系）：平面恒含自转轴 A，法向 = 视线的 ⟂A 分量——
-      // 绕轴方位拖动 → 弧在屏幕上纹丝不动；绕轴俯仰拖动 → 照常透视压扁；
-      // 凸向 = n'×A（默认机位凸向右），竖向中点恒落在屏幕平面内（数学上 b⊥v 恒成立）。
+      // ① 中点恒在屏幕平面内（b⊥f̂，滚转不变）② 绕轴俯仰 → 透视压扁照常；
+      // ③ 黄道水平方案下「横拖不摆」让位于世界系一致性：横拖时弧随轴/赤道
+      //    一起斜摆（只有黄道钉在水平线上）——三规格互斥下的取舍（2026-10-02 三修）。
+      // 凸向 = n'×A（默认机位凸向右）。
       if (arcHolder) {
         const t = (tiltDeg * Math.PI) / 180;
         arcY.set(Math.sin(t), Math.cos(t), 0); // 自转轴 A
