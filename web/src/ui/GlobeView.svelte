@@ -1,13 +1,17 @@
 <script lang="ts">
   /**
-   * 球面视图：**纯展示**（拖动环绕 / 滚轮缩放 / 自转预览）。
+   * 球面视图：**纯展示**（拖动转星球 / 滚轮缩放 / 自转预览）。
+ * 交互终稿（2026-10-02 四修，实物地球仪模型）：**相机固定不动**——
+ * 左右拖 = 星球绕自转轴自转（轴/赤道/支架=台架不随转；黄道=基准环恒水平）；
+ * 上下拖 = 星球系统（球+轴+赤道+支架）绕屏幕水平轴整体翻转（黄道不随）；
+ * 滚轮 = 缩放。OrbitControls 已退役（三轮「环绕参考系 vs 屏幕姿态」死结
+ * 由换交互模型根治：转物体而非转相机，黄道水平与绕轴手感天然同时成立）。
    * 内容：显示碎片着色（composeShownPieces，与平面同一套图层显隐/叠放）+
    * **高度按半径凸起**（陆上凸、海下凹，光照塑形）+ 元素边界线 + 路径 + 轴/黄道。
    * 无编辑、无镜头 FOV 特效（历史教训：镜头特效耦合姿态 → 显示错乱）。
    */
   import { onMount } from 'svelte';
   import * as THREE from 'three';
-  import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import type { ClimateParams, World } from '../core/types';
   import { lonLatToVec3 } from '../core/sphere';
   import { composeShownPieces, isLayerShown } from '../core/displayCompose';
@@ -41,25 +45,31 @@
   let renderer: THREE.WebGLRenderer;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
-  let controls: OrbitControls;
   let planetRoot: THREE.Group;
   let meshHolder: THREE.Group;
+  /** 台架组：轴/赤道/支架弧——随上下翻转、**不随左右自转**（实物地球仪语义） */
   let overlay: THREE.Group;
-  /** 支架弧座：世界对象，每帧把弧面法向对准相机的「绕轴方位分量」（左右拖动不摆动；不挂相机——用户 2026-10-02 定） */
-  let arcHolder: THREE.Group;
-  /** 弧基座每帧计算的暂存（避免逐帧分配）：X=凸向、Y=自转轴、Z=X×Y */
-  const arcBasisM = new THREE.Matrix4();
-  const arcX = new THREE.Vector3();
-  const arcY = new THREE.Vector3();
-  const arcZ = new THREE.Vector3();
-  /** 屏幕回正暂存（环绕轴=A、渲染姿态=Y-up 两套参考系解耦，2026-10-02 三修） */
-  const rollCur = new THREE.Vector3();
-  const rollDes = new THREE.Vector3();
-  const rollQ = new THREE.Quaternion();
+  /** 黄道基准环组：永不旋转（黄道恒水平，2026-10-02 用户定） */
+  let standGroup: THREE.Group;
+  /** 星球系统组：球+台架整体绕屏幕水平轴翻转（上下拖动） */
+  let tipGroup: THREE.Group;
   let contentGroup: THREE.Group;
   let anim = 0;
   let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   let spinT = 0;
+
+  // —— 相机固定（四修）：只存目标点；拖动全部作用在物体上 ——
+  const camTarget = new THREE.Vector3(0, 0, 0);
+  /** 拖动状态与暂存（无逐事件分配） */
+  let dragId: number | null = null;
+  let lastX = 0;
+  let lastY = 0;
+  const wheelOff = new THREE.Vector3();
+  const tipRight = new THREE.Vector3();
+  const tipQ = new THREE.Quaternion();
+  /** 拖动手感（rad/px）：左右=自转、上下=翻转 */
+  const SPIN_K = 0.005;
+  const TIP_K = 0.005;
 
   const home = $derived.by(() => {
     const base = astro ?? world?.astro ?? null;
@@ -233,9 +243,9 @@
   }
 
   function rebuildOverlays() {
-    if (!overlay || !planetRoot || !arcHolder) return;
+    if (!overlay || !planetRoot || !standGroup) return;
     clearGroup(overlay);
-    clearGroup(arcHolder);
+    clearGroup(standGroup);
     const tilt = (tiltDeg * Math.PI) / 180;
     planetRoot.rotation.z = -tilt;
 
@@ -267,12 +277,10 @@
       );
       eqLine.rotation.z = -tilt;
       overlay.add(eqLine);
-      // 子午支架弧（2026-10-02 用户三轮定稿）：
-      // ① 绘制**另一半**——镜像 C 形（凸向右、开口朝左），端点 = 南北极方向（基座 Y=A 自带
-      //    23.4° 倾斜，几何不再另加 rotation.z，避免双重倾斜）；
-      // ② 挂 arcHolder（世界组，**不挂相机**）——每帧按 A 参考系定向（见渲染循环注释）：
-      //    左右（绕轴方位）拖动弧在屏幕上纹丝不动、上下（绕轴俯仰）拖动照常透视旋转，
-      //    弧的竖向中点恒落在屏幕平面内。
+      // 子午支架弧（2026-10-02 四修终稿·实物模型）：镜像 C 形（凸向右、开口朝左），
+      // 与轴/赤道同一 -tilt 变换 → 端点钉在自转轴两极；**挂台架组**——
+      // 左右自转不随动（横拖不摆回归：支架就是台架）、上下翻转随动、
+      // 相机固定 Y-up 下默认机位弧面正对屏幕（竖向中点∈屏面）。
       // 半径 1.30 > 星球(≈1.045) > 赤道线(1.02)、同款青色细线；随⚙「轴」开关。
       const arc: number[] = [];
       for (let i = 0; i <= 72; i++) {
@@ -285,7 +293,8 @@
         ag,
         new THREE.LineBasicMaterial({ color: '#7ec8e3', transparent: true, opacity: 0.65 }),
       );
-      arcHolder.add(arcLine);
+      arcLine.rotation.z = -tilt;
+      overlay.add(arcLine);
     }
 
     if (showEcliptic) {
@@ -300,7 +309,8 @@
         }),
       );
       disc.rotation.x = -Math.PI / 2;
-      overlay.add(disc);
+      // 黄道进基准环组：不随翻转、不随自转——恒水平（2026-10-02 用户定）
+      standGroup.add(disc);
     }
   }
 
@@ -320,13 +330,7 @@
     void showAxis;
     void showEcliptic;
     void tiltDeg;
-    if (scene) {
-      // 轴倾角改变 → 环绕轴（up）同步到新的自转轴方向
-      const t = (tiltDeg * Math.PI) / 180;
-      camera.up.set(Math.sin(t), Math.cos(t), 0);
-      controls.update();
-      rebuildOverlays();
-    }
+    if (scene) rebuildOverlays();
   });
 
   onMount(() => {
@@ -339,42 +343,86 @@
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 20);
-    // 默认镜头看向 +Z（lon=0），与地图「中间是本初子午线」一致
+    // 相机固定（四修终稿）：默认看向 +Z（lon=0），up 默认 Y → 黄道恒水平；
+    // 相机只被滚轮缩放，不再环绕（拖动语义全部交给物体，见文件头）。
     camera.position.set(0.2, 0.35, 2.35);
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.minDistance = 1.12;
-    controls.maxDistance = 6;
-    controls.enablePan = false;
-    controls.target.set(0, 0, 0);
-    // 环绕轴 = 自转轴（2026-10-02 用户定：拖动绕自转轴旋转，而不是绕黄道垂线）——
-    // up 向量取轴方向（与轴线/赤道的 -tilt 同一变换），OrbitControls 每次 update 读 object.up。
-    // 注意：这是**环绕参考系**；屏幕姿态另由渲染循环内的「回正滚转」锚定到黄道（见下）。
-    const upT0 = (tiltDeg * Math.PI) / 180;
-    camera.up.set(Math.sin(upT0), Math.cos(upT0), 0);
     // 相机记忆（设计稿 §2.1-2）：球面姿态与平面相机互不覆盖
     if (viewMemory.globe) {
       const g = viewMemory.globe;
       camera.position.set(g.pos[0], g.pos[1], g.pos[2]);
-      controls.target.set(g.target[0], g.target[1], g.target[2]);
-      controls.update();
+      camTarget.set(g.target[0], g.target[1], g.target[2]);
     }
+    camera.lookAt(camTarget);
     // 光照塑形：让高度凸起可读（平行光 + 弱补光）
     const sun = new THREE.DirectionalLight(0xffffff, 1.15);
     sun.position.set(2.2, 1.6, 2.6);
     scene.add(sun);
     scene.add(new THREE.AmbientLight(0xffffff, 0.42));
 
+    // 组结构（四修）：tipGroup = 星球系统（球+台架，上下拖翻转整体）；
+    // standGroup = 黄道基准环（永不转）；相机不动。
+    tipGroup = new THREE.Group();
+    scene.add(tipGroup);
+    standGroup = new THREE.Group();
+    scene.add(standGroup);
     overlay = new THREE.Group();
-    scene.add(overlay);
-    arcHolder = new THREE.Group();
-    scene.add(arcHolder);
+    tipGroup.add(overlay);
     planetRoot = new THREE.Group();
-    scene.add(planetRoot);
+    tipGroup.add(planetRoot);
     meshHolder = new THREE.Group();
     planetRoot.add(meshHolder);
     contentGroup = new THREE.Group();
     meshHolder.add(contentGroup);
+
+    // —— 指针交互（物体旋转模型；setPointerCapture 包 try——合成事件无活跃指针，跳过捕获即可） ——
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 || dragId !== null) return;
+      dragId = e.pointerId;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      try {
+        renderer.domElement.setPointerCapture(e.pointerId);
+      } catch {
+        /* 合成事件无活跃指针：事件仍派发在画布上，正常跟踪 */
+      }
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerId !== dragId) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      // 左右 → 星球绕自转轴自转（meshHolder 局部 Y = planetRoot 倾斜后的轴；
+      // 台架/黄道不随——轴、赤道、支架对自转不变，正是实物地球仪手感）
+      if (dx !== 0) {
+        spinT += dx * SPIN_K;
+        meshHolder.rotation.y = spinT;
+      }
+      // 上下 → 星球系统（球+轴+赤道+支架）绕「屏幕水平轴」翻转；黄道（standGroup）不随
+      if (dy !== 0) {
+        wheelOff.copy(camera.position).sub(camTarget);
+        tipRight.crossVectors(camera.up, wheelOff).normalize(); // 相机右轴（up=Y → 黄道面水平基准）
+        tipQ.setFromAxisAngle(tipRight, dy * TIP_K);
+        tipGroup.quaternion.premultiply(tipQ);
+      }
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerId === dragId) dragId = null;
+    };
+    // 滚轮 = 缩放（沿视线推拉，保留 1.12–6 限幅；相机只做这一件事）
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      wheelOff.copy(camera.position).sub(camTarget);
+      const len = Math.min(6, Math.max(1.12, wheelOff.length() * Math.exp(e.deltaY * 0.0012)));
+      wheelOff.setLength(len);
+      camera.position.copy(camTarget).add(wheelOff);
+      camera.lookAt(camTarget);
+    };
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+    renderer.domElement.addEventListener('pointercancel', onPointerUp);
+    renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
 
     rebuildSphereContent();
 
@@ -385,59 +433,8 @@
         spinT += dir * (24 / Math.max(6, rotHours)) * 0.004;
         meshHolder.rotation.y = spinT;
       }
-      controls.update();
-      // 屏幕回正（2026-10-02 用户三修：黄道恒水平，其余斜着）：
-      // 环绕仍绕自转轴（camera.up=A 供 OrbitControls 用），渲染前把相机绕视轴
-      // 滚转回 Y-up——黄道(⟂Y)投影恒为水平，轴/赤道/弧保持世界系「斜着」。
-      // 纯姿态滚转不改位置：下一帧 controls.update() 照常按 A 环绕。
-      {
-        const tR = (tiltDeg * Math.PI) / 180;
-        const ax = Math.sin(tR);
-        const ay = Math.cos(tR);
-        const fx = controls.target.x - camera.position.x;
-        const fy = controls.target.y - camera.position.y;
-        const fz = controls.target.z - camera.position.z;
-        const fl = Math.hypot(fx, fy, fz) || 1;
-        const fd = (ax * fx + ay * fy) / fl; // A·f̂（A_z=0）
-        // upCur = lookAt(up=A) 后相机 up 的⟂f̂投影 = A − (A·f̂)f̂
-        rollCur.set(ax - fd * (fx / fl), ay - fd * (fy / fl), -fd * (fz / fl));
-        // upDes = 黄道法向 Y 的⟂f̂投影（黄道恒水平的定义）
-        const yd = fy / fl;
-        rollDes.set(-yd * (fx / fl), 1 - yd * (fy / fl), -yd * (fz / fl));
-        const cl = rollCur.length();
-        const dl = rollDes.length();
-        // 退化位（视线贴自转轴或贴黄道法向）：「水平」无定义，跳过本帧滚转
-        if (cl > 1e-6 && dl > 1e-6) {
-          rollCur.multiplyScalar(1 / cl);
-          rollDes.multiplyScalar(1 / dl);
-          rollQ.setFromUnitVectors(rollCur, rollDes);
-          camera.quaternion.premultiply(rollQ);
-        }
-      }
-      // 支架弧（A 参考系）：平面恒含自转轴 A，法向 = 视线的 ⟂A 分量——
-      // ① 中点恒在屏幕平面内（b⊥f̂，滚转不变）② 绕轴俯仰 → 透视压扁照常；
-      // ③ 黄道水平方案下「横拖不摆」让位于世界系一致性：横拖时弧随轴/赤道
-      //    一起斜摆（只有黄道钉在水平线上）——三规格互斥下的取舍（2026-10-02 三修）。
-      // 凸向 = n'×A（默认机位凸向右）。
-      if (arcHolder) {
-        const t = (tiltDeg * Math.PI) / 180;
-        arcY.set(Math.sin(t), Math.cos(t), 0); // 自转轴 A
-        const vx = controls.target.x - camera.position.x;
-        const vy = controls.target.y - camera.position.y;
-        const vz = controls.target.z - camera.position.z;
-        const vl = Math.hypot(vx, vy, vz) || 1;
-        const d = (vx * arcY.x + vy * arcY.y + vz * arcY.z) / vl;
-        arcZ.set(vx / vl - d * arcY.x, vy / vl - d * arcY.y, vz / vl - d * arcY.z); // n' = v⟂A
-        const nl = arcZ.length();
-        if (nl > 1e-6) {
-          arcZ.multiplyScalar(1 / nl);
-          arcX.crossVectors(arcZ, arcY); // 凸向 b = n'×A
-          arcZ.crossVectors(arcX, arcY); // Z = b×A（与 n' 反向共面，同一平面）
-          arcBasisM.makeBasis(arcX, arcY, arcZ);
-          arcHolder.quaternion.setFromRotationMatrix(arcBasisM);
-        }
-        // nl≈0（相机正压自转轴极点）时保留上一帧姿态——该点任何朝向都正对，属退化位
-      }
+      // 相机固定（四修）：无 controls.update、无回正滚转、无逐帧弧定向——
+      // 黄道水平、台架姿态全部由组结构静态保证。
       renderer.render(scene, camera);
     };
     loop();
@@ -457,13 +454,16 @@
       cancelAnimationFrame(anim);
       clearTimeout(rebuildTimer);
       ro.disconnect();
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
+      renderer.domElement.removeEventListener('pointerup', onPointerUp);
+      renderer.domElement.removeEventListener('pointercancel', onPointerUp);
+      renderer.domElement.removeEventListener('wheel', onWheel);
       const p = camera.position;
-      const t = controls.target;
       viewMemory.globe = {
         pos: [p.x, p.y, p.z],
-        target: [t.x, t.y, t.z],
+        target: [camTarget.x, camTarget.y, camTarget.z],
       };
-      controls.dispose();
       renderer.dispose();
     };
   });
