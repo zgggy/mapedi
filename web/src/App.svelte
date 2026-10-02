@@ -33,7 +33,7 @@
   let expandedIds = $state(new Set<string>());
   let bootError = $state('');
   // panels 状态已退役（2026-09-30 终稿：图层区恒在，开合把手架构随三模式胶囊化取消）
-  /** 左栏两面板开合（LeftRail 回传）：驱动 C7 遮挡宽与高度标注显示条件 */
+  /** 左栏两面板开合（LeftRail 回传）：驱动高度标注显示条件（workspaceOpen）；width 为回传遥测 */
   let railState = $state({ layersOpen: true, wsOpen: true, width: 220 });
 
   let exportCanvas: HTMLCanvasElement | null = null;
@@ -263,7 +263,6 @@
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
           workspaceOpen={railState.wsOpen}
-          railW={railState.layersOpen || railState.wsOpen ? railState.width : 0}
           highlightRegionId={draw.active
             ? (draw.parentRegionId ?? draw.targetRegionId)
             : selectedRegionId}

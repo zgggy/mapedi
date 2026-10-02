@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
@@ -27,14 +27,7 @@
     worldToScreenX,
     worldToScreenY,
   } from '../render/space';
-  import {
-    zoomCamAt,
-    panCam,
-    contentPanDeltaX,
-    bestDrawDxFor,
-    revealCamTarget,
-    startCamTween,
-  } from './planeCamera';
+  import { zoomCamAt, panCam, contentPanDeltaX } from './planeCamera';
   import {
     catmullRomPolyline,
     createPathFeature,
@@ -66,7 +59,6 @@
     drawTool = 'brush' as DrawTool,
     brushRadiusDeg = 1.5,
     highlightRegionId = null,
-    railW = 0,
     roadSegments = [] as { a: number; b: number; pa: LonLat; pb: LonLat }[],
     projection = 'mercator' as ProjectionId,
     projParams,
@@ -84,8 +76,6 @@
     drawTool?: DrawTool;
     brushRadiusDeg?: number;
     highlightRegionId?: string | null;
-    /** C7 有效视口：左轨遮挡宽度（0 = 无轨/已收起）；选中露出按此避让 */
-    railW?: number;
     roadSegments?: { a: number; b: number; pa: LonLat; pb: LonLat }[];
     projection?: ProjectionId;
     projParams?: ProjectionParams;
@@ -130,59 +120,7 @@
   /** C1 反选：左键按下点（会话外），抬起位移 <4px 才触发 onpick */
   let pickDown: { x: number; y: number } | null = null;
 
-  // —— C7 有效视口（设计稿 §7 / U3）：选中元素落在遮挡区（左轨/底栏）→ 相机平移露出 ——
-  // 仅在 highlightRegionId 变化时判定（untrack 隔离 cam/world 依赖，tween 不回调本 effect）
-  // 5-b3：可见副本挑选/遮挡反解/补间在 ui/planeCamera.ts（纯函数可测），此处只聚质心。
-  let revealCancel: (() => void) | null = null;
-  function tweenReveal(tx: number, ty: number) {
-    revealCancel?.();
-    revealCancel = startCamTween(cam.x, cam.y, tx, ty, (x, y) => {
-      cam.x = x;
-      cam.y = y;
-      requestRender(); // 渲染是命令式驱动：只改 cam 不会自动重绘
-    });
-  }
-  function revealSelection(id: string | null) {
-    if (!id || !world || !viewportRoot) return;
-    if (drawActive) return; // 绘制会话中相机突移会打断笔画（目标由用户当前手势决定，无需露出）
-    const wpx = viewportRoot.clientWidth;
-    const hpx = viewportRoot.clientHeight;
-    if (wpx < 80 || hpx < 80) return;
-    // 目标中心（投影空间）：region = pcache 质心均值；path = 控制点投影均值
-    let x = 0;
-    let y = 0;
-    let n = 0;
-    const path = world.paths?.find((p) => p.id === id);
-    if (path?.points?.length) {
-      const pp = projParamsOr();
-      for (const ll of path.points) {
-        const c = project(ll, projection, pp);
-        x += c.x;
-        y += c.y;
-        n++;
-      }
-    } else {
-      const r = world.regions.find((q) => q.id === id);
-      if (!r?.cells.length) return;
-      const pc = getProjCache(world, projection, projParamsOr());
-      for (const cid of r.cells) {
-        x += pc.centers[cid * 2];
-        y += pc.centers[cid * 2 + 1];
-        n++;
-      }
-    }
-    if (!n) return;
-    x /= n;
-    y /= n;
-    // 对准当前可见副本（bestDrawDxFor）→ 遮挡反解（revealCamTarget）→ 补间（tweenReveal）
-    const drawDx = bestDrawDxFor(projection, x, y, contentOffsetX, cam, wpx);
-    const target = revealCamTarget(cam, x, y, drawDx, wpx, hpx, railW);
-    if (target) tweenReveal(target.tx, target.ty);
-  }
-  $effect(() => {
-    const id = highlightRegionId;
-    untrack(() => revealSelection(id));
-  });
+  /**（C7 选中露出已删——2026-10-02 用户拍板：点击元素不再移动镜头）*/
   /** 路/航/河：正在绘制的路径控制点 */
   let pathDraft = $state<LonLat[] | null>(null);
   /** 正在拖动的控制点索引 */
@@ -972,7 +910,6 @@
     window.addEventListener('keyup', up);
     return () => {
       cancelAnimationFrame(raf);
-      revealCancel?.();
       ro.disconnect();
       if (dprMq && dprHandler) dprMq.removeEventListener('change', dprHandler);
       canvas.removeEventListener('contextmenu', stopCtx);
