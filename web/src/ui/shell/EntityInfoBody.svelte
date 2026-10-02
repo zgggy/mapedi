@@ -1,8 +1,9 @@
 <script lang="ts">
   /**
-   * 信息面板内容体（图层/元素共用，2026-10-01 用户定稿）：
-   * **统一、紧凑**——只保留通用项（名称/颜色/描述/相邻/保存 + 调用方 extra 行）。
-   * 外交（附庸/敌对/同盟）与专属色已删（画蛇添足，元素只做统一的东西）；
+   * 信息面板内容体（图层/元素共用，2026-10-02 重构方案 §5 落地）：
+   * 「身份 → 短 KV 流 → 描述 → 相邻 → 详情▸ → 动作条」纵向五段——
+   * 高频高重要在上（名称/颜色/计数），低频低重要进「详情」（ID/分类），
+   * 空描述收起为「＋ 添加描述」，保存固定为右对齐动作条（sticky 底）。
    * 不放解释性文字；无内嵌框（容器由 ExpandPanel 统一）。
    */
   let {
@@ -13,7 +14,8 @@
     countLabel = '地块',
     description = '',
     neighbors = [] as { id: string; name: string; color: string }[],
-    extra = [] as { label: string; value: string }[],
+    extra = [] as { label: string; value: string; detail?: boolean }[],
+    showAdjacent = true,
     onSave,
   }: {
     name?: string;
@@ -24,7 +26,10 @@
     countLabel?: string;
     description?: string;
     neighbors?: { id: string; name: string; color: string }[];
-    extra?: { label: string; value: string }[];
+    /** 结构 KV；detail=true 折进「详情 ▸」（ID/分类类低频元数据） */
+    extra?: { label: string; value: string; detail?: boolean }[];
+    /** 图层无「相邻」概念（恒空=死信息，2026-10-02 D7 拍板：不渲染） */
+    showAdjacent?: boolean;
     onSave?: (patch: { name?: string; color?: string; description?: string }) => void;
   } = $props();
 
@@ -32,8 +37,11 @@
   let editBasic = $state('');
   let editDesc = $state('');
   let editKey = $state('');
+  /** 描述空态收起（P1）；有值常开。详情默认折叠（P2/L3）。 */
+  let descOpen = $state(false);
+  let showDetail = $state(false);
 
-  // 目标切换（选中另一个元素/图层）时重置编辑副本
+  // 目标切换（选中另一个元素/图层）时重置编辑副本与折叠态
   $effect(() => {
     const key = `${name}|${basicColor}|${description}`;
     if (key !== editKey) {
@@ -41,12 +49,17 @@
       editName = name;
       editBasic = basicColor;
       editDesc = description;
+      descOpen = !!description;
+      showDetail = false;
     }
   });
+
+  const mainExtra = $derived(extra.filter((e) => !e.detail));
+  const detailExtra = $derived(extra.filter((e) => e.detail));
 </script>
 
 <div class="body">
-  <!-- 身份行（2026-10-02 紧凑化）：名称 + 颜色 同行 -->
+  <!-- 身份行（2026-10-02 方案）：名称 + 颜色 同行 -->
   <div class="field inline">
     <span class="lb1">名称</span>
     <input class="nm" value={editName} oninput={(e) => (editName = e.currentTarget.value)} />
@@ -60,46 +73,70 @@
     />
   </div>
 
-  <!-- 短 KV 流式排布（地块/分类/ID/子层… 自动并排换行） -->
-  {#if extra.length || cellCount >= 0}
-    <div class="flow">
-      <span class="ex"><span class="lb">{countLabel}</span>{cellCount}</span>
-      {#each extra as row (row.label)}
-        <span class="ex"><span class="lb">{row.label}</span>{row.value}</span>
-      {/each}
-    </div>
-  {/if}
+  <!-- 短 KV 流：计数 + 结构类并排，放不下才换行 -->
+  <div class="flow">
+    <span class="ex"><span class="lb">{countLabel}</span>{cellCount}</span>
+    {#each mainExtra as row (row.label)}
+      <span class="ex"><span class="lb">{row.label}</span>{row.value}</span>
+    {/each}
+  </div>
 
-  <label class="field">
-    <span class="lb1">描述</span>
-    <textarea rows="2" value={editDesc} oninput={(e) => (editDesc = e.currentTarget.value)}></textarea>
-  </label>
-
-  {#if neighbors.length}
-    <div class="ex-row nbr-row">
-      <span class="lb">相邻</span>
-      <span class="nbr">
-        {#each neighbors as n (n.id)}
-          <span class="nb"><span class="dot" style="background:{n.color}"></span>{n.name}</span>
-        {/each}
-      </span>
-    </div>
+  <!-- 描述：空态 = 一行按钮（P1 空态收起） -->
+  {#if !descOpen}
+    <button type="button" class="ghostbtn" onclick={() => (descOpen = true)}>＋ 添加描述</button>
   {:else}
-    <div class="ex-row"><span class="lb">相邻</span><span>—</span></div>
+    <label class="field">
+      <span class="lb1">描述</span>
+      <textarea rows="2" value={editDesc} oninput={(e) => (editDesc = e.currentTarget.value)}></textarea>
+    </label>
   {/if}
 
-  <button
-    type="button"
-    class="primary"
-    onclick={() => onSave?.({ name: editName, color: basicEditable ? editBasic : undefined, description: editDesc })}
-  >
-    保存
-  </button>
+  {#if showAdjacent}
+    {#if neighbors.length}
+      <div class="ex-row nbr-row">
+        <span class="lb">相邻</span>
+        <span class="nbr">
+          {#each neighbors as n (n.id)}
+            <span class="nb"><span class="dot" style="background:{n.color}"></span>{n.name}</span>
+          {/each}
+        </span>
+      </div>
+    {:else}
+      <div class="ex-row"><span class="lb">相邻</span><span>—</span></div>
+    {/if}
+  {/if}
+
+  <!-- 详情 ▸：ID/分类等低频元数据（L3 折叠） -->
+  {#if detailExtra.length}
+    <button type="button" class="ghostbtn dt" onclick={() => (showDetail = !showDetail)}>
+      {showDetail ? '详情 ▾' : '详情 ▸'}
+    </button>
+    {#if showDetail}
+      <div class="flow">
+        {#each detailExtra as row (row.label)}
+          <span class="ex"><span class="lb">{row.label}</span>{row.value}</span>
+        {/each}
+      </div>
+    {/if}
+  {/if}
+
+  <!-- 动作条（sticky 底，右对齐——P8 动作与信息分层） -->
+  <div class="actions">
+    <button
+      type="button"
+      class="primary"
+      onclick={() => onSave?.({ name: editName, color: basicEditable ? editBasic : undefined, description: editDesc })}
+    >
+      保存
+    </button>
+  </div>
 </div>
 
 <style>
   .body {
     font-size: 12px;
+    display: flex;
+    flex-direction: column;
   }
   .field {
     display: flex;
@@ -186,16 +223,41 @@
     border-radius: 50%;
     flex: 0 0 auto;
   }
-  .primary {
-    width: 100%;
+  /* 幽灵行按钮：空态描述 / 详情开关（11px dim，无框） */
+  .ghostbtn {
+    align-self: flex-start;
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 2px 0;
+    margin-bottom: 3px;
+    cursor: pointer;
+  }
+  .ghostbtn:hover {
+    color: var(--text);
+  }
+  /* 动作条：sticky 底 + 右对齐（ExpandPanel body 可滚时始终可达） */
+  .actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: flex-end;
+    background: rgba(16, 19, 26, 0.94);
+    padding: 4px 0 1px;
     margin-top: 2px;
+  }
+  .primary {
     background: rgba(196, 123, 58, 0.4);
     border: 1px solid var(--panel-border);
     border-radius: 7px;
     color: inherit;
-    padding: 3px;
+    padding: 3px 14px;
     cursor: pointer;
     font: inherit;
     font-size: 11px;
+  }
+  .primary:hover {
+    background: rgba(196, 123, 58, 0.55);
   }
 </style>

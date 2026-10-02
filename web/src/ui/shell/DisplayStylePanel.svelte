@@ -39,6 +39,8 @@
 
   const isFreeform = $derived(isFreeLayerId(world, layerId));
   const c = $derived(patchElementStyle(cfg ?? defaultElementStyle(), {}));
+  /** 嵌入检查区默认折叠（2026-10-02 D1 拍板：低频参数收摘要行） */
+  let styleOpen = $state(false);
 
   let debounceTimer = 0;
   let pending: ElementStylePatch = {};
@@ -64,6 +66,17 @@
 </script>
 
 {#snippet inner()}
+    {#if embedded && !isFreeform}
+      <button type="button" class="sumrow" onclick={() => (styleOpen = !styleOpen)}>
+        <span
+          >边界 {fmt(c.border.width)} · 平滑 {fmt(c.border.smooth, 2)} · 填充{c.fill.enabled
+            ? '开'
+            : '关'}</span
+        >
+        <span class="caret">{styleOpen ? '▾' : '▸'}</span>
+      </button>
+    {/if}
+    {#if !embedded || isFreeform || styleOpen}
     <div class="body" class:emb={embedded}>
       {#if isFreeform}
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素样式。</p>
@@ -108,6 +121,7 @@
       </div>
       {/if}
     </div>
+    {/if}
 {/snippet}
 {#if embedded}
   {@render inner()}
@@ -138,6 +152,25 @@
   }
   .body {
     padding: 8px 12px 12px;
+  }
+  /* 折叠摘要行（D1）：边界/平滑/填充一行可读，点开展开全部控件 */
+  .sumrow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 3px 0;
+    cursor: pointer;
+  }
+  .sumrow:hover {
+    color: var(--text);
+  }
+  .sumrow .caret {
+    font-size: 10px;
   }
   /* 嵌入检查展开区：去自身 padding、贴齐信息区左缘（2026-10-02 紧凑化） */
   .body.emb {

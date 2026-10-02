@@ -326,12 +326,14 @@
         open: boolean,
         body: import('svelte').Snippet | null,
         depth: number,
+        hidden = false,
       )}
         <ItemButton
           logoColor={color}
           name={name}
           {depth}
           selected={selectedRegionId === id}
+          {hidden}
           {open}
           content={body}
           onClick={() => {
@@ -349,6 +351,9 @@
           class="cell"
           class:create={c.kind === 'create'}
           class:open={c.kind === 'row' && selectedRegionId === id}
+          title={taskMode === 'gen' && c.kind === 'row'
+            ? '元素级生成待重新设计（2026-10-01 拍板先删）'
+            : undefined}
           data-row-id={c.kind === 'row' ? id : undefined}
           data-kind={c.kind === 'row' ? 'region' : 'create'}
           style="padding-left:{n.depth * 14}px"
@@ -410,6 +415,7 @@
               selectedRegionId === id,
               selectedRegionId === id && modeBodyOf(id) ? rowBody : null,
               n.depth,
+              n.region.hidden ?? false,
             )}
           {/if}
         </li>
@@ -461,6 +467,7 @@
               selectedRegionId === p.id,
               selectedRegionId === p.id && taskMode === 'organize' ? pathBody : null,
               0,
+              p.hidden ?? false,
             )}
           </li>
           {/each}

@@ -15,6 +15,7 @@
     top = false,
     indentable = true,
     name = '',
+    chain = '',
   }: {
     onMove?: (dir: -1 | 1) => void;
     /** 缺省 = 该列表不提供缩进（元素面板） */
@@ -31,7 +32,19 @@
     indentable?: boolean;
     /** 当前元素名（按钮 title 提示） */
     name?: string;
+    /** 层级面包屑（图层：'根 › 父'，顶层为空——2026-10-02 方案 §5.4） */
+    chain?: string;
   } = $props();
+
+  /** 禁用原因行内化（2026-10-02 方案 §5.8：不再只有悬停 title 可见） */
+  const reasons = $derived(
+    [
+      first ? '已在最上' : '',
+      last ? '已在最下' : '',
+      top ? '已提升至顶层' : '',
+      onIndent && !indentable ? '缩进无目标' : '',
+    ].filter(Boolean),
+  );
 </script>
 
 <div class="org">
@@ -43,7 +56,11 @@
   {#if onUnindent}
     <button type="button" class="ob" disabled={top} title="提升至顶层（还有父就继续上溯，一次到位）" onclick={onUnindent}>⇤ 提升</button>
   {/if}
-  {#if name}
+  {#if reasons.length}
+    <span class="hint dim-hint">{reasons.join(' · ')}</span>
+  {:else if chain}
+    <span class="hint">{chain}</span>
+  {:else if name}
     <span class="hint">操作「{name}」的层级与顺序</span>
   {/if}
 </div>
@@ -73,6 +90,10 @@
   .ob:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+  .dim-hint {
+    color: var(--text-dim);
+    opacity: 0.85;
   }
   .hint {
     flex: 1 1 100%;

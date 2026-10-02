@@ -30,6 +30,7 @@
     expandPanel,
     taskMode = 'check',
     onOrganize,
+    gearIds = new Set<string>(),
   }: {
     world: World | null;
     focusLayer?: string;
@@ -51,12 +52,28 @@
     onDeleteLayer?: (id: string) => void;
     /** 聚焦行下方的模式展开区（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     expandPanel?: import('svelte').Snippet;
+    /** L0 ⚙：有专属生成面板的层 id 集（App 按策略+profile 派生，2026-10-02 D6） */
+    gearIds?: Set<string>;
   } = $props();
 
   /** 本面板私有创建/搜索文本（2026-10-01 用户定：两面板各自只搜自己，互不影响） */
   let text = $state('');
 
   type Meta = { emoji: string; name: string; kind: string; category: string; pending?: boolean };
+
+  /** 组织面包屑（2026-10-02 方案 §5.4）：父链名字，根在前（'' = 顶层） */
+  function chainOf(pid: string | null): string {
+    const byId = new Map((world?.layers ?? []).map((l) => [l.id, l]));
+    const parts: string[] = [];
+    let cur = pid;
+    while (cur) {
+      const l = byId.get(cur);
+      if (!l) break;
+      parts.unshift(l.name || cur);
+      cur = l.parentLayerId ?? null;
+    }
+    return parts.join(' › ');
+  }
 
   const rows = $derived.by(() => {
     const layers = world?.layers ?? [];
@@ -79,7 +96,7 @@
       depth: number;
       parentId: string | null;
       meta: Meta;
-      visible: boolean;
+      hidden: boolean;
     }[] = [];
     const walk = (pid: string | null, depth: number) => {
       for (const id of children.get(pid) ?? []) {
@@ -96,7 +113,7 @@
           depth,
           parentId: pid,
           meta: { ...base, name: layer.name || base.name },
-          visible: layer.visible ?? defaultLayerVisible(layer),
+          hidden: !(layer.visible ?? defaultLayerVisible(layer)),
         });
         walk(id, depth + 1);
       }
@@ -238,6 +255,7 @@
           {@const sib = sibFlags.get(row.id) ?? { prev: false, next: false, canIndent: false }}
           <OrganizeRow
             name={row.meta.name}
+            chain={chainOf(row.parentId)}
             first={!sib.prev}
             last={!sib.next}
             top={!row.parentId}
@@ -252,6 +270,8 @@
           name={row.meta.name}
           depth={row.depth}
           selected={focusLayer === row.id}
+          hidden={row.hidden}
+          gear={gearIds.has(row.id)}
           open={focusLayer === row.id}
           content={focusLayer === row.id && taskMode !== 'draw'
             ? taskMode === 'organize'

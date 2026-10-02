@@ -10,7 +10,6 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import EntityInfoBody from './EntityInfoBody.svelte';
   import DisplayStylePanel from './DisplayStylePanel.svelte';
-  import CapsuleSlider from './CapsuleSlider.svelte';
   import { editor } from '../../app/store.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
 
@@ -96,23 +95,15 @@
       description: r ? ((a?.description as string) ?? '') : meta ? `${meta.emoji} ${meta.kind}` : '',
       // 子元素行已删（2026-10-01 拍板：子元素相关功能之后重新设计）
       extra: r
-        ? [
-            {
-              label: '隶属',
-              value: r.parentId
-                ? (world?.regions.find((x) => x.id === r.parentId)?.name ?? r.parentId)
-                : '—',
-            },
-            { label: 'ID', value: r.id },
-          ]
+        ? [{ label: 'ID', value: r.id, detail: true }]
         : l
           ? [
-              { label: '分类', value: catLabel(meta?.category ?? 'custom') },
-              { label: 'ID', value: id ?? '' },
               {
                 label: '子层',
                 value: String(world ? world.layers.filter((x) => x.parentLayerId === id).length : 0),
               },
+              { label: '分类', value: catLabel(meta?.category ?? 'custom'), detail: true },
+              { label: 'ID', value: id ?? '', detail: true },
             ]
           : [],
       neighbors: r && world ? neighborsOfWorld(world, r) : [],
@@ -121,15 +112,11 @@
       styleName: world?.layers.find((x) => x.id === styleId)?.name ?? styleId,
       styleCfg: styleId ? editor.layerStyleConfig(styleId) : null,
       parentId: r?.parentId ?? null,
+      parentName: r?.parentId
+        ? (world?.regions.find((x) => x.id === r.parentId)?.name ?? r.parentId)
+        : null,
     };
   });
-
-  /** 每元素涂改值（初始 = 区间 min）；滑块联动 setHeightPaint（第十一轮） */
-  const paintValues = $state<Record<string, number>>({});
-  function onHeightSlider(rid: string, v: number) {
-    paintValues[rid] = v;
-    editor.setHeightPaint(rid, v);
-  }
 
   function saveElement(patch: {
     name?: string;
@@ -149,34 +136,50 @@
     });
     editor.status = '已保存（Ctrl+Z 可撤销）';
   }
+
+  /** 隶属跳转（2026-10-02 D8 拍板）：聚焦父层 + 选中父元素——父子导航第一跳 */
+  function jumpParent() {
+    const pid = view.parentId;
+    const p = pid && world ? world.regions.find((x) => x.id === pid) : null;
+    if (!p) return;
+    editor.selectLayerTop(p.layerId);
+    editor.selectedRegionId = p.id;
+    editor.status = `跳转「${p.name}」`;
+    editor.notify();
+  }
 </script>
 
 <div class="ins">
-  <!-- 显隐开关（第八轮拍板：眼睛从行按钮移入检查模式展开区；临时安置） -->
-  {#if kind === 'element' && view.regionId}
-    <button type="button" class="vis-toggle" onclick={() => editor.toggleItemHidden(view.regionId!)}>
-      {view.hidden ? '🚫 已隐藏 · 点击显示' : '👁 显示中 · 点击隐藏'}
-    </button>
-  {:else if kind === 'layer' && view.layerId}
-    <button type="button" class="vis-toggle" onclick={() => editor.toggleLayerVisible(view.layerId!)}>
-      {view.layerVisible ? '👁 图层显示中 · 点击隐藏' : '🚫 图层已隐藏 · 点击显示'}
-    </button>
-  {/if}
-  <!-- 第十一轮：高度（区间）元素展开内容带涂改滑块（不分模式；其他元素永不含高度滑块） -->
-  {#if view.regionId && view.heightIv}
-    <div class="hsl">
-      <span class="hsl-lb">高度</span>
-      <CapsuleSlider
-        min={view.heightIv.lo}
-        max={view.heightIv.hi}
-        step={1}
-        value={paintValues[view.regionId] ?? view.heightIv.min}
-        label="{view.name} 涂改高度"
-        width={130}
-        onInput={(v) => onHeightSlider(view.regionId!, v)}
-      />
-    </div>
-  {/if}
+  <!-- 状态条（2026-10-02 方案 §4.3）：显隐胶囊 · 区间徽章（只读，涂改在绘制） · 隶属跳转 -->
+  <div class="srow">
+    {#if kind === 'element' && view.regionId}
+      <button
+        type="button"
+        class="vis-toggle"
+        title={view.hidden ? '点击显示' : '点击隐藏'}
+        onclick={() => editor.toggleItemHidden(view.regionId!)}
+      >
+        {view.hidden ? '🚫 已隐藏' : '👁 显示中'}
+      </button>
+    {:else if kind === 'layer' && view.layerId}
+      <button
+        type="button"
+        class="vis-toggle"
+        title={view.layerVisible ? '点击隐藏' : '点击显示'}
+        onclick={() => editor.toggleLayerVisible(view.layerId!)}
+      >
+        {view.layerVisible ? '👁 显示中' : '🚫 已隐藏'}
+      </button>
+    {/if}
+    {#if view.heightIv}
+      <span class="ivb">区间 {view.heightIv.lo}–{view.heightIv.hi}</span>
+    {/if}
+    {#if kind === 'element' && view.parentName}
+      <button type="button" class="jump" title="跳转到父元素" onclick={jumpParent}>
+        隶属 {view.parentName} ›
+      </button>
+    {/if}
+  </div>
   {#if kind === 'element' && view.regionId}
     <EntityInfoBody
       name={view.name}
@@ -196,6 +199,7 @@
       basicEditable={false}
       cellCount={view.cellCount}
       countLabel="元素"
+      showAdjacent={false}
       description={view.description}
       neighbors={[]}
       extra={view.extra}
@@ -228,34 +232,53 @@
     user-select: none;
   }
   /* 显隐开关（把手语言；第八轮：自行按钮移入） */
-  .vis-toggle {
-    display: block;
-    width: 100%;
+  .srow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
     margin: 4px 0 2px;
+  }
+  .vis-toggle {
+    display: inline-flex;
+    align-items: center;
     border: 1px solid var(--panel-border);
-    border-radius: 8px;
+    border-radius: 999px;
     background: rgba(255, 255, 255, 0.05);
     color: var(--text-dim);
-    padding: 5px 8px;
+    padding: 3px 9px;
     font-size: 11px;
-    text-align: left;
     cursor: pointer;
   }
   .vis-toggle:hover {
     background: rgba(255, 255, 255, 0.1);
     color: var(--text);
   }
-  /* 高度涂改滑块行（第十一轮） */
-  .hsl {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 4px 0 2px;
-    font-size: 11px;
+  /* 区间只读徽章（D2：涂改滑块归绘制模式） */
+  .ivb {
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10px;
     color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
   }
-  .hsl-lb {
-    flex: 0 0 auto;
+  /* 隶属跳转胶囊（D8） */
+  .jump {
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    background: rgba(120, 160, 220, 0.14);
+    color: var(--text);
+    padding: 3px 9px;
+    font-size: 11px;
+    cursor: pointer;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .jump:hover {
+    background: rgba(120, 160, 220, 0.28);
   }
   .sty {
     margin-top: 4px;

@@ -43,6 +43,17 @@
   const focusLayer = $derived(editor.focusLayer);
   /** 焦点层生成策略（GenerateSection 三分支单源；pre-world 回落 'elements'，行展开本就需要 world） */
   const focusStrategy = $derived(genStrategyOf(world, focusLayer));
+  /** L0 ⚙ 徽标（2026-10-02 D6）：有专属生成面板的层 = 策略分支 或 profile 带参数 */
+  const gearIds = $derived(
+    new Set([
+      ...(world?.layers ?? [])
+        .filter((l) => (l.genStrategy ?? 'elements') !== 'elements')
+        .map((l) => l.id),
+      ...editor.profiles
+        .filter((p) => Object.keys(p.params ?? {}).length > 0)
+        .map((p) => p.layerId),
+    ]),
+  );
   const draw = $derived(editor.draw);
   const selectedRegionId = $derived(editor.selectedRegionId);
   const newName = $derived(editor.newName);
@@ -395,6 +406,7 @@
   <LayersPanel
     {world}
     {focusLayer}
+    gearIds={gearIds}
     onSelect={(id) => {
       if (!id) {
         editor.clearLayerSelection();

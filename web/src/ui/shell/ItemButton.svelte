@@ -16,6 +16,8 @@
     desc = '',
     depth = 0,
     selected = false,
+    hidden = false,
+    gear = false,
     open = false,
     content,
     onClick,
@@ -33,6 +35,10 @@
     depth?: number;
     /** 选中：金色外框 */
     selected?: boolean;
+    /** 已隐藏（L0 状态点，2026-10-02 D6 拍板：异常态才出现） */
+    hidden?: boolean;
+    /** 有专属生成面板（L0：⚙ 小标） */
+    gear?: boolean;
     /** 本行展开态（选中/聚焦驱动；open 时原地长出 content） */
     open?: boolean;
     /** 展开内容（检查/生成/绘制/组织模式区；缺省 = 纯行不可展开） */
@@ -50,6 +56,7 @@
       type="button"
       class="ibtn"
       class:open={open && !!content}
+      class:hidden
       onclick={onClick}
       ondblclick={(e) => {
         e.preventDefault();
@@ -74,6 +81,12 @@
           <span class="desc">{desc}</span>
         {/if}
       </span>
+      {#if hidden}
+        <span class="badge" title="已隐藏">🚫</span>
+      {/if}
+      {#if gear}
+        <span class="badge" title="有专属生成面板">⚙</span>
+      {/if}
       {#if content}
         <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
       {/if}
@@ -110,6 +123,16 @@
   }
   .ibtn:hover {
     background: rgba(255, 255, 255, 0.04);
+  }
+  /* L0 隐藏态（D6）：名称压暗 + 🚫 点——异常态才出现，不给正常行加噪 */
+  .ibtn.hidden .nm {
+    opacity: 0.55;
+  }
+  .badge {
+    flex: 0 0 auto;
+    font-size: 9px;
+    line-height: 1;
+    opacity: 0.8;
   }
   /* 缩进短竖线（第十一轮：button 内最左侧；depth > 0 才有） */
   .dbar {
