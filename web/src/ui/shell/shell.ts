@@ -39,6 +39,17 @@ function writeBool(key: string, v: boolean): void {
 }
 
 /** 左栏两面板开合（2026-09-30 终稿：图层/工作区各自收起为一行；替代 railOpen） */
+/**
+ * 空白点击守卫（两面板**统一语义**，2026-10-02 收敛单源）：
+ * 落在「行内（含其展开体 [data-row-id]）或交互控件」上的点击不算空白，不得收起/清选。
+ * 背景：此前图层面板带 [data-row-id] 守卫、元素面板只挡 button/input——点元素展开区
+ * 里的文字/标签/chip 会直接把选中清掉（面板闪没），两面板行为不一致（用户指出）。
+ */
+export function isRowOrControlClick(e: { target: EventTarget | null }): boolean {
+  const t = e.target as HTMLElement | null;
+  return !!(t?.closest?.('[data-row-id]') || t?.closest?.('button,input,select,textarea'));
+}
+
 export function persistPanelOpen(which: 'layers' | 'ws', v: boolean): void {
   writeBool(`${UI_NS}.panel.${which}`, v);
 }

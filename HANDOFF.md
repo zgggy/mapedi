@@ -20,7 +20,7 @@
   - **状态 = StateCapsule 新组件**（边框+背景区分状态、图标+状态文字）：视图设置三开关（🧭🟡🔄）、边界/填充显示、检查区显隐胶囊；checkbox 全清零。**修极性 bug**（图层 on 误写 `!visible` → 现场两态复验：海陆=已隐藏、高度=显示中）。
   - **选中即显示（用户原话「选中既显示，不影响显隐状态按钮」）**：`isLayerShown` 读时派生（焦点层强制显示；不写 visible、不动按钮、焦点走完回存储态）；AGENTS/RENDER_LOGIC 契约同步；像素验收=聚焦海陆显出 69.1%、收起缩回 68.8%、稳定 0；页内 compose 三态 `''→sea0 / 'landsea'→sea87`。旧「焦点不改显示」判废除（记录于契约行）。
   - **PlanetParams 孤儿删除**（全库零引用，被 ViewSettingsPopover 取代）；⚙ 位置标记（D6 L0 徽标=「有专属生成面板」状态标，非按钮）。
-  - 基线：tsc 0、svelte-check 0 errors；第三十轮剪至 `docs/history/HANDOFF_LOG_2026-10-01.md`。
+  - 同批修**两面板空白点击守卫不一致**（用户指出）：元素面板缺 `[data-row-id]` 守卫 →点展开体内文字/标签/chip 即清选闪没——收敛 shell 单源 `isRowOrControlClick`（验收=点 KV 文字双面板保选中、点真空白双面板收起）。基线：tsc 0、svelte-check 0 errors；第三十轮剪至 `docs/history/HANDOFF_LOG_2026-10-01.md`。
 
 
 - **✓ 第三十二轮（2026-10-02 球面手感 + C7 移除 + 展开区方案）**：

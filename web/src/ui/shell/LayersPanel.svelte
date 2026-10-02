@@ -16,6 +16,7 @@
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
   import { measureSlot } from './liftDrag';
+import { isRowOrControlClick } from './shell';
   import OrganizeRow from './OrganizeRow.svelte';
 
   let {
@@ -213,9 +214,7 @@
   }
 
   function onBlankClick(e: MouseEvent) {
-    const t = e.target as HTMLElement | null;
-    if (t?.closest?.('[data-row-id]')) return;
-    if (t?.closest?.('button,input,select,textarea')) return;
+    if (isRowOrControlClick(e)) return;
     onSelect?.('');
   }
 

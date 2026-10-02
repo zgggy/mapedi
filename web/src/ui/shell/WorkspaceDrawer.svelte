@@ -18,6 +18,7 @@
   import CreateRow from './CreateRow.svelte';
   import { ROW_EST, VIRTUAL_MIN, listWindow } from './virtualList';
   import { measureSlot } from './liftDrag';
+import { isRowOrControlClick } from './shell';
   import OrganizeRow from './OrganizeRow.svelte';
 
   let {
@@ -218,10 +219,9 @@
     if (r && selectedRegionId !== id && canExpand(r)) toggleExpand(id);
   }
 
-  /** 点击面板空白处 = 无选中元素 = 收起（绘制退出由 App 推导） */
+  /** 点击面板空白处 = 无选中元素 = 收起（绘制退出由 App 推导）；守卫与图层面板同源 */
   function onBlankClick(e: MouseEvent) {
-    const t = e.target as HTMLElement;
-    if (t.closest('button') || t.closest('input') || t.closest('.ibtn')) return;
+    if (isRowOrControlClick(e)) return;
     if (selectedRegionId) onSelect(null as unknown as string);
   }
 
