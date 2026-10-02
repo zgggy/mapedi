@@ -71,7 +71,7 @@
       : (world.regions.find((r) => r.id === t)?.layerId ?? focusLayer);
     const l = world.layers.find((x) => x.id === layerId);
     if (!l) return '';
-    return isLayerShown(world, l.id, null)
+    return isLayerShown(world, l.id, focusLayer)
       ? ''
       : `⚠ 正在绘制「${l.name}」但该图层已隐藏 —— 笔画画了看不见`;
   });

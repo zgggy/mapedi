@@ -10,6 +10,7 @@
   import { LAYER_META } from '../workbench/layerMeta';
   import EntityInfoBody from './EntityInfoBody.svelte';
   import DisplayStylePanel from './DisplayStylePanel.svelte';
+  import StateCapsule from './StateCapsule.svelte';
   import { editor } from '../../app/store.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
 
@@ -153,23 +154,27 @@
   <!-- 状态条（2026-10-02 方案 §4.3）：显隐胶囊 · 区间徽章（只读，涂改在绘制） · 隶属跳转 -->
   <div class="srow">
     {#if kind === 'element' && view.regionId}
-      <button
-        type="button"
-        class="vis-toggle"
+      <StateCapsule
+        size="md"
+        onIcon="👁"
+        offIcon="🚫"
+        onText="显示中"
+        offText="已隐藏"
+        on={!view.hidden}
         title={view.hidden ? '点击显示' : '点击隐藏'}
-        onclick={() => editor.toggleItemHidden(view.regionId!)}
-      >
-        {view.hidden ? '🚫 已隐藏' : '👁 显示中'}
-      </button>
+        onchange={() => editor.toggleItemHidden(view.regionId!)}
+      />
     {:else if kind === 'layer' && view.layerId}
-      <button
-        type="button"
-        class="vis-toggle"
+      <StateCapsule
+        size="md"
+        onIcon="👁"
+        offIcon="🚫"
+        onText="显示中"
+        offText="已隐藏"
+        on={view.layerVisible}
         title={view.layerVisible ? '点击隐藏' : '点击显示'}
-        onclick={() => editor.toggleLayerVisible(view.layerId!)}
-      >
-        {view.layerVisible ? '👁 显示中' : '🚫 已隐藏'}
-      </button>
+        onchange={() => editor.toggleLayerVisible(view.layerId!)}
+      />
     {/if}
     {#if view.heightIv}
       <span class="ivb">区间 {view.heightIv.lo}–{view.heightIv.hi}</span>
@@ -238,21 +243,6 @@
     align-items: center;
     gap: 6px;
     margin: 4px 0 2px;
-  }
-  .vis-toggle {
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--panel-border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-dim);
-    padding: 3px 9px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .vis-toggle:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text);
   }
   /* 区间只读徽章（D2：涂改滑块归绘制模式） */
   .ivb {

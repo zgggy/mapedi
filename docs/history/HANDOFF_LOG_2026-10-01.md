@@ -75,3 +75,13 @@
   - **顶栏胶囊金钮不动**：根因=**IAB/后台页 CSS 过渡时间线冻结**（style 已更新、computed 停旧档；ModeCapsule 自 371f8d2 未改=环境性）→ `.knob` 去过渡**瞬移到位**。验收：点击后 120ms computed=96px=目标档。
   - **元素展开删子元素**（拍板先删、之后重设计）：WorkspaceDrawer 删 kids 递归+子级 CreateBox+childNameOf/handleCreateChild/onCreateChild（App 绑定同删）；`modeBodyOf(gen)=false`；InspectSection 删「子元素」计数行；App 删元素级生成占位。顶层缩进树不受影响；验收=无子元素/子层字样、检查区正常、7 国全显（少1国=生成数据本就 7 个，旧逻辑同）。
   - 基线：tsc 0、svelte-check 0 errors。
+
+
+## 剪出（2026-10-02）：第三十轮 容差集中
+
+- **✓ 第三十轮（2026-10-01，步骤7 转包①：容差集中）**：
+  - `core/tolerances.ts` 单源 10 常量；**17 文件原值迁移零改值**——键量化 KEY_QUANT（lonlatKey/NumKey ×1000 全清）、WRAP_EPS(1e-3)/PROJ_WRAP_EPS(1e-2) 并列暴露历史分歧、GEOM_EPS(1e-12 含近零保护，全清)、EPS_FP(1e-9)、SCALE_FLOOR(cam.scale 下限 7 处全清)、MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN。
+  - **坑（已修）**：脚本把替换表达式当 import 符号名插进 14 文件（`import { Math.max(...) }` 语法炸）+ ring/ 相对路径差一级——修复法=删垃圾行按 `^import` 重插；教训=批量替换的 import 符号必须与替换对**分离建模**。
+  - 留原地（模块头注明）：一次性孤值 1e-8/1e-10/1e-15、GLSL 内字面量。
+  - 验收：tsc/svelte-check 0；冒烟=平面 hover 拾取（#70115 全字段）+球面往返×2 零错。**未跑测试**（纪律）。
+  - 存量进度：容差 ✓ / 图层名标志位 ☐ / as-unknown ☐。

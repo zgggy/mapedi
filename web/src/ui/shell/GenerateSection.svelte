@@ -11,6 +11,8 @@
    * 防误触由「须先切生成模式」承担（原 D5 长按把手随把手架构退役）。
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
+  import ModeCapsule from './ModeCapsule.svelte';
+  import StateCapsule from './StateCapsule.svelte';
   import type { WorldShape } from '../../core/layer/genTypes';
   import type { GenStrategy } from '../../core/types';
   import { HARD_MAX_DENSITY } from '../../core/world';
@@ -75,6 +77,17 @@
     count: { min: 1, max: 60 },
     fromLayerCount: { min: 1, max: 20 },
   };
+  /** 布尔参数的状态胶囊图标（缺省 ⚙）——2026-10-02 用户定：状态=胶囊按钮 */
+  const PARAM_ICONS: Record<string, string> = { allowOcean: '🌊', allowOverlap: '🌀' };
+  /** 大陆占比档位（N 选 1 → 分段胶囊，图标配文字） */
+  const LAND_TIERS = [
+    { id: '0.08', icon: '○', label: '小' },
+    { id: '0.15', icon: '◎', label: '中' },
+    { id: '0.25', icon: '●', label: '大' },
+    { id: '0.4', icon: '◉', label: '特大' },
+  ];
+  /** 当前值落档（不精确匹配 → '' → 滑钮隐藏，不冒充任何档） */
+  const tierId = (v: number) => LAND_TIERS.find((t) => Math.abs(Number(t.id) - v) < 0.005)?.id ?? '';
 
   function fire() {
     if (generating || !canGen) return;
@@ -99,11 +112,13 @@
         {#if shape && onShape}
           <div class="row">
             <label class="sm">大陆占比
-              <span class="tiered">
-                {#each [{ label: '小', v: 0.08 }, { label: '中', v: 0.15 }, { label: '大', v: 0.25 }, { label: '特大', v: 0.4 }] as t}
-                  <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
-                {/each}
-              </span>
+              <ModeCapsule
+                value={tierId(shape.landRatio)}
+                onChange={(id) => onShape('landRatio', Number(id))}
+                items={LAND_TIERS}
+                ariaLabel="大陆占比"
+                segMinW={64}
+              />
             </label>
             <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
           </div>
@@ -132,11 +147,13 @@
         {#if shape && onShape}
           <div class="row">
             <label class="sm">大陆占比
-              <span class="tiered">
-                {#each [{ label: '小', v: 0.08 }, { label: '中', v: 0.15 }, { label: '大', v: 0.25 }, { label: '特大', v: 0.4 }] as t}
-                  <button type="button" class:active={Math.abs(shape.landRatio - t.v) < 0.005} onclick={() => onShape('landRatio', t.v)}>{t.label}</button>
-                {/each}
-              </span>
+              <ModeCapsule
+                value={tierId(shape.landRatio)}
+                onChange={(id) => onShape('landRatio', Number(id))}
+                items={LAND_TIERS}
+                ariaLabel="大陆占比"
+                segMinW={64}
+              />
             </label>
             <label class="sm">落差 <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} /></label>
           </div>
@@ -162,12 +179,15 @@
           {#if layerParams && onParam}
             {#each Object.entries(layerParams) as [k, v] (k)}
               {#if typeof v === 'boolean'}
-                <label class="sm"
-                  ><input
-                    type="checkbox"
-                    checked={v}
-                    onchange={(e) => onParam(k, e.currentTarget.checked)}
-                  /> {PARAM_LABELS[k] ?? k}</label
+                <span class="prow"
+                  ><span class="pl">{PARAM_LABELS[k] ?? k}</span
+                  ><StateCapsule
+                    icon={PARAM_ICONS[k] ?? '⚙'}
+                    onText="开"
+                    offText="关"
+                    on={v}
+                    onchange={(nv) => onParam(k, nv)}
+                  /></span
                 >
               {:else if typeof v === 'number'}
                 <label class="sm"
@@ -285,25 +305,16 @@
     color: var(--text-dim, #888);
     padding: 2px 0;
   }
-  .tiered {
+  /* N 选 1 已换 ModeCapsule（2026-10-02）；.tiered 死样式删除 */
+  .prow {
     display: inline-flex;
-    border: 1px solid var(--border, #333);
-    border-radius: 5px;
-    overflow: hidden;
-  }
-  .tiered button {
-    border: 0;
-    border-radius: 0;
-    border-right: 1px solid var(--border, #333);
+    align-items: center;
+    gap: 5px;
     font-size: 11px;
-    padding: 3px 8px;
+    color: var(--text-dim);
   }
-  .tiered button:last-child {
-    border-right: 0;
-  }
-  .tiered button.active {
-    background: var(--accent, #c9a24a);
-    color: #1a1408;
+  .prow .pl {
+    color: var(--text-dim);
   }
   .prog {
     position: relative;

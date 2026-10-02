@@ -8,6 +8,7 @@
   import { isFreeLayerId } from '../../core/displayCompose';
   import type { World } from '../../core/types';
   import PanelShell from './PanelShell.svelte';
+  import StateCapsule from './StateCapsule.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
 
   let {
@@ -82,8 +83,8 @@
         <p class="dim">曲线层样式独立（线宽/颜色），不走元素样式。</p>
       {:else}
       <div class="grp">
-        <div class="grp-hd"><span>边界</span><label class="chk"><input type="checkbox" checked={c.border.enabled}
-            onchange={(e) => debouncedChange({ border: { enabled: e.currentTarget.checked } })} />显示</label></div>
+        <div class="grp-hd"><span>边界</span><StateCapsule icon="📏" onText="开" offText="关" on={c.border.enabled}
+            onchange={(v) => debouncedChange({ border: { enabled: v } })} /></div>
         {#if c.border.enabled}
           <label class="r">
             宽度
@@ -104,8 +105,8 @@
       </div>
 
       <div class="grp">
-        <div class="grp-hd"><span>填充</span><label class="chk"><input type="checkbox" checked={c.fill.enabled}
-            onchange={(e) => debouncedChange({ fill: { enabled: e.currentTarget.checked } })} />显示</label></div>
+        <div class="grp-hd"><span>填充</span><StateCapsule icon="🎨" onText="开" offText="关" on={c.fill.enabled}
+            onchange={(v) => debouncedChange({ fill: { enabled: v } })} /></div>
         {#if c.fill.enabled}
           <label class="r">
             透明
@@ -187,14 +188,6 @@
     color: var(--text-dim);
     margin-bottom: 4px;
     letter-spacing: 0.5px;
-  }
-  .grp-hd .chk {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-    font-size: 11px;
-    letter-spacing: 0;
   }
   .r {
     display: flex;

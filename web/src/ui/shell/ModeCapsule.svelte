@@ -26,7 +26,8 @@
     disabledWhen?: (id: string) => boolean;
   } = $props();
 
-  const activeIndex = $derived(Math.max(0, items.findIndex((i) => i.id === value)));
+  /** 无匹配档 = -1（自定义值不冒充任何档）；滑钮隐藏 */
+  const activeIndex = $derived(items.findIndex((i) => i.id === value));
 
   function onKey(e: KeyboardEvent) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
@@ -48,7 +49,8 @@
 >
   <span
     class="knob"
-    style="width:calc((100% - 4px) / {items.length});transform:translateX({activeIndex * 100}%)"
+    class:off={activeIndex < 0}
+    style="width:calc((100% - 4px) / {items.length});transform:translateX({Math.max(activeIndex, 0) * 100}%)"
   ></span>
   {#each items as it (it.id)}
     <button
@@ -85,6 +87,9 @@
    * 2026-10-01 用户报障「只切换、金钮不动」：IAB/后台页 **CSS 过渡时间线会冻结**，
    * transform 过渡停在旧档（style 已更新、computed/渲染不跟）→ 去过渡改**瞬移到位**，
    * 任何一帧绘制即在正确档位（动画是锦上添花，位置正确是底线）。 */
+  .knob.off {
+    visibility: hidden;
+  }
   .knob {
     position: absolute;
     top: 2px;

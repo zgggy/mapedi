@@ -6,6 +6,8 @@
    *   （用户原话：3d 时显示 3d 相关，2d 时显示 2d 相关，和设计的一样）
    */
   import CapsuleSlider from './CapsuleSlider.svelte';
+  import ModeCapsule from './ModeCapsule.svelte';
+  import StateCapsule from './StateCapsule.svelte';
   import type { ViewMode } from './shell';
 
   let {
@@ -58,8 +60,18 @@
       onClose();
     }
   }
-</script>
 
+  /** N 选 1 胶囊档位（图标配文字——2026-10-02 用户定） */
+  const STYLE_ITEMS = [
+    { id: 'dark', icon: '🌑', label: '暗色' },
+    { id: 'parchment', icon: '📜', label: '羊皮纸' },
+    { id: 'neon', icon: '👾', label: '科幻' },
+  ];
+  const PROJ_ITEMS = [
+    { id: 'mercator', icon: '▭', label: '墨卡托' },
+    { id: 'robinson', icon: '⬭', label: '罗宾森' },
+  ];
+</script>
 <svelte:document onpointerdown={onDocPointer} onkeydown={onKey} />
 
 {#if open}
@@ -68,9 +80,9 @@
       <section>
         <h3>星球</h3>
         <div class="row">
-          <label class="sm"><input type="checkbox" checked={globeShowAxis} onchange={(e) => onGlobeShowAxis?.(e.currentTarget.checked)} /> 轴 / 赤道</label>
-          <label class="sm"><input type="checkbox" checked={globeShowEcliptic} onchange={(e) => onGlobeShowEcliptic?.(e.currentTarget.checked)} /> 黄道</label>
-          <label class="sm"><input type="checkbox" checked={globeSpin} onchange={(e) => onGlobeSpin?.(e.currentTarget.checked)} /> 自转预览</label>
+          <StateCapsule icon="🧭" onText="开" offText="关" on={globeShowAxis} onchange={() => onGlobeShowAxis?.(!globeShowAxis)} title="轴与赤道线" />
+          <StateCapsule icon="🟡" onText="开" offText="关" on={globeShowEcliptic} onchange={() => onGlobeShowEcliptic?.(!globeShowEcliptic)} title="黄道基准环（恒水平）" />
+          <StateCapsule icon="🔄" onText="开" offText="关" on={globeSpin} onchange={() => onGlobeSpin?.(!globeSpin)} title="星球自转预览" />
         </div>
         <div class="row">
           <label class="sm">倾角 <CapsuleSlider min={0} max={60} step={0.5} value={globeTilt} label="轴倾角" width={110} onInput={(v) => onGlobeTilt?.(v)} /> {globeTilt.toFixed(1)}°</label>
@@ -82,19 +94,24 @@
       <section>
         <h3>视图</h3>
         <div class="row">
-          <label class="sm">地图风格
-            <select value={styleId} onchange={(e) => onStyle?.(e.currentTarget.value)}>
-              <option value="dark">暗色</option>
-              <option value="parchment">羊皮纸</option>
-              <option value="neon">科幻</option>
-            </select>
-          </label>
-          <label class="sm">投影
-            <select value={projection} onchange={(e) => onProjection?.(e.currentTarget.value)}>
-              <option value="mercator">墨卡托</option>
-              <option value="robinson">罗宾森（两极内收）</option>
-            </select>
-          </label>
+          <span class="k">风格</span>
+          <ModeCapsule
+            value={styleId}
+            onChange={(v) => onStyle?.(v)}
+            items={STYLE_ITEMS}
+            ariaLabel="地图风格"
+            segMinW={76}
+          />
+        </div>
+        <div class="row">
+          <span class="k">投影</span>
+          <ModeCapsule
+            value={projection}
+            onChange={(v) => onProjection?.(v)}
+            items={PROJ_ITEMS}
+            ariaLabel="投影"
+            segMinW={112}
+          />
         </div>
         <p class="dim">「地图风格」改的是海色/陆色/描边（StyleSet），不是界面主题。</p>
       </section>
@@ -139,13 +156,11 @@
     font-size: 11px;
     color: var(--text-dim);
   }
-  select {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text, #ddd);
-    border: 1px solid var(--border, #333);
-    border-radius: 5px;
+  .k {
     font-size: 11px;
-    padding: 2px 4px;
+    color: var(--text-dim);
+    min-width: 3em;
+    flex: 0 0 auto;
   }
   .dim {
     color: var(--text-dim);

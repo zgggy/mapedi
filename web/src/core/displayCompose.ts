@@ -253,21 +253,24 @@ export function splitRegionForDisplay(
 }
 
 /**
- * 图层是否在地图上展示元素：**显隐唯一开关 = layer.visible**（眼睛 / 图层行点击均切换它）。
- * 焦点/选中只决定工作区与叠放分组，**不改变显隐**（旧「选中 ≡ 显示」已废——它造成
- * "点行只临时显示"：焦点强制显示 + 眼睛状态不变，切走即消失）。
+ * 图层是否在地图上展示元素。两层语义（2026-10-02 用户原话「选中既显示，不影响
+ * 显隐状态按钮」）：
+ * - **存储显隐** = `layer.visible`，只有眼睛钮写它；
+ * - **选中即显示** = 焦点层读时强制显示——不写 visible、不动眼睛状态与按钮，
+ *   焦点走完自动回到存储态。（替代 2026-09-28「焦点不改显示」旧判——该判造成
+ *   选中了却看不见；实现为读时派生，不是恢复当年的写入方案。）
  */
 export function isLayerShown(
   world: World,
   layerId: string,
   focusLayerId?: string | null,
 ): boolean {
-  void focusLayerId;
   const l = world.layers.find((x) => x.id === layerId);
   if (!l) return false;
-  // baseMesh（地块网格）单独走 cells 门；自由层（路/航线/河）不再短路——
-  // 显隐唯一开关 = layer.visible（2026-10-01：「不选中但正在显示的图层要显示」）
+  // baseMesh（地块网格）单独走 cells 门；自由层（路/航线）不再短路——
   if (l.baseMesh) return false;
+  // 选中即显示：焦点层（且仅焦点层本身）读时强制显示
+  if (focusLayerId && layerId === focusLayerId) return true;
   return isVisible(l, defaultLayerVisible(l));
 }
 
