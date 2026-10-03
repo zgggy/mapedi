@@ -112,6 +112,48 @@ select {
   padding: 4px 8px;
 }
 
+/* ── 手感批（2026-10-04 用户：所有按钮要有响应动画、不等地图）──
+ * 按压缩放 = 纯 CSS :active，输入事件后首个样式重算即生效——
+ * 不依赖 JS/地图状态；极端失焦冻结也只是停在按住态，松开即复原。 */
+button:not(:disabled),
+[role='radio']:not([aria-disabled='true']) {
+  transition: transform 0.1s ease;
+}
+button:not(:disabled):active,
+[role='radio']:active {
+  transform: scale(0.96);
+}
+
+/* 视图容器子件进场（挂载即播：球面/平面何时就绪都自带动画，不空等） */
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.view > * {
+  animation: view-in 0.26s ease;
+}
+
+/* 模式展开区换档进场（{#if} 换分支 = 新节点创建即播） */
+@keyframes body-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.acc .body > * {
+  animation: body-in 0.18s ease;
+}
+
 .viewport-root {
   position: absolute;
   inset: 0;

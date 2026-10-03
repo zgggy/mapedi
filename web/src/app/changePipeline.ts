@@ -10,8 +10,6 @@
 import type { World } from '../core/types';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
-import { invalidateProjCache } from '../render/projCache';
-import { invalidateBorderCache } from '../render/borderCache';
 import { bumpAllRev, bumpHeightRev, bumpRegionsRev } from '../core/rev';
 import { materializeParentCells } from '../core/displayCompose';
 import {
@@ -44,18 +42,18 @@ export class ChangePipeline {
   touchWorld(): void {
     invalidateRegionIndex();
     invalidateCellGrid();
-    invalidateProjCache();
-    invalidateBorderCache();
+    // 手感批（2026-10-04）：不再全清投影/件环缓存——投影键含 seed/count/参数
+    // 自失效（撒点才换）；成员 Δ 由渲染前 reconcilePieceMembership 自动补丁。
+    // 全清曾导致下一帧数百毫秒重建 = 用户报的「整个界面闪一下」。
     bumpAllRev();
     this.swapIdentity();
     this.ctx.scheduleAutosave();
     this.ctx.notify();
   }
 
-  /** 仅 Region 归属/排序/颜色：不重建投影缓存 */
+  /** 仅 Region 归属/排序/颜色：不重建投影/件环缓存（渲染前对账补丁接管） */
   touchRegions(): void {
     invalidateRegionIndex();
-    invalidateBorderCache();
     bumpRegionsRev();
     materializeParentCells(this.ctx.world!);
     this.swapIdentity();

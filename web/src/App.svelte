@@ -148,7 +148,9 @@
       // 球面为纯展示：离开平面即结束绘制态（残留的绘制状态不得带到球面）
       if (draw.active) editor.endDraw();
     }
-    viewFade = 0.2;
+    // 手感批（2026-10-04）：点击即全暗 dip（flush~4ms，先于地图重建长块绘制）→
+    // 内容挂载时 .view > * 自带进场动画（何时到都自带动画，不等地图）
+    viewFade = 0;
     shell.viewMode = m;
     requestAnimationFrame(() => {
       viewFade = 1;

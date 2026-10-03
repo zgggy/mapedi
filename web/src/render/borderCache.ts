@@ -115,6 +115,57 @@ export function patchPieceEntry(
   return true;
 }
 
+/**
+ * 成员对账补丁（2026-10-04 手感批·修「全量重绘闪」）：编辑/物化后**渲染前**一次性
+ * 对账——已缓存件按 setKey 反查 region，cells 与 book.set 的 Δ 就地打补丁。
+ * 取代 touchWorld/touchRegions 里的 invalidateBorderCache 全清：全清会让下一帧
+ * 投影+环全量重建 = 数百毫秒长帧 = 用户报的「整个界面闪一下」。
+ * 门控 = dataRev|projKey（同修订同投影只对账一次，~1-3ms；换投影/改数据自动再来）；
+ * geomRev 仍写在键里——重生/导入自动换代，首启渐现不受影响。
+ */
+let memberReconcileGate = '';
+export function reconcilePieceMembership(
+  world: World,
+  projKey: ProjectionId,
+  project: (ll: LonLat) => Pt,
+): number {
+  const gate = `${dataRev()}|${projKey}`;
+  if (gate === memberReconcileGate) return 0;
+  memberReconcileGate = gate;
+  let patched = 0;
+  for (const [key, entry] of ringsCache) {
+    if (!entry.book) continue;
+    const segs = key.split('|');
+    if (segs.length < 2 || segs[1] !== projKey) continue;
+    const setKey = segs[0];
+    if (!setKey.startsWith('piece:')) continue;
+    const rid = setKey.split(':')[2];
+    if (!rid) continue;
+    const region = world.regions.find((r) => r.id === rid);
+    if (!region) continue;
+    const cached = entry.book.set;
+    const cur = region.cells;
+    if (cached.size === cur.length) {
+      let same = true;
+      for (const id of cur) {
+        if (!cached.has(id)) {
+          same = false;
+          break;
+        }
+      }
+      if (same) continue;
+    }
+    const nowSet = new Set(cur);
+    const added: CellId[] = [];
+    const removed: CellId[] = [];
+    for (const id of cur) if (!cached.has(id)) added.push(id);
+    for (const id of cached) if (!nowSet.has(id)) removed.push(id);
+    if (patchPieceEntry(world, setKey, projKey, project, added, removed)) patched++;
+  }
+  globalThis.__reconcileN = patched;
+  return patched;
+}
+
 function ensureRev(world: World): string {
   const rev = dataRev();
   // 环缓存按内容指纹命中，这里不清（见 ringCacheKey）
@@ -137,8 +188,9 @@ function ensureRev(world: World): string {
 /**
  * 环缓存键：setKey（`piece:${dp.key}`）+ 投影 + geomRev。
  * **不含内容指纹**（O(n) 指纹是热路径反模式，AGENTS.md §8/9）。
- * 不变量：`region.cells` 变化要么走 `invalidateBorderCache()`（全量），
- * 要么走 `patchPieceEntry()`（增量补丁）——二者互斥且必居其一。
+ * 不变量（2026-10-04 收口）：`region.cells` 变化走 `patchPieceEntry()`（增量补丁，
+ * 含渲染前 `reconcilePieceMembership` 自动对账）；`invalidateBorderCache()` 全清
+ * 只留测试夹具——运行时全清=重建长帧闪屏，已退役。
  */
 function ringCacheKey(setKey: string, projKey: string): string {
   return `${setKey}|${projKey}|${geomRev()}`;

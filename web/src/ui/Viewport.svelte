@@ -3,7 +3,7 @@
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
-  import { patchPieceEntry, invalidatePieceEntries } from '../render/borderCache';
+  import { patchPieceEntry, invalidatePieceEntries, reconcilePieceMembership } from '../render/borderCache';
   import {
     unproject,
     project,
@@ -826,6 +826,9 @@
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
+    // 成员对账补丁（手感批 2026-10-04）：本次数据修订内一次——已缓存件与
+    // region.cells 的 Δ 就地补上（替代 touch* 的全清，全清=重建长帧闪屏）
+    reconcilePieceMembership(world, projection, (ll) => project(ll, projection, projParams ?? defaultProjParams()));
     // 统一接口：选中 ≡ 显示；无图层特殊性
     const displayPieces = pathEdit
       ? undefined

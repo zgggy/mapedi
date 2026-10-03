@@ -31,4 +31,6 @@ declare global {
   var __gpuMs: number | undefined;
   /** GPU 帧计数 */
   var __gpuRan: number | undefined;
+  /** 渲染前成员对账补丁数（手感批 2026-10-04：替代全清的 Δ 补丁计数） */
+  var __reconcileN: number | undefined;
 }

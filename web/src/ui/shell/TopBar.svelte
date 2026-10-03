@@ -112,10 +112,20 @@
     { id: 'import', label: '导入…', action: () => fileInput?.click() },
     { id: 'clear', label: '清除自动存档', danger: true, action: () => editor.clearAutosave() },
   ]);
+
+  /** 球面预取（手感批 2026-10-04）：悬停视图胶囊即暖懒加载 chunk——
+   * 首次切球面的 2-3s 空窗缩到接近零（dev 下 HMR ?t= 可能分裂实例，
+   * 预取落空也无害——组件自己的 import 仍会各自缓存）。 */
+  let globeWarmed = false;
+  function warmGlobe(): void {
+    if (globeWarmed) return;
+    globeWarmed = true;
+    void import('../GlobeView.svelte');
+  }
 </script>
 
 <!-- 模式胶囊 + 视图设置：顶栏居中悬浮（2026-09-30：⚙ 移到切换显示右侧） -->
-<div class="center">
+<div class="center" onpointerover={warmGlobe}>
   <ModeCapsule
     value={viewMode}
     onChange={(v) => onSwitchView(v as ViewMode)}
