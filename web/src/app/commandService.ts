@@ -14,7 +14,6 @@ import { moveAmongSiblings } from '../core/hierarchy/ops';
 import {
   patchElementStyle,
   clampElementStyle,
-  defaultExclusiveColor,
   type ElementStyle,
   type ElementStylePatch,
 } from '../core/layer/style';
@@ -632,7 +631,7 @@ export class CommandService {
   }
 
   /**
-   * 字段快照执行器（1-b）：fn 前后对全部 Region 浅字段（name/color/exclusiveColor/
+   * 字段快照执行器（1-b）：fn 前后对全部 Region 浅字段（name/color/
    * attributes/hidden）快照 → diff → 单命令入栈。覆盖「core 直改字段」类操作
    * （元素保存信息、外交 attributes 等）；cells 不在此域（成员变更走笔画快照-diff）。
    */
@@ -679,7 +678,7 @@ export class CommandService {
 
   patchRegions(label: string, fn: () => void): void {
     if (!this.world) return;
-    const FIELDS = ['name', 'color', 'exclusiveColor', 'attributes', 'hidden'] as const;
+    const FIELDS = ['name', 'color', 'attributes', 'hidden'] as const;
     type Snap = Record<string, unknown>;
     const snap = () =>
       new Map<string, Snap>(
@@ -784,7 +783,6 @@ export class CommandService {
         cells: [],
         parentId: parent?.id,
         color: parent?.color ?? colors[this.world.regions.filter((r) => r.layerId === layerId).length % colors.length],
-        exclusiveColor: parent ? defaultExclusiveColor(parent.color) : undefined,
         attributes: {},
       }),
     );

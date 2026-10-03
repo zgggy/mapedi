@@ -148,8 +148,6 @@ export interface Region {
   parentId?: RegionId;
   /** 基本色 = 自身渲染色；子元素与所属父元素**同色系微调**（palette.tintOf，2026-10-04）；不得单独改 */
   color: string;
-  /** 专属色：仅本元素，UI 上以边框内阴影呈现 */
-  exclusiveColor?: string;
   attributes: Record<string, unknown>;
   weights?: Map<CellId, number>;
   /** 道路/航线：cellId → 覆盖端点（球面）；拖出多边形时清除归属 */

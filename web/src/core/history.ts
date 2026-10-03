@@ -1,5 +1,4 @@
 import type { CellId, Region, RegionId, World } from './types';
-import { scrubRegionDiplomacy } from './diplomacy';
 import { childrenOnRegionDelete, childrenOnAnnex, planLayerDelete } from './hierarchy/policy';
 
 export interface EditCommand {
@@ -200,7 +199,6 @@ export class DeleteRegionCommand implements EditCommand {
       const r = world.regions.find((x) => x.id === c.id);
       if (r) r.parentId = undefined;
     }
-    scrubRegionDiplomacy(world, this.regionId);
     world.regions.splice(idx, 1);
   }
 

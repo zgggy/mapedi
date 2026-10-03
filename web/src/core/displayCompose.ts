@@ -20,7 +20,6 @@ export interface DisplayPiece {
   cellIds: CellId[];
   label: string;
   color: string;
-  exclusiveColor?: string;
   opacity: number;
   /** 工作区选中的元素 → 渲染置顶 */
   regionSelected?: boolean;
@@ -333,7 +332,6 @@ function composeShownPiecesUncached(
           cellIds: s.cells,
           label: s.label,
           color: mulColor(reg.color, 1),
-          exclusiveColor: reg.exclusiveColor,
           opacity,
           regionSelected: selRegion?.id === reg.id,
         });

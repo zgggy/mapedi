@@ -14,7 +14,6 @@ import { childLayerIdOf } from '../core/hierarchy/derive';
 import { generateWorldAsync } from '../core/generate/runGenerate';
 import { cascadeEnabled, type GenerationProfile } from '../core/generate/profile';
 import { defaultStarSystem } from '../core/astro';
-import { defaultExclusiveColor } from '../core/layer/style';
 import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
 import { installProjCache } from '../render/projCache';
 
@@ -96,9 +95,6 @@ export class GenerationService {
     if (seq !== this.ctx.seq) return;
     const world = got.world;
     if (got.projCache) installProjCache(got.projCache);
-    for (const r of world.regions) {
-      if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
-    }
     world.astro = defaultStarSystem(seed, world.climate);
     this.ctx.replaceWorld(world);
     // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
@@ -126,9 +122,6 @@ export class GenerationService {
     const enabled = new Set(cascadeEnabled(this.ctx.profiles));
     runCascade(world, seed, undefined, undefined, params, enabled);
     world.astro = defaultStarSystem(seed, world.climate);
-    for (const r of world.regions) {
-      if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
-    }
     if (seq !== this.ctx.seq) return;
     this.ctx.replaceWorld(world);
     // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
