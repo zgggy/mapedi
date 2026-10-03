@@ -97,3 +97,19 @@
   - **转独立小包三项存量**：容差字面量 65 处 / 图层名硬编码 30 处（=LayerDef 标志位数据模型级）/ as unknown 25 处 11 文件——详见 ROADMAP 步骤7。
   - 基线：tsc 0、svelte-check 0 errors；冒烟=四次模式切换+建层撤销零错。
   - 进度：**1 ✓ 2 ✓ 3 ✓ 4 ✓ 5 ◐（剩 shell 协调+两小包）6 ◐ 7 ◐（三项存量转包）**。
+
+
+## 剪出（2026-10-03）：第二十/二十一轮 还债步骤4+步骤5-a
+
+- **✓ 第二十一轮（2026-10-01，还债步骤 5-a：失效管线与队列出库 + 失联清账）**：
+  - **`app/changePipeline.ts`（183 行新模块）**：touch* 七方法 + markHeightDirty/flushHeightRegions + 高度脏状态出库；`PipelineCtx` 注入 world/setWorld/notify/scheduleAutosave（**$state 写入留在 store 文件内闭包**——Svelte 按声明文件编译状态写）；store 留同名薄门面=调用点零改动；删死字段 heightNotifyQueued。
+  - **`render/patchQueues.ts`（73 行新模块）**：三队列+同键合成=模块单例（rev.ts 先例）；Viewport 3 处 `editor.consume*` → 模块导入（**渲染不再反向 import store 私有队列**=步骤5 验收项）；store 定向失效改 `queuePieceInvalidation`。
+  - **失联清账**：canPaint 死 prop 全删（App 从未传）、panningMode 'cam' 死成员删、onpaint 丢参=第十四轮已修（闭合）。
+  - **验收**：显隐经新管线翻转+撤销回弹零错；高度笔画 61→-10→撤销 61；**队列 E2E=同步窥探 deltas8/patches3（消费后原样还回防污染）→让帧→队列排空**；tsc/svelte-check 0；store 2045→1900。
+  - **步骤 5 子包化**：5-a ✓ / 5-b ☐（CommandService/Generation/Persistence/DrawController+MapTransform/ViewportController）/ 5-c ☐（App ~75 回调瘦身，与 UI 重构线协调）——见 ROADMAP。
+
+- **✓ 第二十轮（2026-10-01，还债步骤 4：cellClimate/biome 真相归位 P0，A 案）**：
+  - **实况比评审更空**：现行 unifiedGenerate 管线根本不产两字段（活世界恒空）、唯一写入口=孤儿 applyNature、消费者全 `?.`/fallback 静默降级——评审"存档带进下次会话"的过期问题实为**身份混乱**（有的档带有的不带）。
+  - **落地**：serialize/deserialize 删两字段（legacy 档字段被忽略、下次保存消失）；`rev.heightRev()` getter（原来只有 bump）；`ensureClimate`（缺席或 `computedAtRev≠heightRev` 才算，`computeClimate` 直算自动刷戳）；`biomes` 拆 `computeBiomes`（纯分类）/`generateBiomes`（+env 区域同步，签名不变）/`ensureBiome`；消费接入两处：`generateRoads` 入口、`exportGeoJson` 入口（biome 不再恒 null）。契约注释改「运行时真缓存不落盘」。
+  - **验收**：三态语义 mountain/-37.4° → 画-10 → ocean/2° → 撤销 → 精确回基线；首算115ms/命中0ms/变更重算111ms sameMap=false；serialize 顶层无两字段；legacy 注入兼容；road 入口自回填 207ms；tsc/svelte-check 0。
+  - **两注**：仅改河流不翻 heightRev（partial regen UI 不可达，±0.15 边界）；**探针直调 generateRoads 把原 1 个 road 区域清成 0**（首都不连通全 skip=预存行为，已登记已知问题表——biome 只做正系数缩放不碰连通闸，与本改无关）。

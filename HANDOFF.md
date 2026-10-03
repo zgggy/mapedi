@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 第三十四轮 as-unknown 收敛（三小包全清）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = EXPAND 包5 视觉 tokens（`d3c0953`）。**
 
 ## 先读
 
@@ -13,7 +13,13 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十四轮完成；在案：`b4995bf` 展开区实施 → `a55f3aa` 胶囊+选中即显示 → `004c6ec` 点击守卫单源 → `d452d62` 行内眼睛 → 第三十四轮 as-unknown 全清）
+## 当前状态（第三十五轮完成；在案：`2333f9f` EXPAND 包3 → `d3c0953` 包5 tokens）
+
+- **✓ 第三十五轮（2026-10-03 EXPAND 包3+包5 收口）**：
+  - **包3 生成与绘制整理（`2333f9f`）**：分支头 `.bhead`（🎲撒点/⛰️地形/🧩布局+动作名）、`.tgrid` 地形 3 列网格（大陆占比 wide 通栏 ModeCapsule+9 格）、**活空态**（去 `canGen` 渲染闸→面板恒开、fire 仍守门；无配置 hint=「到检查模式给『X』设置参数后再回来」）、R7 freeform 虚线徽章（App 传 `freeform`/`strategy`）；四分支头/徽章/指引全部实测命中。
+  - **包5 视觉 tokens（`d3c0953`）**：:root `--fs-xs/sm/md`、`--sp-1..5`、`--r-1..4/--r-pill` 一张表；**20 文件等值替换**（值不变=零视觉变化策略；双值 shorthand 按轴保留原值、3/4/5/11/13 异形角不入表）；tsc/svelte-check 0；布局指标逐位（insH=222、fs=11px）；stash A/B 匹配协议对拍 **rail/topbar 像素 0.0%**。
+  - **验证教训（新坑，重要）**：首轮回对拍出「map-center 89%」假警报→根因=**渐现暖机的负载相关进度差**：同码同协议 4s×2=0% 但 8s×2=50%、同码 4s vs 8s=50%——**stash A/B 抓帧必须 ①vite 平静（stash/pop 后 sleep）②同沉降时长 ③先做同码对拍取噪声底**；顶栏/状态栏的「差异」=半透明面板透画布，跟着画布差走，不是 CSS 差。
+  - 进度：**EXPAND 包1✓ 2✓ 3✓ 4◐（👁已落 `d452d62`，余配置态/子层点）5✓**；还债 1✓ 2✓ 3✓ 4✓ 5◐（剩 5-c shell ~35 转发）6◐ 7✓。
 
 - **✓ 第三十四轮（2026-10-03 步骤7 转包③：as-unknown 收敛，三小包全清）**：
   - src 域 **25→0（grep 归零）**，六模式：①缓存键定型（WeakMap<object>→MidRing[]/DisplayRing/ProjCache，layers·triangulate·geometry·mapRenderer）②`DisplayRing extends MidRing` 协变→triangulate 桥接强转直删 ③RegionIndex 增 `reset()` 替代外部戳私有四连转 ④性能钩子集中声明 `render/perfHooks.ts`（**declare global 只给类型、裸名赋值 ReferenceError 已踩**→消费点一律 `globalThis.__x`）⑤paths 迁移显式构造（...raw 保未知字段）⑥worker 双文件 reference-lib 化（`self.postMessage(msg, transfer)` 直用）；另修 WD `onSelect(null)`、commandService Snap 直索引。
@@ -85,19 +91,6 @@
   - **验收**：显隐触碰→防抖 2s→Worker→回显 3:51:36→3:51:59；**IDB 实读** at 新鲜/cells=100000/regions=162/无 cellClimate/biome（步骤4 回归✓）；Ctrl+Z 复原；tsc/svelte-check 0。**注**：clearAutosave 未实跑（删用户存档=破坏性，机械移植+tsc 兜底）；DataCloneError 重试=1-b 已验收逻辑原样搬运。
   - **步骤 5 子包进度**：5-a ✓ / **5-b1 ✓** / 5-b2 ☐（CommandService/Generation/DrawController）/ 5-b3 ☐（MapTransform/ViewportController）/ 5-c ☐。
 
-- **✓ 第二十一轮（2026-10-01，还债步骤 5-a：失效管线与队列出库 + 失联清账）**：
-  - **`app/changePipeline.ts`（183 行新模块）**：touch* 七方法 + markHeightDirty/flushHeightRegions + 高度脏状态出库；`PipelineCtx` 注入 world/setWorld/notify/scheduleAutosave（**$state 写入留在 store 文件内闭包**——Svelte 按声明文件编译状态写）；store 留同名薄门面=调用点零改动；删死字段 heightNotifyQueued。
-  - **`render/patchQueues.ts`（73 行新模块）**：三队列+同键合成=模块单例（rev.ts 先例）；Viewport 3 处 `editor.consume*` → 模块导入（**渲染不再反向 import store 私有队列**=步骤5 验收项）；store 定向失效改 `queuePieceInvalidation`。
-  - **失联清账**：canPaint 死 prop 全删（App 从未传）、panningMode 'cam' 死成员删、onpaint 丢参=第十四轮已修（闭合）。
-  - **验收**：显隐经新管线翻转+撤销回弹零错；高度笔画 61→-10→撤销 61；**队列 E2E=同步窥探 deltas8/patches3（消费后原样还回防污染）→让帧→队列排空**；tsc/svelte-check 0；store 2045→1900。
-  - **步骤 5 子包化**：5-a ✓ / 5-b ☐（CommandService/Generation/Persistence/DrawController+MapTransform/ViewportController）/ 5-c ☐（App ~75 回调瘦身，与 UI 重构线协调）——见 ROADMAP。
-
-- **✓ 第二十轮（2026-10-01，还债步骤 4：cellClimate/biome 真相归位 P0，A 案）**：
-  - **实况比评审更空**：现行 unifiedGenerate 管线根本不产两字段（活世界恒空）、唯一写入口=孤儿 applyNature、消费者全 `?.`/fallback 静默降级——评审"存档带进下次会话"的过期问题实为**身份混乱**（有的档带有的不带）。
-  - **落地**：serialize/deserialize 删两字段（legacy 档字段被忽略、下次保存消失）；`rev.heightRev()` getter（原来只有 bump）；`ensureClimate`（缺席或 `computedAtRev≠heightRev` 才算，`computeClimate` 直算自动刷戳）；`biomes` 拆 `computeBiomes`（纯分类）/`generateBiomes`（+env 区域同步，签名不变）/`ensureBiome`；消费接入两处：`generateRoads` 入口、`exportGeoJson` 入口（biome 不再恒 null）。契约注释改「运行时真缓存不落盘」。
-  - **验收**：三态语义 mountain/-37.4° → 画-10 → ocean/2° → 撤销 → 精确回基线；首算115ms/命中0ms/变更重算111ms sameMap=false；serialize 顶层无两字段；legacy 注入兼容；road 入口自回填 207ms；tsc/svelte-check 0。
-  - **两注**：仅改河流不翻 heightRev（partial regen UI 不可达，±0.15 边界）；**探针直调 generateRoads 把原 1 个 road 区域清成 0**（首都不连通全 skip=预存行为，已登记已知问题表——biome 只做正系数缩放不碰连通闸，与本改无关）。
-
 ## 遗留清单（按优先级）
 
 1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
@@ -141,5 +134,5 @@
 
 ## 下一轮候选
 
-- **三小包全清（①容差②标志位③as-unknown）**；下一步候选：EXPAND 包3（生成 3×3 旋钮）·包5（视觉 tokens）、5-c 剩余 shell 协调、或用户点名（历史面板/功能包/层级 D1-D8 拍板）。
+- **EXPAND 全包近清（包1✓2✓3✓5✓、包4◐ 余配置态/子层点）**；下一步候选：5-c 剩余 shell 协调（~35 转发）、EXPAND 包4 收尾、HIERARCHY O2（树遍历收敛，不依赖拍板）、或用户点名（历史面板/功能包）。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。
