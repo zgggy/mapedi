@@ -154,7 +154,7 @@
     overflow: visible;
   }
   .val {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     line-height: 1;
     font-variant-numeric: tabular-nums;
     color: #1a1408;
@@ -191,11 +191,11 @@
     bottom: calc(100% + 6px);
     transform: translateX(-50%);
     padding: 3px 7px;
-    border-radius: 7px;
+    border-radius: var(--r-2);
     background: rgba(20, 22, 28, 0.95);
     border: 1px solid rgba(240, 195, 106, 0.6);
     color: var(--text);
-    font-size: 10px;
+    font-size: var(--fs-xs);
     line-height: 1;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;

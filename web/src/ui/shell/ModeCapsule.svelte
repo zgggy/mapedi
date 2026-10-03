@@ -73,7 +73,7 @@
     display: flex;
     align-items: center;
     height: 26px;
-    padding: 2px;
+    padding: var(--sp-1);
     border-radius: 13px;
     border: 1px solid rgba(255, 255, 255, 0.16);
     background: rgba(10, 12, 18, 0.82);
@@ -110,7 +110,7 @@
     border: 0;
     background: transparent;
     color: rgba(255, 255, 255, 0.72);
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1;
     white-space: nowrap;
     cursor: pointer;

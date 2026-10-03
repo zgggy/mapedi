@@ -134,22 +134,22 @@
 
 <style>
   .body {
-    font-size: 12px;
+    font-size: var(--fs-md);
     display: flex;
     flex-direction: column;
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-bottom: 4px;
+    gap: var(--sp-1);
+    margin-bottom: var(--sp-2);
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
   .field.inline {
     flex-direction: row;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
   }
   .field .lb1 {
     flex: 0 0 auto;
@@ -182,7 +182,7 @@
     flex-wrap: wrap;
     gap: 1px 14px;
     margin-bottom: 3px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1.5;
   }
   .ex {
@@ -196,8 +196,8 @@
   }
   .ex-row {
     display: flex;
-    gap: 8px;
-    font-size: 11px;
+    gap: var(--sp-4);
+    font-size: var(--fs-sm);
     margin-bottom: 3px;
     line-height: 1.5;
   }
@@ -215,7 +215,7 @@
   .nb {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--sp-2);
   }
   .dot {
     width: 7px;
@@ -229,7 +229,7 @@
     border: 0;
     background: transparent;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
     padding: 2px 0;
     margin-bottom: 3px;
     cursor: pointer;
@@ -250,12 +250,12 @@
   .primary {
     background: rgba(196, 123, 58, 0.4);
     border: 1px solid var(--panel-border);
-    border-radius: 7px;
+    border-radius: var(--r-2);
     color: inherit;
     padding: 3px 14px;
     cursor: pointer;
     font: inherit;
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
   .primary:hover {
     background: rgba(196, 123, 58, 0.55);

@@ -213,7 +213,7 @@
     z-index: 60;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     pointer-events: auto;
   }
   .right {
@@ -223,7 +223,7 @@
     z-index: 60;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     pointer-events: auto;
   }
   .name,
@@ -234,7 +234,7 @@
     border: 1px solid rgba(255, 255, 255, 0.16);
     background: rgba(10, 12, 18, 0.82);
     color: var(--text, #ddd);
-    font-size: 12px;
+    font-size: var(--fs-md);
     line-height: 24px;
     cursor: pointer;
     outline: none;

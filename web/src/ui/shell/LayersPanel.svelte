@@ -317,7 +317,7 @@ import { isRowOrControlClick } from './shell';
     padding: 1px; /* 第十一轮：左右间距再调小（用户定） */
     display: grid;
     grid-template-columns: 1fr;
-    gap: 4px;
+    gap: var(--sp-2);
     align-content: start;
   }
   .grid::-webkit-scrollbar {

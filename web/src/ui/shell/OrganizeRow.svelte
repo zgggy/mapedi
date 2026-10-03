@@ -70,17 +70,17 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    font-size: 11px;
+    gap: var(--sp-3);
+    font-size: var(--fs-sm);
     user-select: none;
   }
   .ob {
     border: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.05);
     color: var(--text, #ddd);
-    border-radius: 8px;
+    border-radius: var(--r-3);
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1.2;
     cursor: pointer;
   }
@@ -98,6 +98,6 @@
   .hint {
     flex: 1 1 100%;
     color: var(--text-dim);
-    font-size: 10px;
+    font-size: var(--fs-xs);
   }
 </style>

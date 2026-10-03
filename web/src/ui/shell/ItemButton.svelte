@@ -98,15 +98,15 @@
     height: var(--ibtn-h, 26px);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     padding: 5px 8px; /* 把手同款内边距 */
     border: 0;
-    border-radius: 12px;
+    border-radius: var(--r-4);
     background: transparent;
     color: inherit;
     cursor: pointer;
     text-align: left;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     overflow: hidden;
     touch-action: none;
     user-select: none;
@@ -139,7 +139,7 @@
   /* 展开箭头（把手语言） */
   .caret {
     flex: 0 0 auto;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-dim);
     padding-left: 2px;
   }
@@ -161,7 +161,7 @@
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     line-height: 1.25;
     max-height: 100%;
     overflow: hidden;
@@ -179,7 +179,7 @@
   }
 
   .desc {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }

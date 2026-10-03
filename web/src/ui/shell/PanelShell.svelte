@@ -98,9 +98,9 @@
     max-height: 80vh;
     background: rgba(16, 19, 26, 0.94);
     border: 1px solid var(--panel-border);
-    font-size: 12px;
+    font-size: var(--fs-md);
     user-select: none;
-    border-radius: 12px;
+    border-radius: var(--r-4);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     /* 不用 backdrop-filter：①GL 画布上逐帧毛玻璃是帧率杀手（显示不打折红线）；
@@ -127,10 +127,10 @@
     border: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.06);
     color: inherit;
-    border-radius: 7px;
+    border-radius: var(--r-2);
     padding: 3px 7px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--fs-md);
     line-height: 1;
   }
   .collapse:hover {
@@ -143,14 +143,14 @@
     text-align: center;
     pointer-events: none;
     font-weight: 600;
-    font-size: 12px;
+    font-size: var(--fs-md);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 5px;
   }
   .ticon {
-    font-size: 12px;
+    font-size: var(--fs-md);
     line-height: 1;
   }
   .bd {

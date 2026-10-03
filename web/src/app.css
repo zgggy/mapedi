@@ -12,6 +12,25 @@
   --land: #2d4a3e;
   --cell-stroke: rgba(255, 255, 255, 0.06);
   --hover: #f0c36a;
+  /* ── 视觉 tokens（2026-10-03 EXPAND 包5：一张表管密度；组件内散落字面量等值收敛）─
+   * 字号: xs 10 · sm 11 · md 12（px）
+   * 间距: 1=2 · 2=4 · 3=6 · 4=8 · 5=12（px；双值 shorthand 如 `5px 8px` 按轴保留原值）
+   * 圆角: 1=6 · 2=7 · 3=8 · 4=12 · pill=999（px；3/4/5/11/13 等异形角未入表，保留字面量）
+   * 控件行高: 列表行头 = --ibtn-h（measureSlot 实测写入，不在本表）
+   */
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-md: 12px;
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --r-1: 6px;
+  --r-2: 7px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-pill: 999px;
   font-family:
     -apple-system,
     'PingFang SC',
@@ -19,7 +38,7 @@
     'Segoe UI',
     system-ui,
     sans-serif;
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--text);
   color-scheme: dark;
 }
@@ -53,19 +72,19 @@ button {
   color: inherit;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: var(--r-1);
   padding: 3px 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-md);
 }
 
 input, select, textarea {
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--text);
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: var(--r-1);
   padding: 3px 6px;
 }
 
@@ -89,7 +108,7 @@ select {
   color: var(--text);
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: var(--r-3);
   padding: 4px 8px;
 }
 

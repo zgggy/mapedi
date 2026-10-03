@@ -528,7 +528,7 @@ import { isRowOrControlClick } from './shell';
   }
   /* 第七轮：身份行 header 已删（首行 = 新元素）；面板头 = 左栏 ExpandPanel 把手 */
   .ws {
-    font-size: 12px;
+    font-size: var(--fs-md);
     user-select: none;
     display: flex;
     flex-direction: column;
@@ -547,14 +547,14 @@ import { isRowOrControlClick } from './shell';
     /* 2026-10-01：去框去底——展开内容不套框，行间用间距 */
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--sp-3);
   }
   .field.inline {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
     margin: 0;
   }
   /* 单列网格：一格 = 一个 ItemButton；元素列表 = 工作区段的 flex-1 内滚区（§3.1）
@@ -569,7 +569,7 @@ import { isRowOrControlClick } from './shell';
     padding: 1px; /* 第十一轮：左右间距再调小（用户定） */
     display: grid;
     grid-template-columns: 1fr;
-    gap: 4px;
+    gap: var(--sp-2);
     align-content: start;
   }
   .grid::-webkit-scrollbar {
@@ -603,13 +603,13 @@ import { isRowOrControlClick } from './shell';
   .dim.pad {
     padding: 12px;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
   .dim-pad {
     flex: 0 0 auto;
     margin: 0;
     padding: 8px 10px;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
 </style>

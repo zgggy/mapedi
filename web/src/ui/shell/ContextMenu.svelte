@@ -70,7 +70,7 @@
     position: fixed;
     z-index: 200;
     min-width: 128px;
-    padding: 4px;
+    padding: var(--sp-2);
     border-radius: 10px;
     background: rgba(20, 23, 30, 0.97);
     border: 1px solid var(--panel-border);
@@ -78,13 +78,13 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
-    font-size: 12px;
+    font-size: var(--fs-md);
   }
   .mi {
     text-align: left;
     padding: 6px 10px;
     border: none;
-    border-radius: 7px;
+    border-radius: var(--r-2);
     background: transparent;
     color: var(--text);
     cursor: pointer;

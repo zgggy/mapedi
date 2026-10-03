@@ -110,10 +110,10 @@
     z-index: 50;
     display: flex;
     flex-direction: column;
-    gap: 8px; /* 三块之间统一间隔 */
+    gap: var(--sp-4); /* 三块之间统一间隔 */
     min-height: 0;
     user-select: none;
-    font-size: 11px; /* 面板字体统一 11（第十轮） */
+    font-size: var(--fs-sm); /* 面板字体统一 11（第十轮） */
     /* 宽度基准 = 顶行（胶囊+圆钮）：panel 内容不得撑宽（展开定宽） */
     width: var(--rail-w, max-content);
   }
@@ -121,7 +121,7 @@
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     height: 26px;
   }
   .round {

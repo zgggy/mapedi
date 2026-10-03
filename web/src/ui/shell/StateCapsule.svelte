@@ -50,13 +50,13 @@
   .scap {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--sp-2);
     border: 1px solid var(--panel-border);
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     background: transparent;
     color: var(--text-dim);
     padding: 2px 8px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1.3;
     cursor: pointer;
     white-space: nowrap;
@@ -81,10 +81,10 @@
     padding: 3px 10px;
   }
   .ic {
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1;
   }
   .tx {
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
 </style>

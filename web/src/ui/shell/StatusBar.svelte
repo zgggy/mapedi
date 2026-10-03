@@ -137,7 +137,7 @@
     align-items: center;
     height: 26px;
     padding: 0 14px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     background: rgba(10, 12, 18, 0.85);
     border: 1px solid var(--panel-border);
     border-radius: 13px;
@@ -147,7 +147,7 @@
   .zone {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--sp-4);
     min-width: 0;
   }
   .left {
@@ -168,11 +168,11 @@
     border: 1px solid rgba(255, 255, 255, 0.18);
     background: rgba(255, 255, 255, 0.06);
     color: inherit;
-    border-radius: 7px;
+    border-radius: var(--r-2);
     width: 18px;
     height: 16px;
     padding: 0;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1;
     cursor: pointer;
   }
@@ -197,16 +197,16 @@
     opacity: 0.9;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--sp-2);
   }
   /* 悬停归属元素：每个可点击跳选（C4 ①） */
   .chip {
     border: 1px solid rgba(255, 255, 255, 0.14);
     background: rgba(255, 255, 255, 0.07);
     color: inherit;
-    border-radius: 8px;
+    border-radius: var(--r-3);
     padding: 1px 6px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     line-height: 1.3;
     cursor: pointer;
     max-width: 14vw;
@@ -220,7 +220,7 @@
   }
   .be {
     opacity: 0.8;
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
   .be.gpu,
   .be.mode {

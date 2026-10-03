@@ -66,24 +66,24 @@
     flex: 1 1 auto;
     width: auto;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
   .cr button {
     flex: 0 0 auto;
     width: 24px;
     height: 24px;
     padding: 0;
-    font-size: 12px;
+    font-size: var(--fs-md);
     display: grid;
     place-items: center;
   }
   .cr.compact input {
     height: 22px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
   }
   .cr.compact button {
     width: 22px;
     height: 22px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
 </style>

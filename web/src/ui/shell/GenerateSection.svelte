@@ -242,17 +242,17 @@
   .bhead {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
-    font-size: 11px;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-2);
+    font-size: var(--fs-sm);
     color: var(--text);
   }
   .sb {
     border: 1px solid var(--panel-border);
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     background: rgba(120, 160, 220, 0.16);
     padding: 1px 7px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text);
     flex: 0 0 auto;
   }
@@ -261,9 +261,9 @@
   }
   .rb {
     border: 1px dashed var(--panel-border);
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     padding: 1px 6px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-dim);
     margin-left: auto;
   }
@@ -272,13 +272,13 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 4px 8px;
-    margin-bottom: 4px;
+    margin-bottom: var(--sp-2);
   }
   .tcell {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    font-size: 10px;
+    gap: var(--sp-1);
+    font-size: var(--fs-xs);
     color: var(--text-dim);
     min-width: 0;
   }
@@ -286,7 +286,7 @@
     grid-column: 1 / -1;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: var(--sp-4);
   }
   .tcell input[type='number'] {
     width: 100%;
@@ -300,32 +300,32 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 4px 10px;
-    margin-bottom: 4px;
+    margin-bottom: var(--sp-2);
   }
   .handles {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--sp-2);
     padding: 6px 8px;
   }
   .panel {
     padding: 2px 8px 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--sp-2);
   }
   .row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--sp-4);
     flex-wrap: wrap;
     margin: 4px 0;
   }
   .row label {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    font-size: 11px;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
     color: var(--text-dim);
   }
   .row input[type='number'] {
@@ -339,7 +339,7 @@
     color: var(--text, #ddd);
     border: 1px solid var(--border, #333);
     border-radius: 5px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     padding: 3px 5px;
   }
   .row button {
@@ -349,7 +349,7 @@
     color: var(--text, #ddd);
     border-radius: 5px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--fs-md);
   }
   .row button.primary {
     background: var(--accent, #c9a24a);
@@ -365,7 +365,7 @@
     padding: 3px 6px;
   }
   .hint {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-dim, #888);
     padding: 2px 0;
   }
@@ -374,7 +374,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     color: var(--text-dim);
   }
   .prow .pl {
@@ -383,7 +383,7 @@
   .prog {
     position: relative;
     height: 16px;
-    border-radius: 8px;
+    border-radius: var(--r-3);
     background: rgba(255, 255, 255, 0.08);
     overflow: hidden;
     margin-top: 4px;
@@ -398,7 +398,7 @@
     inset: 0;
     display: grid;
     place-items: center;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text, #ddd);
     font-variant-numeric: tabular-nums;
   }

@@ -135,17 +135,17 @@
 <style>
   .row {
     display: flex;
-    gap: 6px;
+    gap: var(--sp-3);
   }
   .seg {
     flex: 1;
     padding: 4px 8px;
     border: 1px solid var(--border, #3a4354);
-    border-radius: 6px;
+    border-radius: var(--r-1);
     background: transparent;
     color: inherit;
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--fs-md);
   }
   .seg.on {
     background: var(--accent, #4a7ab0);
@@ -163,7 +163,7 @@
     border: 0;
     background: transparent;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
     padding: 3px 0;
     cursor: pointer;
   }
@@ -171,29 +171,29 @@
     color: var(--text);
   }
   .sumrow .caret {
-    font-size: 10px;
+    font-size: var(--fs-xs);
   }
   /* 嵌入检查展开区：去自身 padding、贴齐信息区左缘（2026-10-02 紧凑化） */
   .body.emb {
     padding: 2px 0 0;
   }
   .grp {
-    margin-bottom: 8px;
+    margin-bottom: var(--sp-4);
   }
   .grp-hd {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-dim);
-    margin-bottom: 4px;
+    margin-bottom: var(--sp-2);
     letter-spacing: 0.5px;
   }
   .r {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-2);
     color: var(--text-dim);
   }
   .r input[type='range'] {
@@ -210,6 +210,6 @@
     min-width: 2.5em;
     font-variant-numeric: tabular-nums;
     color: var(--text);
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
 </style>

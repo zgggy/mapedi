@@ -233,7 +233,7 @@
 
 <style>
   .ins {
-    font-size: 12px;
+    font-size: var(--fs-md);
     user-select: none;
   }
   /* 显隐开关（把手语言；第八轮：自行按钮移入） */
@@ -241,26 +241,26 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-3);
     margin: 4px 0 2px;
   }
   /* 区间只读徽章（D2：涂改滑块归绘制模式） */
   .ivb {
     border: 1px solid var(--panel-border);
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     padding: 2px 8px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
   /* 隶属跳转胶囊（D8） */
   .jump {
     border: 1px solid var(--panel-border);
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     background: rgba(120, 160, 220, 0.14);
     color: var(--text);
     padding: 3px 9px;
-    font-size: 11px;
+    font-size: var(--fs-sm);
     cursor: pointer;
     max-width: 100%;
     overflow: hidden;
@@ -275,8 +275,8 @@
   }
   .dim {
     margin: 0;
-    padding: 8px;
+    padding: var(--sp-4);
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: var(--fs-sm);
   }
 </style>

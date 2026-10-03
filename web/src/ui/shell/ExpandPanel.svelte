@@ -89,7 +89,7 @@
     overflow-x: hidden; /* 展开内容不得把面板/轨撑宽（宽度恒定） */
     background: rgba(16, 19, 26, 0.94);
     border: 1px solid var(--panel-border);
-    border-radius: 12px;
+    border-radius: var(--r-4);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   }
   .acc.grow.open {
@@ -104,15 +104,15 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
+    gap: var(--sp-3);
     width: 100%;
     overflow: hidden;
     border: 0;
     background: transparent;
     color: var(--text, #ddd);
-    border-radius: 12px;
+    border-radius: var(--r-4);
     padding: 6px 8px; /* 高度与列表行头精确对齐（26 = txt 14 + padding 12） */
-    font-size: 11px;
+    font-size: var(--fs-sm);
     line-height: 1.2;
     cursor: pointer;
     user-select: none;
