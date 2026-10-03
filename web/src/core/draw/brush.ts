@@ -1,6 +1,6 @@
 import type { Cell, CellId, Region, World } from '../types';
 import { isLand } from '../types';
-import { childLayerIdOf } from '../layer/tree';
+import { childLayerIdOf } from '../hierarchy/derive';
 import { getCellGrid } from '../index/cellGrid';
 import { getRegionIndex, invalidateRegionIndex } from '../index/regionIndex';
 

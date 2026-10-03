@@ -407,7 +407,7 @@
       // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐在检查模式展开区（第八轮）
       editor.focusLayerForDraw(id);
     }}
-    onOrganize={(action, id) => editor.organize(action, id)}
+    onOrganize={(action, id, anchorId) => editor.organize(action, id, anchorId)}
     taskMode={shell.wsMode}
     onAddLayer={(n) => editor.addLayer(n)}
     onRandomName={() => (editor.newName = editor.randomLayerName())}
@@ -450,7 +450,7 @@
         editor.focusLayer === 'province' ? 'province' : 'country',
       ))}
     onNewName={(n) => (editor.newName = n)}
-    onOrganize={(action, id) => editor.organize(action, id)}
+    onOrganize={(action, id, anchorId) => editor.organize(action, id, anchorId)}
     onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
     onCopyItem={(id) => editor.copyItem(id)}
   />

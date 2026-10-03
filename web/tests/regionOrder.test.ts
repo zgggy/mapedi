@@ -2,11 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createWorld } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
 import { generatePolitical } from '../src/core/political';
-import {
-  applyRegionDrop,
-  moveAmongSiblings,
-  siblingRegions,
-} from '../src/core/regionOps';
+import { siblingRegions } from '../src/core/hierarchy/derive';
+import { moveAmongSiblings } from '../src/core/hierarchy/ops';
 
 function makeCountries() {
   const w = createWorld({ seed: 99, count: 600 });
@@ -45,13 +42,8 @@ describe('sibling order (insert, not end)', () => {
     const [a] = list;
     const b = list[1];
     const c = list[2];
-    const r = applyRegionDrop(w, c.id, {
-      kind: 'gap',
-      afterId: a.id,
-      parentId: null,
-      highlightParentId: null,
-    });
-    expect(r.ok).toBe(true);
+    const r = moveAmongSiblings(w, c.id, a.id, 'after');
+    expect(r).toBe(true);
     const ord = siblingRegions(w, 'country', null).map((x) => x.id);
     expect(ord.indexOf(c.id)).toBe(ord.indexOf(a.id) + 1);
     expect(ord.indexOf(a.id)).toBe(0);
@@ -62,12 +54,7 @@ describe('sibling order (insert, not end)', () => {
     const w = makeCountries();
     const list = siblingRegions(w, 'country', null);
     const last = list[list.length - 1];
-    applyRegionDrop(w, last.id, {
-      kind: 'gap',
-      afterId: null,
-      parentId: null,
-      highlightParentId: null,
-    });
+    moveAmongSiblings(w, last.id, null, 'before');
     expect(siblingRegions(w, 'country', null)[0].id).toBe(last.id);
   });
 });

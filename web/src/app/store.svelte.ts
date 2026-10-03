@@ -1,5 +1,6 @@
 import type { Region } from '../core/types';
 import { deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
+import { repairHierarchy } from '../core/hierarchy/gate';
 import { installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateCellGraph } from '../core/index/cellGraph';
 import { invalidateViewIndex } from '../render/viewIndex';
@@ -14,7 +15,7 @@ import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID } from '../core/layer/flags';
-import { childLayerIdOf } from '../core/layer/tree';
+import { childLayerIdOf } from '../core/hierarchy/derive';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { loadWorldAsync } from '../core/generate/runGenerate';
@@ -486,10 +487,15 @@ export class EditorStore {
     // 旧档区间嵌套累积（h≥lo）→ 精确档归一（成员由高度重导，对象/顺序保留，名称随表单源）
     normalizeHeightIntervalElements(w);
     ensureBuiltinLayers(w);
+    // 层级修复收尾幂等调用（HIERARCHY S8）：deserialize 已修过一轮，
+    // ensure 补入内置父链后再过一次闸，报告给状态栏（不静默）。
+    const hrep = repairHierarchy(w);
     if (!w.astro) w.astro = defaultStarSystem(w.meta.seed, w.climate);
     rebuildLandSeaRegions(w);
     this.replaceWorld(w);
-    this.status = `已从浏览器恢复 · ${w.cells.length} 地块`;
+    this.status =
+      `已从浏览器恢复 · ${w.cells.length} 地块` +
+      (hrep.fixed ? ` · 层级修复 ${hrep.fixed} 处` : '');
     return true;
   }
 
@@ -511,8 +517,8 @@ export class EditorStore {
     this.cmds.toggleItemHidden(id);
   }
 
-  indentItem(id: string): void {
-    this.cmds.indentItem(id);
+  indentItem(id: string, anchorId: string | null = null): void {
+    this.cmds.indentItem(id, anchorId);
   }
 
   unindentItem(id: string): void {
@@ -523,8 +529,8 @@ export class EditorStore {
     this.cmds.moveItemStep(id, dir);
   }
 
-  organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string) {
-    this.cmds.organize(action, id);
+  organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string, anchorId?: string | null) {
+    this.cmds.organize(action, id, anchorId);
   }
 
   copyItem(id: string) {

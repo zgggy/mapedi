@@ -4,7 +4,7 @@
    * - ul = 创建行（新图层文本框**兼过滤器** + 🎲 + ➕，拉满与 button 同宽）
    *   → 图层行（缩进行 button 内最左侧一根短竖线；li 左垫 = depth×14）。
    * - 行 = 图层 logo + 名称；单击聚焦（C1：不进绘制）+ 原地展开模式区。
-   * - 组织模式行展开区 = 上移/下移/缩进/提升（缩进=成为上一个同级的子图层）。
+   * - 组织模式行展开区 = 上移/下移/缩进/提升（缩进=成为视觉上一行的子，锚点=过滤后行 D3）。
    * - 内滚：.grid overflow-y auto（第十一轮根治「不能滚动」）。
    * 右键菜单：复制一个、删除。
    */
@@ -15,7 +15,7 @@
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
-  import { layerTreeOf } from '../../core/layer/tree';
+  import { layerTreeOf } from '../../core/hierarchy/derive';
   import { measureSlot } from './liftDrag';
 import { isRowOrControlClick } from './shell';
   import OrganizeRow from './OrganizeRow.svelte';
@@ -38,7 +38,7 @@ import { isRowOrControlClick } from './shell';
     /** 工作区模式（组织 = 上移/下移/缩进/提升面板，替代已退役的拖动） */
     taskMode?: 'check' | 'gen' | 'draw' | 'organize';
     /** 组织四操作（App 转发 store） */
-    onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string) => void;
+    onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string, anchorId?: string | null) => void;
     /** 单击选中（并置顶显示） */
     onSelect?: (id: string) => void;
     /** 选中（C1：单击只聚焦，不进绘制） */
@@ -134,13 +134,14 @@ import { isRowOrControlClick } from './shell';
    *  prev/next = 同 parentId 邻居（上移/下移）；
    *  canIndent = 存在视觉上一行且当前父 ≠ 上一行（缩进目标 = 视觉上一行，无则禁用/无操作）。 */
   const sibFlags = $derived.by(() => {
-    const m = new Map<string, { prev: boolean; next: boolean; canIndent: boolean }>();
+    const m = new Map<string, { prev: boolean; next: boolean; canIndent: boolean; aboveId: string | null }>();
     shownRows.forEach((r, i) => {
       const prev = shownRows.slice(0, i).some((x) => x.parentId === r.parentId);
       const next = shownRows.slice(i + 1).some((x) => x.parentId === r.parentId);
       const above = i > 0 ? shownRows[i - 1] : null;
       const canIndent = !!above && r.parentId !== above.id;
-      m.set(r.id, { prev, next, canIndent });
+      // aboveId（D3 包1）：缩进锚点 = 过滤后视觉上一行，与 canIndent 同源
+      m.set(r.id, { prev, next, canIndent, aboveId: above?.id ?? null });
     });
     return m;
   });
@@ -151,7 +152,7 @@ import { isRowOrControlClick } from './shell';
 
   function openMenu(e: MouseEvent, id: string) {
     // 简化（2026-09-30 拍板 3）：显隐 → 行内 eye；信息/显示参数 → 检查模式展开区；
-    // 上移/下移 → 长按拖动。只留无其他入口的复制/删除。
+    // 上移/下移 → 组织模式行内四钮（拖动已退役）。只留无其他入口的复制/删除。
     const items: MenuItem[] = [{ id: 'copy', label: '复制一个', action: () => onCopyLayer?.(id) }];
     if (id.startsWith('custom-')) {
       items.push({ id: 'del', label: '删除', danger: true, action: () => onDeleteLayer?.(id) });
@@ -222,7 +223,7 @@ import { isRowOrControlClick } from './shell';
         <!-- 第八轮：行按钮自身 = 把手（聚焦行原地展开）；显隐眼睛在检查模式展开区 -->
         <!-- 第十轮：组织模式 = OrganizeRow（上移/下移/缩进/提升，替代拖动） -->
         {#snippet rowOrg()}
-          {@const sib = sibFlags.get(row.id) ?? { prev: false, next: false, canIndent: false }}
+          {@const sib = sibFlags.get(row.id) ?? { prev: false, next: false, canIndent: false, aboveId: null }}
           <OrganizeRow
             name={row.meta.name}
             chain={row.chain}
@@ -231,7 +232,7 @@ import { isRowOrControlClick } from './shell';
             top={!row.parentId}
             indentable={sib.canIndent}
             onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', row.id)}
-            onIndent={() => onOrganize?.('indent', row.id)}
+            onIndent={() => onOrganize?.('indent', row.id, sib.aboveId)}
             onUnindent={() => onOrganize?.('unindent', row.id)}
           />
         {/snippet}

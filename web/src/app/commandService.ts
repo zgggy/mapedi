@@ -9,7 +9,8 @@ import type { Region, World } from '../core/types';
 import { defaultPathColor } from '../core/paths';
 import { ensureBuiltinLayers } from '../core/world';
 import { emptyDrawSession, type DrawSession } from '../core/draw/brush';
-import { moveAmongSiblings, siblingRegions } from '../core/regionOps';
+import { siblingRegions } from '../core/hierarchy/derive';
+import { moveAmongSiblings } from '../core/hierarchy/ops';
 import {
   patchElementStyle,
   clampElementStyle,
@@ -19,7 +20,8 @@ import {
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
 import { defaultFocusLayerId } from '../core/layer/flags';
-import { layerTreeOf } from '../core/layer/tree';
+import { layerTreeOf } from '../core/hierarchy/derive';
+import { planIndent, planPromote, layerCopyAsRoot } from '../core/hierarchy/ops';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
@@ -250,37 +252,28 @@ export class CommandService {
    * 单条 LayerFieldsCommand；**数组序不动**（前序不变量保证位置零漂移、叠放零影响）。
    * 元素树的缩进已随按钮退役，本方法只服务图层。
    */
-  indentItem(id: string): void {
+  indentItem(id: string, anchorId: string | null = null): void {
     const w = this.world;
     if (!w) return;
-    if (!w.layers.some((l) => l.id === id)) {
-      this.status = '缩进只适用于图层';
+    // D3 同源（2026-10-03 包1）：锚点 = 面板按**过滤后视觉行**给出（与按钮禁用态
+    // 同一来源），不再在服务端用全表行另算一份；闸复核链约束。
+    const res = planIndent(w, id, anchorId);
+    if (!res.ok) {
+      this.status = res.status;
       return;
     }
-    const vis = this.layerDisplayList();
-    const idx = vis.findIndex((x) => x.id === id);
-    if (idx <= 0) {
-      this.status = '已是第一个图层，无处缩进';
-      return;
-    }
-    const above = vis[idx - 1];
-    const l = w.layers.find((x) => x.id === id)!;
-    const beforeParent = l.parentLayerId;
-    if ((beforeParent ?? undefined) === above.id) {
-      this.status = '已在上一个图层之下';
-      return;
-    }
-    l.parentLayerId = above.id;
+    const { plan } = res;
+    w.layers.find((x) => x.id === plan.id)!.parentLayerId = plan.after;
     history.run(
       w,
       new LayerFieldsCommand(
-        [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: above.id } }],
+        [{ id: plan.id, before: { parentLayerId: plan.before }, after: { parentLayerId: plan.after } }],
         '缩进',
       ),
       { alreadyApplied: true },
     );
     this.touchWorld();
-    this.status = '已缩进（Ctrl+Z 可撤销）';
+    this.status = res.status;
   }
 
   /**
@@ -293,29 +286,23 @@ export class CommandService {
   unindentItem(id: string): void {
     const w = this.world;
     if (!w) return;
-    const l = w.layers.find((x) => x.id === id);
-    if (!l) {
-      this.status = '提升只适用于图层';
+    const res = planPromote(w, id);
+    if (!res.ok) {
+      this.status = res.status;
       return;
     }
-    const hasParent =
-      !!l.parentLayerId && w.layers.some((x) => x.id === l.parentLayerId);
-    if (!hasParent) {
-      this.status = '已是顶层图层，无处提升';
-      return;
-    }
-    const beforeParent = l.parentLayerId;
-    l.parentLayerId = undefined;
+    const { plan } = res;
+    w.layers.find((x) => x.id === plan.id)!.parentLayerId = plan.after;
     history.run(
       w,
       new LayerFieldsCommand(
-        [{ id, before: { parentLayerId: beforeParent }, after: { parentLayerId: undefined } }],
+        [{ id: plan.id, before: { parentLayerId: plan.before }, after: { parentLayerId: plan.after } }],
         '提升',
       ),
       { alreadyApplied: true },
     );
     this.touchWorld();
-    this.status = '已提升至顶层（Ctrl+Z 可撤销）';
+    this.status = res.status;
   }
 
   /**
@@ -344,10 +331,12 @@ export class CommandService {
   /**
    * 组织模式四操作（2026-09-30 拖动退役；5-c 自 App 下沉）：上移/下移方向按两面板
    * 既有菜单映射（图层上移=-1、元素上移=+1——两者数组方向相反，各自验证过）。
+   * `anchorId`（D3，2026-10-03 包1）= 缩进的**过滤后视觉上一行**，由面板与禁用态
+   * 同源给出；不传时 planIndent 按「无锚点」拒绝（首行）。
    */
-  organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string): void {
+  organize(action: 'up' | 'down' | 'indent' | 'unindent', id: string, anchorId?: string | null): void {
     const isLayer = this.world?.layers.some((l) => l.id === id) ?? false;
-    if (action === 'indent') this.indentItem(id);
+    if (action === 'indent') this.indentItem(id, anchorId ?? null);
     else if (action === 'unindent') this.unindentItem(id);
     else this.moveItemStep(id, action === 'up' ? (isLayer ? -1 : 1) : isLayer ? 1 : -1);
   }
@@ -407,17 +396,13 @@ export class CommandService {
     const layer = this.world.layers.find((l) => l.id === id);
     if (layer) {
       const nid = `custom-${Date.now().toString(36)}`;
-      const copy = {
-        ...layer,
-        id: nid,
-        name: `${layer.name || id} 副本`,
-        parentLayerId: layer.parentLayerId,
-      };
+      // D5（包1）：副本成根——继承父会造成一父二子违链
+      const copy = layerCopyAsRoot(layer, nid);
       // 1-b：复制图层入栈（AddLayerCommand 天然支持整层 add/remove undo）
       history.run(this.world, new AddLayerCommand(copy, '复制图层'));
       this.touchWorld();
       this.focusLayer = nid;
-      this.status = '已复制图层（样式与设置，不含元素）';
+      this.status = '已复制图层（副本在顶层；样式与设置，不含元素）';
       return;
     }
     // 路径

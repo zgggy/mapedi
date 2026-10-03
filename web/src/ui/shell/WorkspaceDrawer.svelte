@@ -11,7 +11,7 @@
   import { rebuildHeightIntervalElements, heightIntervalRegions } from '../../core/layer/heightElements';
   import { editsHeightAt } from '../../core/layer/flags';
   import { isFreeLayerId } from '../../core/displayCompose';
-  import { childLayerIdOf } from '../../core/layer/tree';
+  import { childLayerIdOf } from '../../core/hierarchy/derive';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
@@ -230,7 +230,7 @@ import { isRowOrControlClick } from './shell';
 
   function openMenu(e: MouseEvent, id: string) {
     // 右键菜单简化（2026-09-30 拍板 3）：信息/显示参数 → 检查模式展开区；
-    // 显隐 → 行内 eye；上移/下移 → 长按拖动。只留无其他入口的复制/删除。
+    // 显隐 → 检查区开关；上移/下移 → 组织模式行内钮（拖动已退役）。只留无其他入口的复制/删除。
     const reg = world?.regions.find((x) => x.id === id);
     const derived = !!reg && !!intervalAttrs(reg);
     const items: MenuItem[] = [

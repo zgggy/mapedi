@@ -2,12 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createWorld } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
 import { generatePolitical, childrenOf } from '../src/core/political';
-import {
-  annexRegion,
-  deleteRegionKeepChildren,
-  restoreRegions,
-  snapshotRegions,
-} from '../src/core/regionOps';
+import { AnnexCommand, DeleteRegionCommand } from '../src/core/history';
 
 function makeWorld() {
   const w = createWorld({ seed: 33, count: 900 });
@@ -22,7 +17,8 @@ describe('region ops', () => {
     const country = w.regions.find((r) => r.layerId === 'country')!;
     const kids = childrenOf(w, country.id);
     expect(kids.length).toBeGreaterThan(0);
-    expect(deleteRegionKeepChildren(w, country.id)).toBe(true);
+    const del = new DeleteRegionCommand(country.id);
+    del.apply(w);
     expect(w.regions.find((r) => r.id === country.id)).toBeUndefined();
     for (const k of kids) {
       const still = w.regions.find((r) => r.id === k.id);
@@ -40,7 +36,9 @@ describe('region ops', () => {
     const bKids = childrenOf(w, b.id);
     const aCount = a.cells.length;
     const bCount = b.cells.length;
-    expect(annexRegion(w, a.id, b.id)).toBe(true);
+    const cmd = new AnnexCommand(a.id, b.id);
+    cmd.apply(w);
+    expect(cmd).toBeTruthy();
     expect(w.regions.find((r) => r.id === b.id)).toBeUndefined();
     expect(a.cells.length).toBeGreaterThanOrEqual(aCount + bCount - 2);
     for (const k of bKids) {
@@ -52,9 +50,9 @@ describe('region ops', () => {
   it('annex is undoable via snapshot', () => {
     const w = makeWorld();
     const countries = w.regions.filter((r) => r.layerId === 'country');
-    const snap = snapshotRegions(w);
-    annexRegion(w, countries[0].id, countries[1].id);
-    restoreRegions(w, snap);
+    const cmd = new AnnexCommand(countries[0].id, countries[1].id);
+    cmd.apply(w);
+    cmd.revert(w);
     expect(w.regions.find((r) => r.id === countries[1].id)).toBeTruthy();
   });
 });

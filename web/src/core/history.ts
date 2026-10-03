@@ -1,5 +1,6 @@
 import type { CellId, Region, RegionId, World } from './types';
 import { scrubRegionDiplomacy } from './diplomacy';
+import { childrenOnRegionDelete, childrenOnAnnex, planLayerDelete } from './hierarchy/policy';
 
 export interface EditCommand {
   label: string;
@@ -195,12 +196,11 @@ export class DeleteRegionCommand implements EditCommand {
     if (idx < 0) return;
     // COW：splice 后 region 不可达，cells/map 引用直接交给快照
     this.snapshot = snapshotRegionCOW(world.regions[idx]);
-    this.childParents = [];
-    for (const r of world.regions) {
-      if (r.parentId === this.regionId) {
-        this.childParents.push({ id: r.id, parentId: r.parentId });
-        r.parentId = undefined;
-      }
+    // 删除策略表单源（policy 场景1：子 → 未分配）
+    this.childParents = childrenOnRegionDelete(world, this.regionId);
+    for (const c of this.childParents) {
+      const r = world.regions.find((x) => x.id === c.id);
+      if (r) r.parentId = undefined;
     }
     scrubRegionDiplomacy(world, this.regionId);
     world.regions.splice(idx, 1);
@@ -247,12 +247,11 @@ export class AnnexCommand implements EditCommand {
       }
     }
     attacker.cells = merged;
-    this.childParents = [];
-    for (const r of world.regions) {
-      if (r.parentId === this.targetId) {
-        this.childParents.push({ id: r.id, from: r.parentId, to: this.attackerId });
-        r.parentId = this.attackerId;
-      }
+    // 删除策略表单源（policy 场景2：子 → 攻击方）
+    this.childParents = childrenOnAnnex(world, this.targetId, this.attackerId);
+    for (const c of this.childParents) {
+      const r = world.regions.find((x) => x.id === c.id);
+      if (r) r.parentId = c.to;
     }
     world.regions.splice(tIdx, 1);
   }
@@ -396,6 +395,9 @@ export class AddLayerCommand implements EditCommand {
 export class DeleteLayerCommand implements EditCommand {
   private regions: Region[];
   private renderCfg: [string, NonNullable<World['layerRenderConfig']> extends Map<string, infer V> ? V : never][];
+  /** 包1（2026-10-03）：链拼接 + 失父元素清父的快照（policy 场景3，供 revert） */
+  private layerFlip: { id: string; before: string | undefined; after: string | undefined } | null = null;
+  private regionFlips: { id: string; parentId: string | undefined }[] = [];
 
   constructor(private layer: World['layers'][number], world: World, public label = '删除图层') {
     this.regions = world.regions
@@ -413,9 +415,29 @@ export class DeleteLayerCommand implements EditCommand {
   }
 
   apply(world: World): void {
+    // 删除策略表单源（policy 场景3）：删除**前**算出链拼接与失父元素
+    const plan = planLayerDelete(world, this.layer.id);
     world.layers = world.layers.filter((l) => l.id !== this.layer.id);
     world.regions = world.regions.filter((r) => r.layerId !== this.layer.id);
     world.layerRenderConfig?.delete(this.layer.id);
+    // ② 子层提升为被删层的父（链拼接，不留悬空 parentLayerId——修 P3）
+    this.layerFlip = null;
+    if (plan.layerFlip) {
+      const child = world.layers.find((l) => l.id === plan.layerFlip!.id);
+      if (child) {
+        this.layerFlip = { id: child.id, before: child.parentLayerId, after: plan.layerFlip.parentId };
+        child.parentLayerId = plan.layerFlip.parentId;
+      }
+    }
+    // ③ 因①失去父的元素走「删元素」行（清父，快照供 revert）
+    this.regionFlips = [];
+    for (const f of plan.regionFlips) {
+      const r = world.regions.find((x) => x.id === f.id);
+      if (r) {
+        this.regionFlips.push({ id: f.id, parentId: r.parentId });
+        r.parentId = undefined;
+      }
+    }
   }
 
   revert(world: World): void {
@@ -432,6 +454,15 @@ export class DeleteLayerCommand implements EditCommand {
       }
     }
     if (world.layerRenderConfig) for (const [k, v] of this.renderCfg) world.layerRenderConfig.set(k, v);
+    // 包1：回滚链拼接与清父
+    if (this.layerFlip) {
+      const child = world.layers.find((l) => l.id === this.layerFlip!.id);
+      if (child) child.parentLayerId = this.layerFlip.before;
+    }
+    for (const f of this.regionFlips) {
+      const r = world.regions.find((x) => x.id === f.id);
+      if (r) r.parentId = f.parentId;
+    }
   }
 }
 

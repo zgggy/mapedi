@@ -78,8 +78,8 @@ export function displayTree(
     arr.push(l.id);
   }
   const out: { layerId: string; depth: number }[] = [];
+  // 去 depth>8 截断（HIERARCHY §7，包1）：写入闸/读档修复已禁环，上爬/下探无界安全
   const walk = (id: string, depth: number) => {
-    if (depth > 8) return;
     out.push({ layerId: id, depth });
     for (const k of kids.get(id) ?? []) walk(k, depth + 1);
   };
@@ -104,30 +104,11 @@ export function visibleColorRoots(world: World, maxRoots = 3): string[] {
   return roots;
 }
 
-export function defaultOpacityAtDepth(depth: number): number {
-  if (depth <= 0) return 1;
-  if (depth === 1) return 0.62;
-  return 0.42;
-}
-
 /**
  * 层序：列表最上 = 地图最上（后画）。
  * 列表最下不透明，越往上越透；列表最上颜色对比最鲜明。
  * listIndex: 0 = 列表最上。
  */
-export function stackAlphaForListIndex(listIndex: number, count: number): number {
-  if (count <= 1) return 1;
-  if (listIndex <= 0) return 0.45; // 列表最上 → 更透
-  if (listIndex >= count - 1) return 1; // 列表最下 → 不透明
-  return 0.7;
-}
-
-function stackContrastForListIndex(listIndex: number, count: number): number {
-  if (count <= 1) return 1;
-  // listIndex 0（最上）→ 1.0；最下 → 0.55
-  return 0.55 + (0.45 * (count - 1 - listIndex)) / Math.max(1, count - 1);
-}
-
 /**
  * 归属唯一真相 = `region.cells`。
  * 父 Region 的 cells **必须已物化**为子并集（生成/改归属后调用 materializeParentCells）。

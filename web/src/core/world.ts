@@ -2,6 +2,7 @@ import type { Cell, World, LayerDef, ClimateParams, LayerRenderConfig, LonLat } 
 import { normalizeStyle } from './layer/style';
 import { generateVoronoiCells } from './voronoi';
 import { bumpGeomRev } from './rev';
+import { repairHierarchy } from './hierarchy/gate';
 import { defaultClimate } from './types';
 import { migrateToPathFeature } from './paths';
 import { getCellGrid, invalidateCellGrid } from './index/cellGrid';
@@ -448,7 +449,14 @@ export function deserializeWorld(json: string): World {
   }
   // 反序列化 = 新几何域（同 createWorld）
   bumpGeomRev();
-  return ensureBuiltinLayers(world);
+  const withBuiltins = ensureBuiltinLayers(world);
+  // 层级读档修复（HIERARCHY S8，2026-10-03 包1）：悬空/环/一父二子/桥违例
+  // → 确定性修复 + console.warn 报告（不动 cells / 邻接 / 数组序）
+  const rep = repairHierarchy(withBuiltins);
+  if (rep.fixed) {
+    console.warn(`[hierarchy] 读档修复 ${rep.fixed} 处：`, rep.notes.join('；'));
+  }
+  return withBuiltins;
 }
 
 /** 粗拾取：最近中心（大图走 CellGrid）；经度差按球面 wrap */
