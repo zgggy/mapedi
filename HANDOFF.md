@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = EXPAND 包5 视觉 tokens（`d3c0953`）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = HIERARCHY O2 树遍历单源（`7622abe`）。**
 
 ## 先读
 
@@ -13,7 +13,12 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十五轮完成；在案：`2333f9f` EXPAND 包3 → `d3c0953` 包5 tokens）
+## 当前状态（第三十六轮完成；在案：`56574f9` 滑块挤压修复 → `7622abe` O2 树遍历单源）
+
+- **✓ 第三十六轮（2026-10-03 用户报障修复 + HIERARCHY O2）**：
+  - **地形网格挤压（包3 引入的真 bug）**：山脉/细节/海床三格滑块被压成 2px 横线——根因=`.tcell` 列向 flex 格里 `.cap` 是 `flex:1 1 0%`（**basis 0 不计容器固有高度**），中间行三格全滑块 → 行高只剩标签 16px；有数字输入格的行被抬到 40px 才掩盖。修=`.cap` 改 `flex:1 1 auto`（行向仍靠 grow 填满=视觉不变，列向恢复固有高），组件级一处修全。**全库扫描**（生成三分支/检查四态/绘制/组织/⚙弹层）压扁+裁切控件 = 0（`56574f9`）。
+  - **O2 树遍历单源（`7622abe`）**：`core/layer/tree.ts` = `layerTreeOf`（前序 DFS 一次产 parentId/depth/**chain 面包屑**）+ `childLayerIdOf`（首子层）；收编 layerDisplayList / LayersPanel.rows / chainOf（删）/ regionOps.childLayerIdOf（删定义，WD+内部 5 处+store+brush 换源）。**验收**：旧算法内联逐位对照（15 层顺序 equal、chain 零失配）、组织缩进 0→14px→撤销回 0（parent=null、已撤销）、lastError 空；tsc/svelte-check 0。
+  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
 
 - **✓ 第三十五轮（2026-10-03 EXPAND 包3+包5 收口）**：
   - **包3 生成与绘制整理（`2333f9f`）**：分支头 `.bhead`（🎲撒点/⛰️地形/🧩布局+动作名）、`.tgrid` 地形 3 列网格（大陆占比 wide 通栏 ModeCapsule+9 格）、**活空态**（去 `canGen` 渲染闸→面板恒开、fire 仍守门；无配置 hint=「到检查模式给『X』设置参数后再回来」）、R7 freeform 虚线徽章（App 传 `freeform`/`strategy`）；四分支头/徽章/指引全部实测命中。

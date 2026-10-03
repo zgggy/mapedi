@@ -330,7 +330,7 @@ ops 全部为纯 core 计算，`commandService` 负责 `history.run`（既有 `L
 | # | 优化项 | 依据 / 现状 | 建议批次 |
 |---|--------|-------------|----------|
 | O1 | **隶属跳转已落地 → 补反向导航**：检查区「子元素 N」计数（子图层中 parentId=本元素）可点跳转，与「隶属 ›」对称 | 跳转已在展开区实现（D8，戊府→罗马端到端验收）；反向=§6.4 原有规划 | 层级 UI 包（原方案包4） |
-| O2 | **树遍历第 4 处内联 → derive 单源**：`chainOf`（新·LayersPanel）加入 `layerDisplayList` / `LayersPanel.rows` / `WD childLayerIdOf` 的行列——四个消费者各写一遍 parent/children walk | 本会话新增 chainOf 后达 4 处 | 层级内核包（原方案包1，**优先级提升**） |
+| O2 | **树遍历第 4 处内联 → derive 单源**——**已完成（2026-10-03，`7622abe`）**：`core/layer/tree.ts` 新增 `layerTreeOf`（前序 DFS 一次产出 parentId/depth/chain 面包屑）+ `childLayerIdOf`；收编 `commandService.layerDisplayList` / `LayersPanel.rows` / `chainOf`（删）/ `regionOps.childLayerIdOf`（删定义，WD+内部5处+store+brush 换源）。验收=新旧算法逐位对照（顺序 equal、chain 零失配）+ 组织缩进 E2E | 2026-10-03 落地 | **✓ 已完成** |
 | O3 | **行内可见态读什么**——已定案（2026-10-03）：行内眼睛 = **存储 visible**（与眼睛按钮同源同值，不跟 effective；「不影响显隐状态按钮」同族语义）；形态=可见 👁 / 不可见无图标（🚫、⚙ 均撤） | D6 终稿修订 | 已结案 |
 | O4 | ~~gearIds 第二类读法~~ → **已消解**（2026-10-03：行内 ⚙ 徽标撤销，gearIds 派生整链删除——生成接线包落地时若需「面板就绪」谓词再按单源建） | D6 终稿修订 | 已消解 |
 | O5 | **聚焦≠显示的现场证据**：验收时在「已隐藏的 height 层」上直接进入绘制会话（drawActive=true）——drawGuard 红字是活的；L0 🚫 + 红字双通道已覆盖，图层面板无需内容（D4 结案依据） | 2026-10-02 实测 | 已结案 |
