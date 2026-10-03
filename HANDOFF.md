@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 海陆案 A 删除 landsea（`fc8664e`）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 用户反馈四件（`6580e75`）。**
 
 ## 先读
 
@@ -13,7 +13,16 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十七轮完成；在案：`c4ba324` HIERARCHY 包1 → `1980fdc` 包2 → `268b307` 包3 → `b01c906` 包4 → `8ef38d6` EXPAND 包4 → `716e03f` 5-c 全量 → `fc8664e` 海陆案 A）
+## 当前状态（第三十八轮完成；在案：`6580e75` 用户反馈四件）
+
+- **✓ 第三十八轮（2026-10-04 用户四件反馈，一次交付）**：
+  - ① **「子层」药丸撤销**（8ef38d6 引入当日即撤）；② **元素单体显隐退役**（用户定：图层显示下元素恒显示、个体显隐无意义）——检查区元素胶囊删、元素行 👁 徽章停发（ItemButton badge 改显式开关，图层/路径保留）、toggleItemHidden 命令链整删、检查区元素基本色改**自身渲染色**（微调后父色≠自色，面板与地图同真值）。
+  - ③ **彩虹配色 `core/layer/palette.ts`**（≥20：RAINBOW 24 色相均分+colorAt 单源）——九层旧色池全删（实测唯一色仅 4–5）；④ **父子同色系 tintOf**（父色 ±16°/±7% 按兄弟序）：generateFromLayer 聚合后 + 组织缩进（与 parentLayerId 同一条 Composite 入栈）双路径。
+  - 验收：scratch 每层 unique==n、15 省贴父 ≤16.1°；真实缩进 15 变色/15 贴父/状态回显 → 撤销×2 逐位还原；行内 kidp=0/元素徽章0/元素胶囊0、图层侧全保留；tsc/svelte-check 0。
+  - **坑**：① alreadyApplied 模式下新字段必须**手动写入世界**（只建 patches 忘写 r.color → 状态报「15 个随父配色」但颜色未变——探针 changedOnIndent=0 抓住）；② 检查区有两个 .ins 实例（图层在前），断言元素区必须按行作用域。
+  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
+
+（第三十七轮 HIERARCHY 四包/EXPAND 包4/5-c/海陆案 A 记录见下）；在案链：`c4ba324` HIERARCHY 包1 → `1980fdc` 包2 → `268b307` 包3 → `b01c906` 包4 → `8ef38d6` EXPAND 包4 → `716e03f` 5-c 全量 → `fc8664e` 海陆案 A）
 
 - **✓ 第三十七轮（2026-10-03 用户委托「把我没拍的全部做完」——四件全清）**：
   - **HIERARCHY 包1–4（D1–D8 全按推荐拍板并落地）**：包1 `c4ba324` hierarchy/{derive,gate,ops,policy} 四件+读档修复+DeleteLayer 链拼接+copy 成根+D3 锚点同源+**regionOps 整体溶解**（死路径删、测试迁 history/ops/gate 规则面）；包2 `1980fdc` 焦点整段叠放（derive.layerStackComparator 单源）+I6 effective 显隐+**D8 关=只写自身**（stash 像素 A/B 底0%/信号10%格状斑块）；包3 `268b307` units=层树派生（fromLayerId 三处退役）+拓扑级联替 CASCADE_ORDER（dependsOn 真消费、profiles 零迁移）+递归 regen——**全级联 serialize 哈希新旧逐位相等**；包4 `b01c906` 子元素逐跳（O1）+手动挂靠（D4，打分单源 bestParentAmong）。
