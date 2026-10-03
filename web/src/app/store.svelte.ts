@@ -565,6 +565,11 @@ export class EditorStore {
     this.cmds.toggleLayerVisible(id);
   }
 
+  /** 手动挂靠（HIERARCHY D4，包4）：孤儿元素挂到共享邻接最多的父层元素 */
+  attachElement(id: string) {
+    this.cmds.attachElement(id);
+  }
+
   setLayerOpacity(id: string, opacity: number) {
     this.cmds.setLayerOpacity(id, opacity);
   }

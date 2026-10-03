@@ -10,6 +10,7 @@
  */
 import type { CellId, LayerId, Region, World } from '../types';
 import { childLayerIdOf } from '../hierarchy/derive';
+import { bestParentAmong } from '../hierarchy/ops';
 import { isLand as isLandCell } from '../types';
 import type { GenConfig } from '../layer/genTypes';
 import { layerAllowsOverlap } from '../layer';
@@ -395,22 +396,9 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
   if (out.length) {
     for (const s of sources) {
       if (grouped.has(s.id)) continue;
-      let best = out[0].id;
-      let bestScore = -1;
-      for (const el of out) {
-        const elCells = new Set(el.cells);
-        let score = 0;
-        for (const c of s.cells) {
-          for (const nb of world.cells[c].neighbors) {
-            if (elCells.has(nb)) score++;
-          }
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          best = el.id;
-        }
-      }
-      s.parentId = best;
+      // 打分单源 = hierarchy/ops.bestParentAmong（D4 挂靠与生成兜底同一算法）
+      const best = bestParentAmong(world, s.id, out);
+      if (best) s.parentId = best.id;
     }
   }
   world.regions = world.regions.concat(out);

@@ -13,6 +13,8 @@
   import StateCapsule from './StateCapsule.svelte';
   import { editor } from '../../app/store.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
+  import { childLayerIdOf } from '../../core/hierarchy/derive';
+  import { bestParentFor } from '../../core/hierarchy/ops';
 
   let {
     world,
@@ -80,6 +82,16 @@
           }
         : null;
     const styleId = r ? (r.layerId ?? '') : (id ?? '');
+    // 层级导航（HIERARCHY §6.4，包4）：子元素 = 子图层中 parentId=本元素（快照取 id/name，
+    // 模板禁读活引用）；挂靠入口 = 孤儿且父层有元素（D4 手动，打分单源 ops.bestParentFor）
+    const childLid = r && world ? childLayerIdOf(world, r.layerId) : null;
+    const childItems =
+      r && childLid && world
+        ? world.regions
+            .filter((x) => x.layerId === childLid && x.parentId === r.id)
+            .map((x) => ({ id: x.id, name: x.name }))
+        : [];
+    const attach = r && world ? bestParentFor(world, r.id) : null;
     return {
       regionId: r?.id ?? null,
       layerId: l?.id ?? null,
@@ -116,6 +128,9 @@
       parentName: r?.parentId
         ? (world?.regions.find((x) => x.id === r.parentId)?.name ?? r.parentId)
         : null,
+      childItems,
+      childLayerId: childLid,
+      attachTo: attach ? { id: attach.id, name: attach.name } : null,
     };
   });
 
@@ -146,6 +161,28 @@
     editor.selectLayerTop(p.layerId);
     editor.selectedRegionId = p.id;
     editor.status = `跳转「${p.name}」`;
+    editor.notify();
+  }
+
+  /** 子元素逐个跳转（O1 反向，包4）：重复点击按序轮换子图层元素 */
+  let childCursor = 0;
+  function jumpChild() {
+    const kids = view.childItems;
+    const lid = view.childLayerId;
+    if (!kids.length || !lid) return;
+    const k = kids[childCursor % kids.length];
+    childCursor = (childCursor + 1) % kids.length;
+    editor.selectLayerTop(lid);
+    editor.selectedRegionId = k.id;
+    editor.status = `跳转子元素「${k.name}」(${childCursor || kids.length}/${kids.length})`;
+    editor.notify();
+  }
+
+  /** 手动挂靠（D4）：孤儿 → 共享邻接最多的父层元素 */
+  function attach() {
+    const rid = view.regionId;
+    if (!rid) return;
+    editor.attachElement(rid);
     editor.notify();
   }
 </script>
@@ -182,6 +219,21 @@
     {#if kind === 'element' && view.parentName}
       <button type="button" class="jump" title="跳转到父元素" onclick={jumpParent}>
         隶属 {view.parentName} ›
+      </button>
+    {/if}
+    {#if kind === 'element' && view.childItems.length}
+      <button
+        type="button"
+        class="jump"
+        title="跳转到子元素（子图层，重复点击逐个轮换）"
+        onclick={jumpChild}
+      >
+        子元素 {view.childItems.length} ›
+      </button>
+    {/if}
+    {#if kind === 'element' && view.attachTo && !view.parentId}
+      <button type="button" class="jump attach" title="挂靠到共享邻接最多的父层元素" onclick={attach}>
+        挂靠「{view.attachTo.name}」
       </button>
     {/if}
   </div>
@@ -269,6 +321,14 @@
   }
   .jump:hover {
     background: rgba(120, 160, 220, 0.28);
+  }
+  /* 挂靠入口（D4）：暖色调区分导航与写入动作 */
+  .jump.attach {
+    background: rgba(61, 154, 106, 0.16);
+    border-color: rgba(61, 154, 106, 0.45);
+  }
+  .jump.attach:hover {
+    background: rgba(61, 154, 106, 0.3);
   }
   .sty {
     margin-top: 4px;

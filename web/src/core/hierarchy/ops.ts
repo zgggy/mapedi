@@ -128,3 +128,47 @@ export function moveAmongSiblings(
   }
   return oi === ordered.length;
 }
+
+/**
+ * 候选集中与 element 共享邻接边最多者（挂靠打分，D4/生成兜底共用——单源）。
+ * 打分 = element 每个 cell 的邻居中落在候选 cells 里的数量和。
+ */
+export function bestParentAmong(
+  world: World,
+  elementId: string,
+  candidates: Region[],
+): Region | null {
+  const el = world.regions.find((r) => r.id === elementId);
+  if (!el || !candidates.length) return null;
+  let best: Region | null = null;
+  let bestScore = -1;
+  for (const cand of candidates) {
+    if (cand.id === el.id) continue;
+    const candCells = new Set(cand.cells);
+    let score = 0;
+    for (const c of el.cells) {
+      for (const nb of world.cells[c]?.neighbors ?? []) {
+        if (candCells.has(nb)) score++;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = cand;
+    }
+  }
+  return best;
+}
+
+/**
+ * 孤儿手动挂靠候选（D4，§6.4）：父层元素中共享邻接最多者。
+ * 无父层 / 父层无元素 / 本元素已有父 → null（UI 不显示挂靠入口）。
+ */
+export function bestParentFor(world: World, elementId: string): Region | null {
+  const el = world.regions.find((r) => r.id === elementId);
+  if (!el || el.parentId) return null;
+  const parentLayer = world.layers.find((l) => l.id === el.layerId)?.parentLayerId;
+  if (!parentLayer) return null;
+  const cands = world.regions.filter((r) => r.layerId === parentLayer);
+  if (!cands.length) return null;
+  return bestParentAmong(world, elementId, cands);
+}

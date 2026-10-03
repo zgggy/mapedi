@@ -21,7 +21,7 @@ import {
 import { resolveLayerStyle } from '../core/layer/config';
 import { defaultFocusLayerId } from '../core/layer/flags';
 import { layerTreeOf } from '../core/hierarchy/derive';
-import { planIndent, planPromote, layerCopyAsRoot } from '../core/hierarchy/ops';
+import { planIndent, planPromote, layerCopyAsRoot, bestParentFor, reparentElement } from '../core/hierarchy/ops';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
@@ -464,6 +464,39 @@ export class CommandService {
     }
     this.selectedRegionId = id;
     this.deleteSelected();
+  }
+
+  /**
+   * 手动挂靠（HIERARCHY D4，包4）：孤儿元素（无父且本层有父层）挂到
+   * 共享邻接最多的父层元素——打分单源 ops.bestParentFor；闸复核桥不变量；
+   * 一条 RegionFieldsCommand + touchRegions（物化父 cells）。
+   */
+  attachElement(id: string): void {
+    const w = this.world;
+    if (!w) return;
+    const best = bestParentFor(w, id);
+    if (!best) {
+      this.status = '无可挂靠的父层元素（本层无父层或已有父）';
+      return;
+    }
+    const el = w.regions.find((r) => r.id === id);
+    if (!el) return;
+    const before = el.parentId;
+    const err = reparentElement(w, id, best.id);
+    if (err) {
+      this.status = `挂靠失败：${err}`;
+      return;
+    }
+    history.run(
+      w,
+      new RegionFieldsCommand(
+        [{ id, before: { parentId: before }, after: { parentId: best.id } }],
+        '挂靠',
+      ),
+      { alreadyApplied: true },
+    );
+    this.touchRegions();
+    this.status = `已挂靠到「${best.name || best.id}」（Ctrl+Z 可撤销）`;
   }
 
   doAnnex(targetId: string) {
