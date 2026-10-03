@@ -9,6 +9,7 @@
  * 产物是 Region（= LayerElement），含 adjacentElementIds / overlaps。
  */
 import type { CellId, LayerId, Region, World } from '../types';
+import { childLayerIdOf } from '../hierarchy/derive';
 import { isLand as isLandCell } from '../types';
 import type { GenConfig } from '../layer/genTypes';
 import { layerAllowsOverlap } from '../layer';
@@ -33,10 +34,14 @@ function isLand(world: World, id: CellId): boolean {
   return isLandCell(world.cells[id] ?? { height: 0 });
 }
 
+/**
+ * 单元源 = childLayer(L)（HIERARCHY D1 单源统一，包3）：原配置的源层字段
+ * 退役——组织手势即语义声明，源层从层树派生。
+ */
 function scopeCandidates(
   world: World,
   scope: GenConfig['scope'],
-  fromLayerId?: LayerId,
+  unitsLayerId?: LayerId,
 ): CellId[] {
   const out: CellId[] = [];
   switch (scope) {
@@ -52,7 +57,7 @@ function scopeCandidates(
     case 'fromLayer': {
       const fromCells = new Set<CellId>();
       for (const r of world.regions) {
-        if (r.layerId === fromLayerId) for (const c of r.cells) fromCells.add(c);
+        if (r.layerId === unitsLayerId) for (const c of r.cells) fromCells.add(c);
       }
       for (const id of fromCells) out.push(id);
       break;
@@ -287,7 +292,8 @@ function pickSeeds(pool: CellId[], count: number, rng: () => number): CellId[] {
 // ── fromLayer：聚合源图层元素 ──
 
 function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): Region[] {
-  const fromId = config.fromLayerId;
+  // 单元源从层树派生（D1）：无子层 → 无聚合源，返回空（与旧行为一致）
+  const fromId = childLayerIdOf(world, layerId) ?? undefined;
   const groupSize = Math.max(2, config.fromLayerCount ?? 3);
   const sources = world.regions.filter((r) => r.layerId === fromId);
   if (!sources.length) return [];
@@ -444,17 +450,17 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
 
   let pool: CellId[];
   if (config.pattern === 'partitionLand' && !config.allowOcean) {
-    pool = scopeCandidates(world, 'landOnly', config.fromLayerId);
+    pool = scopeCandidates(world, 'landOnly', childLayerIdOf(world, layerId) ?? undefined);
   } else if (config.pattern === 'partitionOcean') {
-    pool = scopeCandidates(world, 'oceanOnly', config.fromLayerId);
+    pool = scopeCandidates(world, 'oceanOnly', childLayerIdOf(world, layerId) ?? undefined);
   } else if (config.pattern === 'partitionAll') {
     pool = scopeCandidates(
       world,
       config.scope === 'noCrossLandSea' ? 'unlimited' : config.scope,
-      config.fromLayerId,
+      childLayerIdOf(world, layerId) ?? undefined,
     );
   } else {
-    pool = scopeCandidates(world, effScope, config.fromLayerId);
+    pool = scopeCandidates(world, effScope, childLayerIdOf(world, layerId) ?? undefined);
   }
   if (!pool.length) return [];
   const poolSet = new Set(pool);

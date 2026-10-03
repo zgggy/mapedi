@@ -9,7 +9,8 @@
 import type { World } from '../core/types';
 import { createWorld, HARD_MAX_DENSITY, builtinLayers } from '../core/world';
 import { genStrategyOf, heightmapLayerId } from '../core/layer/flags';
-import { runCascade } from '../core/generate/registry';
+import { runCascade, generatorFor } from '../core/generate/registry';
+import { childLayerIdOf } from '../core/hierarchy/derive';
 import { generateWorldAsync } from '../core/generate/runGenerate';
 import { cascadeEnabled, type GenerationProfile } from '../core/generate/profile';
 import { defaultStarSystem } from '../core/astro';
@@ -146,6 +147,9 @@ export class GenerationService {
   regenLayer(layerId: string): void {
     const world = this.ctx.world;
     if (!world) return;
+    // R2 递归（HIERARCHY §6.3 包3）：先确保单元源（子层）可用——
+    // 无元素 → 递归生成（孙层优先），再生成本层；有元素则不重算（非破坏）。
+    this.ensureUnitsReady(layerId);
     const params = this.ctx.profiles.find((p) => p.layerId === layerId)?.params;
     const enabled = new Set([layerId]);
     runCascade(
@@ -169,6 +173,27 @@ export class GenerationService {
       this.ctx.setFocusLayer(fg.id);
     }
     this.ctx.setStatus(`已重新生成：${layerId}`);
+  }
+
+  /** 单元源兜底（R2）：childLayer 无元素 → 先递归生成子层链（自底向上） */
+  private ensureUnitsReady(layerId: string): void {
+    const world = this.ctx.world;
+    if (!world) return;
+    const child = childLayerIdOf(world, layerId);
+    if (!child || !generatorFor(child)) return;
+    if (world.regions.some((r) => r.layerId === child)) return; // 已可用
+    this.ensureUnitsReady(child); // 孙层优先
+    const params = this.ctx.profiles.find((p) => p.layerId === child)?.params;
+    runCascade(
+      world,
+      world.meta.seed,
+      [child],
+      undefined,
+      params ? { [child]: params } : undefined,
+      new Set([child]),
+    );
+    if (genStrategyOf(world, child) === 'heightmap') rebuildLandSeaRegions(world);
+    this.ctx.setStatus(`已生成单元子层：${child}`);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean): void {

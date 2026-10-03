@@ -68,8 +68,7 @@ export interface GenConfig {
   diffusion?: { falloff: number; radius: number; roughness: number; peakHeight: number };
   /** height 层：世界形状（大陆占比/落差/平整率等，见 WorldShape） */
   worldShape?: WorldShape;
-  /** method=fromLayer 时的源图层 */
-  fromLayerId?: LayerId;
+  // 源层已改由层树派生（HIERARCHY D1，包3）——原 fromLayerId 字段退役
   /** method=fromLayer 时每个新元素聚合几个源元素 */
   fromLayerCount?: number;
   /** 元素名池（缺省用通用名） */

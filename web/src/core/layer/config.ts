@@ -29,7 +29,6 @@ export interface LayerGenParams {
   pattern: GenPattern;
   coreSelector: CoreSelector;
   count: number;
-  fromLayerId?: LayerId;
   fromLayerCount?: number;
   /** 海国等：勾选才生成海上元素 */
   allowOcean: boolean;
@@ -153,7 +152,6 @@ export function defaultLayerConfigs(): LayerConfig[] {
         scope: 'landOnly',
         pattern: 'partitionLand',
         coreSelector: 'centermost',
-        fromLayerId: 'province',
         fromLayerCount: 3,
         allowOcean: false,
       },

@@ -49,7 +49,7 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         ...base,
         method: 'fromLayer', scope: 'landOnly', pattern: 'partitionLand',
         coreSelector: 'centermost', count: 8,
-        fromLayerId: 'province', fromLayerCount: 3,
+        fromLayerCount: 3, // 源层从层树派生（D1），原 province 常量退役
         names: ['华夏', '罗马', '波斯', '埃及', '印度', '希腊', '腓尼基', '阿拉伯'],
         colors: ['#8B4513', '#A0522D', '#D2691E', '#CD853F', '#8B4513', '#A0522D', '#D2691E', '#CD853F'],
       };
@@ -127,7 +127,7 @@ export function genConfigFromParams(
   if (typeof params.scope === 'string') cfg.scope = params.scope as GenScope;
   if (typeof params.pattern === 'string') cfg.pattern = params.pattern as GenPattern;
   if (typeof params.coreSelector === 'string') cfg.coreSelector = params.coreSelector as CoreSelector;
-  if (typeof params.fromLayerId === 'string') cfg.fromLayerId = params.fromLayerId;
+  // 原 params.fromLayerId 覆盖已删（D1 派生单源；旧档草稿里的同名键被忽略）
   if (typeof params.fromLayerCount === 'number') cfg.fromLayerCount = params.fromLayerCount;
   if (typeof params.allowOcean === 'boolean') cfg.allowOcean = params.allowOcean;
   // height：世界形状（大陆占比/落差/平整率/大陆数/穿极/崎岖/海底起伏/侵蚀）

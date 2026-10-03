@@ -74,7 +74,6 @@
     scope: '生成范围',
     pattern: '生成形态',
     coreSelector: '核心选择',
-    fromLayerId: '源图层',
   };
   const PARAM_RANGE: Record<string, { min: number; max: number }> = {
     count: { min: 1, max: 60 },
@@ -183,7 +182,7 @@
         </div>
         {#if layerParams && onParam}
           <div class="prow-wrap">
-            {#each Object.entries(layerParams) as [k, v] (k)}
+            {#each Object.entries(layerParams).filter(([k]) => k !== 'fromLayerId') as [k, v] (k)}
               {#if typeof v === 'boolean'}
                 <span class="prow"
                   ><span class="pl">{PARAM_LABELS[k] ?? k}</span
