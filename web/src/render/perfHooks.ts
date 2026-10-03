@@ -33,4 +33,6 @@ declare global {
   var __gpuRan: number | undefined;
   /** 渲染前成员对账补丁数（手感批 2026-10-04：替代全清的 Δ 补丁计数） */
   var __reconcileN: number | undefined;
+  /** 金钮看门狗观测（模式胶囊卡死自归位，2026-10-04 手感批二） */
+  var __knobV: { n: number; snap: number; last: string; eff?: number } | undefined;
 }
