@@ -11,7 +11,7 @@
   import InspectSection from './ui/shell/InspectSection.svelte';
   import LeftRail from './ui/shell/LeftRail.svelte';
   import { clearViewMemory } from './ui/viewMemory';
-  import { isLayerShown } from './core/displayCompose';
+  import { isLayerShown, isFreeLayerId } from './core/displayCompose';
   import { genStrategyOf, editsHeightAt, editsHeightLayerId, heightmapLayerId } from './core/layer/flags';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
@@ -366,6 +366,7 @@
         layerId={focusLayer}
         layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
         strategy={focusStrategy}
+        freeform={!!world && isFreeLayerId(world, focusLayer)}
         layerParams={focusStrategy === 'heightmap' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
         onShape={(k, v) => editor.setProfileParam(heightmapLayerId(world?.layers), k, v)}
         onRegen={(id) => editor.regenLayer(id)}
