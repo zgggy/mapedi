@@ -122,7 +122,10 @@
 <style>
   .cap {
     position: relative;
-    flex: 1;
+    /* flex-basis:auto 而非 0：basis 0 不计入列向容器的固有高度
+     * （包3 tgrid 中间行全滑块 → 行高塌到标签、滑块被压成 2px 横线）；
+     * 行向容器里仍靠 flex-grow 填满，视觉不变。 */
+    flex: 1 1 auto;
     min-width: 64px;
     height: 22px;
     border-radius: 11px;
