@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 手感批·按钮动画+闪根治（`ed10480`）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 金钮动画+看门狗（`c14c764`）。**
 
 ## 先读
 
@@ -13,7 +13,13 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第四十一轮完成；在案：`ed10480` 手感批）
+## 当前状态（第四十二轮完成；在案：`c14c764` 金钮动画+看门狗）
+
+- **✓ 第四十二轮（2026-10-04 用户驳回「保持瞬移」——修根因不撤功能）**：
+  - 金钮（ModeCapsule 填色滑钮）**滑动过渡加回**（0.18s）+ **卡死看门狗**：档位变化后320ms核对滑钮矩形与激活档，未到位=时间线冻结（2026-10-01 旧 bug 根因：后台页 CSS 过渡冻结、style 已终值 computed 停旧档）→ 关过渡+强制重排瞬时落终档、随后恢复过渡；回前台/visibilitychange/focus 立即再核对。**动画与位置正确兼得**——四十一轮候选ⓒ「保留瞬移」作废（用户原则：发现 bug 修根因，别撤功能）。
+  - 观测：`globalThis.__knobV`（perfHooks 声明）；验收在失焦冻结环境正合压测：慢过渡注入模拟冻结→snap 归位、四连切自愈、双胶囊终态 dLeft=0；tsc/svelte-check 0、vitest 152 绿。
+
+（第四十一轮手感批记录见下）；在案链：
 
 - **✓ 第四十一轮（2026-10-04 用户两件手感问题 + 自查）**：
   - **问题2「绘制/显隐/切图层整个界面闪一下」根治**：根因=touchWorld/touchRegions **双全清**（投影重建+件环重建=编辑后数百毫秒长帧，用户猜的『全量重绘』完全正确）；修=**渲染前对账补丁** `borderCache.reconcilePieceMembership`（dataRev|projKey 门控一次，Δ 就地 patchPieceEntry；实测 mutate→1、还原→1、零错），touchWorld 撤投影/环两全清（投影键 seed/count 自失效）、touchRegions 撤环全清（invalidateBorderCache 留作测试夹具）。附证：compose 冷算 0ms（6件级）无辜、渐现只在首启 warmDone 前。
