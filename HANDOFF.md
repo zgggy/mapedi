@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 面板展开视图对准剩余空间中心（`cf23dae`）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 拍板④副本双尺合一（`7eb3775`）。**
 
 ## 先读
 
@@ -13,7 +13,17 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十九轮完成；在案：`cf23dae` 视图居中对准）
+## 当前状态（第四十轮完成；在案：`7eb3775` 拍板④）
+
+- **✓ 第四十轮（2026-10-04 用户批8项决议执行 + 生成三症修复 + 测试首跑）**：
+  - **测试（批5）首跑**：两处陈旧失败修 `71a5329`——cellIndex.test（模块36f7773已删测试漏删）删；环不变量「同件各环同周期窗」断言被 ad3f72b 缝环设计取代（该修复当时已像素验证+用户裁决）→ 重述为「单环内无周期跳变」。**29 文件/152 全绿**。
+  - **生成三症（B1/B2/B3）`7451ec8`**：地形/布局分支补种子行+🎲（seedInput=草稿字段全链透传 regenLayer(layerId,seed)，状态回显种子）；B3 引擎实测无恙（扰动60海格→输出变、还原→逐位回基线）——「像没重新生成」= 同种子同输入必然同输出。E2E：🎲换种子 hSum 变、原种子复原逐位 `-908150`。顺补案A遗漏的 GenerateSection 5处海陆文案。
+  - **拍板执行**：①`2aa988a` 精度统一千分之一（PROJ_WRAP_EPS1e-2→1e-3、顶点网格0.01°→KEY_QUANT）；③`d0b3aa5` 尸体删除（exclusiveColor 全链+diplomacy.ts+测试，grep 归零）；④`7eb3775` 副本双尺合一（space.copyOffRange/copyIntersectsBox 单一原语，mapRenderer 本地谓词删）——稳定帧法 A/B：默认态跨码0.0%、平移态跨码0.0%；⑤原方案（键补 regionsRev）与件环补丁红线冲突→维持文档裁决（断言随翻转探针包）；⑥flip 断言同捆（可选项）。
+  - **验收（批6）**：100k 主线程 scratch 基准 create5.9s+cascade1.9s=总7.96s（UI 实际走 Worker）；绘制会话=成员笔画 +119 格→撤销逐位还原、高度会话见三十八轮、道路会话本世界不可达（paths=0=校验早退原状，逐位哈希证非回归；新建走自由层创建行）；帧 p50=1.1ms；「长按生成/liftDrag」两项验收标的已随三模式重构与拖动退役**作废**。
+  - **坑**：跨码像素对拍必须**同码序列收敛到稳定帧再比**（渐现/暖机瞬态6-9s 跳变89%曾两度误判）；broker 不吃跨进程大字节数组（页内 diff 直接炸——改文件序列+node 端比）。
+  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）/ vitest 29 文件 152 用例绿。
+
+（第三十九轮视图居中对准记录见下）；在案链：
 
 - **✓ 第三十九轮（2026-10-04 用户需求：面板展开→视图对准剩余空间中心，双收起回屏幕中心）**：
   - 实现 = **几何内缩而非相机搬家**：App `mapInset`（图层|元素任一展开 ? 栏右缘317 : 0）→ `--map-inset-l` 挂 `.view`（left 内缩）——平面/球面共用；相机不动 → 世界中心自动落在剩余空间中心；rect 相对坐标（llAt/zoom/拾取全链 `clientX-rect.left`）零改动自适配。LeftRail onState 改回传 `right`（fixed left8+实测宽）。
@@ -55,28 +65,6 @@
   - 验收：tsc/svelte-check 0；平面实测钩子 drawCount/gpuRan 跳动、gpuErr 空、lastError 空；tests 域余 2 处（造 mock 夹具保留，域外）。
   - **总进度：1✓ 2✓ 3✓ 4✓ 5◐（剩 5-c shell 协调）6◐ 7✓**。
 
-
-- **✓ 第三十三轮（2026-10-02 N选1/状态胶囊组件化 + 选中即显示）**：
-  - **N 选 1 → ModeCapsule（图标配文字）**：大陆占比四档（○小◎中●大◉特大，无档滑钮隐藏）、地图风格/投影两个 select 换胶囊；顶栏视图/工作区模式本就是胶囊 ✓。
-  - **状态 = StateCapsule 新组件**（边框+背景区分状态、图标+状态文字）：视图设置三开关（🧭🟡🔄）、边界/填充显示、检查区显隐胶囊；checkbox 全清零。**行内 L0 终稿（10-03 用户定）**：可见=👁、不可见=无图标（不用 🚫），⚙ 配置标撤销——实测 icons 与存储逐一对应、gears=0。**修极性 bug**（图层 on 误写 `!visible` → 现场两态复验：海陆=已隐藏、高度=显示中）。
-  - **选中即显示（用户原话「选中既显示，不影响显隐状态按钮」）**：`isLayerShown` 读时派生（焦点层强制显示；不写 visible、不动按钮、焦点走完回存储态）；AGENTS/RENDER_LOGIC 契约同步；像素验收=聚焦海陆显出 69.1%、收起缩回 68.8%、稳定 0；页内 compose 三态 `''→sea0 / 'landsea'→sea87`。旧「焦点不改显示」判废除（记录于契约行）。
-  - **PlanetParams 孤儿删除**（全库零引用，被 ViewSettingsPopover 取代）；⚙ 位置标记（D6 L0 徽标=「有专属生成面板」状态标，非按钮）。
-  - 同批修**两面板空白点击守卫不一致**（用户指出）：元素面板缺 `[data-row-id]` 守卫 →点展开体内文字/标签/chip 即清选闪没——收敛 shell 单源 `isRowOrControlClick`（验收=点 KV 文字双面板保选中、点真空白双面板收起）。基线：tsc 0、svelte-check 0 errors；第三十轮剪至 `docs/history/HANDOFF_LOG_2026-10-01.md`。
-
-
-- **✓ 第三十二轮（2026-10-02 球面手感 + C7 移除 + 展开区方案）**：
-  - **惯性**（用户要回）：拖动按事件估速（平滑），释放后指数衰减积分滑行（INERTIA_K=3.0、V_CUT=0.03、抓取清零接管）；验收=释放 400ms 盘面仍变 32.1% → 4.6s 仍转 → 5.2s 归零停稳、台架恒 0.1%。
-  - **极点限位**（用户定）：翻转累计绝对角钳 ±90°（极点正对相机即停），固定屏幕水平轴实现，撞墙速度归零。
-  - **删 C7 点选镜头对准**（用户拍板不需要）：Viewport reveal 块/railW prop/App 传参/planeCamera 三孤儿导出（bestDrawDxFor·revealCamTarget·startCamTween）全删（−165 行）；点选「腓尼基」回归零错。
-  - **交付并实施 `docs/EXPAND_REFACTOR_2026-10-02.md`**（8 格盘点/问题 P1–P9/L0–L3+重要×便捷矩阵/逐格规格；**D1–D8 当日拍板**：D1 折叠✓ D2 涂改归绘制✓ D3 hover✓ **D4 否决** D5 笔刷留行内✓ D6 L0 徽标✓ D7 删相邻✓ D8 隶属跳转✓，实施 `b4995bf`：图层检查 333→226px(-32%)、跳转/徽标/折叠/区间徽章/绘制滑块全验收；剩余包3 生成网格、包5 tokens；父子图层优化项 O1–O8 见 HIERARCHY §11）。
-  - 基线：tsc 0、svelte-check 0 errors（第二十五轮已剪入 `docs/history/HANDOFF_LOG_2026-10-01.md`）。
-
-- **✓ 第三十一轮（2026-10-02，步骤7 转包②：图层名标志位）**：
-  - **LayerDef 三标志（数据模型级）**：`genStrategy: 'scatter'|'heightmap'|'elements'`（缺省 elements）、`focusAfterGen`、`editsHeight`——cells/height 在 `builtinLayers` 声明，`ensureBuiltinLayers` **旧档回填**（与 kind 同策略强制同步）；读取单源 **`core/layer/flags.ts`**（genStrategyOf/editsHeightAt/defaultFocusLayerId/heightmapLayerId/editsHeightLayerId），消费点禁比 id 字符串。
-  - **landsea 身份收进 landSea 模块**（选标志位而非标志——模块本职）：`landSeaLayerRegions`/`landSeaContinentRegions`/`isLandSeaLayer` 选择器单源；`displayCompose.isFreeLayerId` = kind 版 lookup（Viewport/WD/DisplayStylePanel 三处 id 三连比较收编，DisplayName 面板补 world prop）。
-  - **迁移 ~35 处**：生成三分支（GenerateSection strategy prop/unified/generationService）、生成后聚焦（focusAfterGen，整链+单层）、worldShape 参数视图、showCellMesh（baseMesh）、高度域 UI（App 选中=区间、Viewport overlay 标签×2、WD canCreate+区间 ensure 收编 heightIntervalRegions）、flush diff/大陆中心/手动分割（选择器）、默认焦点回落（replaceWorld/删层回落=defaultFocusLayerId）、commandService 建层路径分支（isFreeLayerDef(meta)）；死码 `genLabel`/`isPath` 删；`types.ts` opacity 过时注释修正。**判定保留（注释说明）**：模块本域 id（political/heightElements/landSea 内部）、SVG 导出描边（storage 导出呈现域）、`__height__` 笔刷协议（区间元素属性驱动）。
-  - **验收**：tsc 0 / svelte-check 0 errors（5 warning 存量）；浏览器=**旧档回填读证**（恢复档 cells gs=scatter、height 三标志齐、focus=cells）+ 生成三分支面板逐一命中（撒点/生成高度图/重新生成「国家」）+ height regen（status「已重新生成：height」、焦点与 visible=focusAfterGen 路径）+ 高度层创建行禁用留搜索框 + 球面↔平面往返零错（**会话1 左轨 viewMode bug 未复现**）、`lastError` 空。**未跑测试**（纪律）。
-  - **插单批（同轮用户点名，四件）**：① 球面半圆弧竖转 90°=地球仪弯支架 → 二修定稿=**绘制另一半（镜像凸右）+ 方位实时锁定**：挂 `arcHolder` 世界组（**不挂相机**，用户定）、每帧 `rotation.y=atan2(dx,dz)` 对准相机——左右拖动弧在屏幕上纹丝不动、上下拖动照常透视旋转（竖向中点恒在正对屏幕的竖直平面内）；像素验收=横拖盘面变 49.7% 而弧统计逐位不变、竖拖 yExtent 670→617→544、洋红描点证凸右；② **球面南北极翻转对齐平面「北在上」**（根因=`core/sphere.ts` 沿用已归档 Canvas2D 时代 +y 向下约定→成对翻正 `eb88373`；`sphereOrient` 测试业务规则同步更新=用户方向即新契约；northY 探针=+1）；③ 检查展开区紧凑化（身份行内联+KV 流式+样式表头并显隐开关+嵌入去 padding，`8882c6e`——**544→333px/-39%** 信息不减、新增元素「隶属」行、图层计数标签改「元素」）。⑤ **球面交互终稿·实物地球仪模型（四修，用户「不能让星球自己转吗」点醒换模型根治）**：**相机固定**（滚轮缩放=手写（精确验证 2.384→1.4754=e^−0.48），OrbitControls 退役）；**左右拖=星球绕自转轴自转**（轴/赤道/支架=台架不随转——横拖不摆回归 ✓）、**上下拖=星球系统绕屏幕水平轴翻转**（黄道 standGroup 永不转恒水平 ✓）；三轮「环绕轴 vs 屏幕姿态」互斥死结由**转物体不转相机**溶解；弧三规格在实物模型下全部成立（横拖不摆✓俯仰=刚体翻转✓默认机位中点∈屏面✓）；验收=横拖内环20.2%/台架0.4%、竖拖内环21.1%+弧像素230→21（随架翻出带）、滚轮单事件数学精确、lastError 空（合成指针 setPointerCapture 包 try 根治污染）。lastError 空。**验证法教训：截图尺寸会中途变化（1280×720→1410×1134），像素分析必须先读 w/h 且排除顶栏/状态栏青蓝 UI（否则 bbox 被钉死在框边）；1px 细线被设备像素比稀释，颜色阈值要松+细线+暗邻域三重过滤，必要时洋红描红定位；近距机位弧超扫描带→bbox 指标饱和失真（换像素计数/带内比例）；**合成 PointerEvent 在 OrbitControls setPointerCapture 处必抛（No active pointer）→ 拖动验证只能用 CUA 真指针**；连续 reload 后 viewMemory 为 null=回默认机位（可利用做确定性 A/B）**。⑥ 高度档「高平原」→「高原」：`heightIntervals.NAMES` 改表 + `normalizeHeightIntervalElements` 载入时**名称随表单源**同步（区间=派生结构数据；边界：曾手动改过的档名会被表默认覆盖）。存量进度：容差 ✓ / 图层名标志位 **✓** / as-unknown ☐。
 
 - **◐ 第二十八轮（2026-10-01，还债 5-c 首批：App 转发器瘦身）**：
   - **审计**：双向比对 39 个 on* 赋值**零死转发**（前轮已清 canPaint/onMoveLayer 类）。

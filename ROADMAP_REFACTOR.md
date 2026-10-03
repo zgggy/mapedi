@@ -59,7 +59,10 @@
 
 - **✓ 已落地**：① `RegionIndex worldKey` → O(1)（原每次 ensure 扫全部 region.cells+拼串，拾取/悬停按帧调用=O(100k)/次 → 改 `regionsRev():长度:长度`，rev 在全部 touch* 同点 bump）；② `buildPieceParams` 每帧分配清零（regionById Map/seenFill/seenBound 跨帧 clear+复用——同步不可重入已论证，out 数组刻意保持新分配防跨帧持有）；③ decorationsLayer 每层 `regions.filter` + cellMarker `flatMap+Set` → **dataRev 键控惰性缓存**（每次编辑只重建可见层，帧内零分配）。
 - **验收**：**同状态 stash A/B（旧码 vs 新码、零交互默认态）最终 diff=0.0%**（首次 7.1% = 渐现时序，3s 后完全收敛）；帧 p50 9.7ms 无回归；tsc/svelte-check 0。
-- **✗ 缓发（含理由）**：④ 世界副本数 GL/2D 统一——副本机制是历史 bug 旋涡（硬教训1），合并需全量副本回归另立包；⑤ borderCache 键补 regionsRev——与「件环不删缓存、Δ 补丁即机制」红线冲突（键上加 rev 会把补丁作废成全量重算），运行时断言随翻转探针包一起做；⑥ flip 探针降级 debug 断言（可选项，随定向包）。
+- **缓发三项结案（2026-10-04 用户批「做」后复核）**：
+  - ④ **✓ 完成 `7eb3775`**：副本可见性双尺合一——`space.copyOffRange/copyIntersectsBox` 单一原语，worldCopyKs（世界级）与 mapRenderer 件级过滤（原 copyVisibleIn/offRangeOf 内联删）同函数；稳定帧法 stash A/B=默认态/平移态跨码均0.0%（「历史 bug 旋涡」由统一+对拍双保险收口）。
+  - ⑤ **维持原裁决（红线）**：键补 regionsRev 会把件环 Δ 补丁作废成全量重算，与「不删缓存、补丁即机制」冲突——正确形态=运行时一致性断言，随翻转探针包立项（不单独实施被否方案）。
+  - ⑥ flip 探针降级 debug 断言：同捆翻转探针包（可选项）。
 
 ### ✓ 7. 大扫除（P2）——三小包全清收口——2026-10-01 第二十九轮：死码/孤儿/两修复全清，三项存量转独立小包
 
@@ -71,7 +74,7 @@
 - **✓ 两修复**：
   - **路网清空先于早退**（已知问题）：generateRoads/generateRoutes 改**校验先于清空**——合成探针双分支实测 verdict=true（早退保留既有路网 / 正常重建照常清空）；
   - **撤销后父层残留**（5-b4 发现的预存缺口）：CommandService undo/redo 补 `materializeParentCells`，且物化实现由「从父现有并=**只加不减**」改为**精确派生（父≡∪子，AGENTS §3 字面语义）**——实测 7 对父子中 6 对恒等、唯一 extra 全为历史残留本身 → 改后**自愈**（extraNow=[]）+ 撤销逐位还原（unrestored=[]）、深度 0、零错。
-- **✓ 三小包①容差集中（2026-10-01 第三十轮）**：`core/tolerances.ts` 单源——KEY_QUANT(1e-3 键量化)/WRAP_EPS/PROJ_WRAP_EPS（**分歧可见化**：1e-3 vs 1e-2 待拍板）/GEOM_EPS(1e-12 判等·近零)/EPS_FP(1e-9)/SCALE_FLOOR/MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN；**17 文件原值迁移、零数值改动**；裸字面量收敛（1e-12 全清、cam.scale 下限族全清、键量化×1000 全清）；一次性孤值（1e-8/1e-10/1e-15）与 GLSL 内字面量留原地（模块头注明）。
+- **✓ 三小包①容差集中（2026-10-01 第三十轮）**：`core/tolerances.ts` 单源——KEY_QUANT(1e-3 键量化)/WRAP_EPS/PROJ_WRAP_EPS（**已统一千分之一**：`2aa988a` 拍板①，projCache 顶点网格同改 KEY_QUANT）/GEOM_EPS(1e-12 判等·近零)/EPS_FP(1e-9)/SCALE_FLOOR/MIN_RATIO/MIN_SEG/DEDUP_EPS/SPHERE_MIN；**17 文件原值迁移、零数值改动**；裸字面量收敛（1e-12 全清、cam.scale 下限族全清、键量化×1000 全清）；一次性孤值（1e-8/1e-10/1e-15）与 GLSL 内字面量留原地（模块头注明）。
 - **✓ 三小包② 图层名标志位（2026-10-02 第三十一轮）**：**LayerDef 三标志**（`genStrategy: 'scatter'|'heightmap'|'elements'` 缺省 elements / `focusAfterGen` / `editsHeight`）+ `ensureBuiltinLayers` 旧档回填；读取单源 `core/layer/flags.ts`，消费点禁比 id 字符串。**landsea 身份收进 landSea 模块选择器**（landSeaLayerRegions/landSeaContinentRegions/isLandSeaLayer——非标志位，模块本职）；`isFreeLayerId` kind 版 lookup 收编 Viewport/WD/DisplayNamePanel 三处 id 三连比较。迁移 ~35 处（生成三分支/生成后聚焦/worldShape/showCellMesh/高度域 UI/flush diff/大陆中心/手动分割/默认焦点回落/建层路径分支）；死码 genLabel/isPath 删；opacity 过时注释修。**判定保留**：模块本域 id（political/heightElements/landSea 内部）、SVG 导出描边（storage 注释）、`__height__` 协议。**行为零变化**；tsc/svelte-check 0；浏览器=旧档回填读证+三分支面板+height regen focusAfterGen+球面往返零错。**未跑测试**（纪律）。
 - **✓ 三小包③ `as unknown` 收敛（2026-10-03 第三十四轮）**：src 域 **25→0（grep 归零）**，六模式——缓存键定型（WeakMap 键改 MidRing[]/DisplayRing/ProjCache）、`DisplayRing extends MidRing` 协变直删桥接强转、RegionIndex 增 `reset()`、globalThis 性能钩子集中声明 `render/perfHooks.ts`（declare global 只给类型，裸名赋值 ReferenceError 已踩 → 消费点一律 `globalThis.__x`）、paths 迁移显式构造、worker 双文件 reference-lib 化；**tests 域余 2 处**（造 World/Canvas mock 夹具，保留）。**三小包全清。**
 - **验收达成部分**：grep 死码零残留 ✓；npm check 0 errors ✓（tsc/svelte-check 绿）。三项存量按拆包纪律各自立项。
@@ -126,6 +129,8 @@
 
 ## 五、变更决策记录（待拍板的架构级选项）
 
+- **2026-10-04 用户决议批（8项）**：①精度统一千分之一 ✓`2aa988a` ②地图模式三按钮+投影动画=**维持现状** ③尸体数据（exclusiveColor+外交）**删** ✓`d0b3aa5` ④步骤6缓发=**做**（④✓`7eb3775`、⑤⑥按红线/同捆结案见上）⑤全量测试=**跑** ✓152绿 ⑥验收三件=**做** ✓（见待验收行）⑦路径生成 R7=**先不做** ⑧12条UI提案=**不要了**。
+
 - **地图模式三按钮 + 投影动画**（墨卡托基准烘焙 + LUT 插值）：待用户拍板，见记忆与 HANDOFF 日志第五十九次前后讨论。
 - **图集三选一**：已被 ✗（见上）。
 - **全新父子层级系统设计（2026-10-02）**：`docs/HIERARCHY_DESIGN_2026-10-02.md` —— 层显示树/生成单元源/元素行政树三处真相收敛为**一片层森林 + 一片元素森林**（`parentLayerId` 单源、units=子层、桥不变量 I-bridge），并含焦点整段叠放修复、读时有效显隐、删除策略表、元素 UI 重设计（承接 2026-10-01「子元素先删之后重设计」原话）。**已拍（2026-10-03 用户委托全按推荐实施）并全部落地**：包1 层级内核 `c4ba324` → 包2 显示 `1980fdc` → 包3 生成 `268b307`（逐位哈希相等）→ 包4 元素 UI `b01c906`（子元素逐跳+手动挂靠）；读档修复/删除策略表/双路径清账（regionOps 溶解）齐。**吸收 GEN_UNIFIED_DESIGN §6 引擎包**（指针方向反转：genParent 改为从 parentLayerId 派生）。
@@ -146,4 +151,4 @@
 - **✓ U3 完成（2026-09-30，`04dcff1`+`e492241`）**：C7 有效视口（选中遮挡区 180ms easeOut 拉回；修 `viewportRoot` 未绑定、tween 漏 `requestRender` 两处根因）+ 生成段按层补全（非 height 层 params 类型化控件 + regenLayer、无配置层禁用、height 原样）+ 草稿持久化（mapedi.ui.gen 500ms 防抖）。浏览器端到端验证过（按层面板/草稿回读/遮挡判定+tween 帧数断言）。
 - **✓ 四把手重排包（2026-09-30 第三轮需求，`6ceb132`）**：左栏=图层把手+绘制/生成/显示三把手（FoldHandle 单源）+列表；**生成三分支**（cells=重新撒点 / height=生成高度图+海陆删旧建新 / 普通 regen / 路径禁用）；⚙ 移模式胶囊右、视图面板 3d/2d 互斥、星球组迁回；搜索按钮化；紧凑统一。配套架构设计：**`docs/GEN_UNIFIED_DESIGN.md`**（genParent 单源/递归/CASCADE 推导——引擎包待过目）。
 - **✓ 三模式双树包（2026-09-30 第四轮 E1-E5，`fc827ce`）**：**取代四把手结构**（需求演进非缺陷）——检查/生成/绘制 tab + 双树行级展开区 + C1 二修（推导式会话）+ 右键收敛（三 popover 退役）+ 平面编辑更名 + 球面锁。后续：**包2 新绘制语义（范围/自动扩展/笔刷类型）= 还债步骤 1 命令化后**；**包3 元素级生成 = 生成引擎包后**（GEN_UNIFIED_DESIGN §6）。
-- **待验收**：100k 性能回归、非 height 层长按生成、liftDrag/绘制会话全量回归（用户验收轮）。~~引擎包~~已随 HIERARCHY 包3 落地；**海陆案 A ✓（2026-10-03 `fc8664e` 产品级删除 landsea，-1171 行）**。
+- **验收轮已执行（2026-10-04 批6）**：100k 主线程 scratch 基准=总7.96s（create5.92/cascade1.90/serialize0.14，UI 走 Worker 另测）；绘制会话=高度+成员笔画 commit→undo 逐位还原 ✓、帧 p50=1.1ms；**「长按生成」「liftDrag」两项标的已随三模式重构/拖动退役作废**（替代=非 height 层按钮生成 E2E ✓）；道路会话本世界 paths=0 不可达（校验早退原状，哈希证非回归）。~~引擎包~~已随 HIERARCHY 包3 落地；**海陆案 A ✓（`fc8664e`）**。
