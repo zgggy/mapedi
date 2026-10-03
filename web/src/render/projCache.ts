@@ -1,4 +1,4 @@
-import { PROJ_WRAP_EPS } from '../core/tolerances';
+import { PROJ_WRAP_EPS, KEY_QUANT } from '../core/tolerances';
 import type { LonLat, World } from '../core/types';
 import {
   project,
@@ -28,13 +28,14 @@ function cacheKey(world: World, proj: ProjectionId, pp: ProjectionParams): strin
   return `${world.meta.seed}:${world.meta.cellCount}:${world.cells.length}:${proj}:${pp.centralMeridian}:${pp.aeqdCenter.lon}:${pp.aeqdCenter.lat}`;
 }
 
-/** 显示用顶点键：0.01° 网格 + ±180 缝（合并浮点微差，角点必须同一 id） */
+/** 显示用顶点键：**千分之一度网格（= KEY_QUANT 单源，2026-10-04 拍板统一）+ ±180 缝
+ * （合并浮点微差，角点必须同一 id）；缝吸附与环键同值（PROJ_WRAP_EPS=WRAP_EPS）。 */
 function vertKey(ll: LonLat): string {
   let lon = ll.lon;
   while (lon > 180) lon -= 360;
   while (lon < -180) lon += 360;
   if (Math.abs(lon) >= 180 - PROJ_WRAP_EPS) lon = 180;
-  return `${Math.round(lon * 100)},${Math.round(ll.lat * 100)}`;
+  return `${Math.round(lon * KEY_QUANT)},${Math.round(ll.lat * KEY_QUANT)}`;
 }
 
 type Vert = { x: number; y: number };
@@ -42,7 +43,7 @@ type Vert = { x: number; y: number };
 /**
  * 问题：同一角点在不同 cell 里投影/unwrap 不一致 → 顶点对不上、真缝。
  * 原理：
- * 1) **合并顶点表**（0.01°）→ 同一角点同一 (x,y)
+ * 1) **合并顶点表**（千分之一度=KEY_QUANT）→ 同一角点同一 (x,y)
  * 2) 每 cell 在表坐标上 **沿环连续 unwrap**（多边形不断）
  * 3) 整格平移 2π 对齐到 wrapPeriod(中心)，跨日界线不拆邻接
  */
