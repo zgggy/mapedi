@@ -188,18 +188,21 @@ describe('真实世界环不变量（600 cell 生成世界）', () => {
     return { rings, closed };
   };
 
-  it('同件各环同周期窗（副本平铺不互相抵消）', () => {
+  // 规则变更（ad3f72b 缝环闭合表决，2026-09-30 用户裁决收工）：闭合切口改为
+  // 「|规范经度| 最大处按环独立展开」——**环与环的窗口不再强制同窗**（旤断言
+  // cx 同窗已随设计作废；正确性由跨实例周期平铺保证，当时以像素 XOR112/112
+  // 横截面验证）。保留真正承重的不变量：**单环内部连续**——相邻点无周期跳变
+  // （环内跳变 = even-odd 自破洞的根源）。
+  it('单环内部无周期跳变（环内连续，ad3f72b 后规则）', () => {
     for (const cells of landSets) {
       const { rings } = buildClosed(cells);
-      if (rings.length < 2) continue;
-      const cx = (r: { pts: { x: number; y: number }[] }) => {
-        let mn = Infinity, mx = -Infinity;
-        for (const p of r.pts) { if (p.x < mn) mn = p.x; if (p.x > mx) mx = p.x; }
-        return (mn + mx) / 2;
-      };
-      const ref = cx(rings[0]);
-      for (let i = 1; i < rings.length; i++) {
-        expect(Math.abs(cx(rings[i]) - ref)).toBeLessThan(PERIOD / 2);
+      if (rings.length < 1) continue;
+      for (const r of rings) {
+        let maxJump = 0;
+        for (let i = 1; i < r.pts.length; i++) {
+          maxJump = Math.max(maxJump, Math.abs(r.pts[i].x - r.pts[i - 1].x));
+        }
+        expect(maxJump).toBeLessThan(PERIOD / 2);
       }
     }
   });
