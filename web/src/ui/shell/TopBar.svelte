@@ -3,6 +3,7 @@
    * 顶栏（设计稿 §2）：三组悬浮件——模式胶囊（居中）· 世界名菜单 · ⚙ 视图设置。
    * 常驻、不随面板开合变化；所有弹出层挂 body 级（§4 portal），不被面板 overflow 截断。
    */
+  import { editor } from '../../app/store.svelte';
   import ModeCapsule from './ModeCapsule.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import ViewSettingsPopover from './ViewSettingsPopover.svelte';
@@ -15,8 +16,6 @@
     autosaveAt = '',
     onExport,
     onImport,
-    onClearCache,
-    onRename,
     projection = 'robinson',
     onProjection,
     styleId = 'dark',
@@ -38,8 +37,6 @@
     autosaveAt?: string;
     onExport: (kind: 'json' | 'gz' | 'png' | 'svg') => void;
     onImport: (kind: string, file: File) => void;
-    onClearCache: () => void;
-    onRename: (name: string) => void;
     projection?: string;
     onProjection?: (p: string) => void;
     styleId?: string;
@@ -99,7 +96,7 @@
     if (!renaming) return;
     renaming = false;
     const v = draft.trim();
-    if (v && v !== worldName) onRename(v);
+    if (v && v !== worldName) editor.renameWorld(v);
   }
   function cancelRename() {
     renaming = false;
@@ -113,7 +110,7 @@
     { id: 'png', label: '导出 PNG', action: () => onExport('png') },
     { id: 'svg', label: '导出 SVG', action: () => onExport('svg') },
     { id: 'import', label: '导入…', action: () => fileInput?.click() },
-    { id: 'clear', label: '清除自动存档', danger: true, action: () => onClearCache() },
+    { id: 'clear', label: '清除自动存档', danger: true, action: () => editor.clearAutosave() },
   ]);
 </script>
 

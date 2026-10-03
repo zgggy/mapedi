@@ -14,7 +14,7 @@ import { createRng } from '../core/rng';
 import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
-import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID } from '../core/layer/flags';
+import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID, editsHeightAt } from '../core/layer/flags';
 import { childLayerIdOf } from '../core/hierarchy/derive';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
@@ -602,6 +602,35 @@ export class EditorStore {
     this.selectedRegionId = null;
     if (this.draw.active && this.draw.targetRegionId === '__path__') {
       this.draw = { ...this.draw, active: false, targetRegionId: null };
+    }
+    this.notify();
+  }
+
+  /**
+   * 元素选中（列表单击/画布反选同语义；5-c 自 App 下沉 2026-10-03）：
+   * 高度域层 → 选中区间=工作区间；普通层 → 聚焦其层并选中。
+   */
+  selectElement(id: string | null): void {
+    if (id === null) {
+      this.selectedRegionId = null;
+      this.notify();
+      return;
+    }
+    const world = this.world;
+    if (editsHeightAt(world, this.focusLayer)) {
+      this.setHeightInterval(id);
+      this.selectedRegionId = id;
+      this.notify();
+      return;
+    }
+    this.selectedRegionId = id;
+    const reg = world?.regions.find((r) => r.id === id);
+    if (reg) {
+      this.selectLayerTop(reg.layerId);
+      this.selectedRegionId = id;
+      this.status = `选中「${reg.name}」`;
+      this.notify();
+      return;
     }
     this.notify();
   }

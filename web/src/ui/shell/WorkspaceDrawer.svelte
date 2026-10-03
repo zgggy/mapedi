@@ -6,6 +6,7 @@
    * 选中即进入绘制；空白点击/Esc 收起。右键菜单：复制一个、删除。
    * 内滚：.grid overflow-y auto。组织模式展开区只有上移/下移（无缩进/提升）。
    */
+  import { editor } from '../../app/store.svelte';
   import { tick } from 'svelte';
   import type { Region, World } from '../../core/types';
   import { rebuildHeightIntervalElements, heightIntervalRegions } from '../../core/layer/heightElements';
@@ -30,16 +31,7 @@ import { isRowOrControlClick } from './shell';
     brushRadius = 1.5,
     newName = '',
     taskMode = 'check',
-    onSelect,
-    onDelete,
-    onPaintValue,
-    onRadius,
-    onCreate,
-    onRandomName,
-    onNewName,
-    onOrganize,
-    onMoveItem,
-    onCopyItem,
+
     layerPanel,
     elementPanel,
     mode = 'plane',
@@ -53,21 +45,11 @@ import { isRowOrControlClick } from './shell';
     newName?: string;
     /** 工作区三模式（2026-09-30 拍板：检查 / 生成 / 绘制；胶囊已上移至左栏顶） */
     taskMode?: 'check' | 'gen' | 'draw' | 'organize';
-    onSelect: (id: string | null) => void;
-    onDelete: (id: string) => void;
     /** 区间型元素滑块联动：涂改值 = 滑块数字（滑块在展开内容，第十一轮） */
-    onPaintValue?: (id: string, value: number) => void;
-    onRadius?: (v: number) => void;
-    onCreate?: (name: string) => void;
     /** 随机名（返回生成的名字，顶层文本框回填；同时写全局供子级创建框） */
-    onRandomName?: () => string;
-    onNewName?: (v: string) => void;
     /** 组织模式四操作（拖动已退役，2026-09-30） */
-    onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string) => void;
     /** 右键菜单：上移/下移一层（dir=-1 上移） */
-    onMoveItem?: (id: string, dir: -1 | 1) => void;
     /** 右键菜单：复制一个 */
-    onCopyItem?: (id: string) => void;
     /** 图层树聚焦行下方的模式展开内容（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     layerPanel?: import('svelte').Snippet;
     /** 元素树选中行下方的模式展开内容（检查=InspectSection / 生成=元素级生成占位；绘制=本地绘制参数区） */
@@ -197,7 +179,7 @@ import { isRowOrControlClick } from './shell';
   }
   function onSliderValue(id: string, v: number) {
     paintValues[id] = v;
-    onPaintValue?.(id, v);
+    editor.setHeightPaint(id, v);
   }
 
   function toggleExpand(id: string) {
@@ -213,8 +195,8 @@ import { isRowOrControlClick } from './shell';
    * 双击不再有独立语义（原「双击进绘制」退役——绘制入口 = 绘制模式）。
    */
   function handleSelect(id: string) {
-    if (selectedRegionId === id) onSelect(null); // 再点收起 = 单开互斥
-    else onSelect(id);
+    if (selectedRegionId === id) editor.selectElement(null); // 再点收起 = 单开互斥
+    else editor.selectElement(id);
     const r = world?.regions.find((x) => x.id === id);
     if (r && selectedRegionId !== id && canExpand(r)) toggleExpand(id);
   }
@@ -222,7 +204,7 @@ import { isRowOrControlClick } from './shell';
   /** 点击面板空白处 = 无选中元素 = 收起（绘制退出由 App 推导）；守卫与图层面板同源 */
   function onBlankClick(e: MouseEvent) {
     if (isRowOrControlClick(e)) return;
-    if (selectedRegionId) onSelect(null);
+    if (selectedRegionId) editor.selectElement(null);
   }
 
   // —— 右键菜单 ——
@@ -238,14 +220,14 @@ import { isRowOrControlClick } from './shell';
         id: 'copy',
         label: derived ? '复制一个（派生项不可复制）' : '复制一个',
         disabled: derived,
-        action: () => onCopyItem?.(id),
+        action: () => editor.copyItem(id),
       },
       {
         id: 'del',
         label: derived ? '删除（派生项不可删）' : '删除',
         danger: !derived,
         disabled: derived,
-        action: () => onDelete(id),
+        action: () => { editor.selectedRegionId = id; editor.deleteSelected(); },
       },
     ];
     menu = { x: e.clientX, y: e.clientY, items };
@@ -307,11 +289,13 @@ import { isRowOrControlClick } from './shell';
             canCreate={mode === 'plane' && !isHeight}
             onNewName={(v) => (text = v)}
             onRandom={() => {
-              const n = onRandomName?.();
+              const n = editor.randomName(editor.focusLayer === 'province' ? 'province' : 'country');
+              editor.newName = n;
               if (n) text = n;
             }}
             onCreate={() => {
-              onCreate?.(text);
+              editor.newName = text;
+              editor.createRegion(editor.focusLayer);
               text = '';
             }}
           />
@@ -338,7 +322,7 @@ import { isRowOrControlClick } from './shell';
           content={body}
           onClick={() => {
             handleSelect(id);
-            if (ia && taskMode === 'draw') onPaintValue?.(id, paintValueOf(id, ia));
+            if (ia && taskMode === 'draw') editor.setHeightPaint(id, paintValueOf(id, ia));
           }}
           onMenu={(e) => openMenu(e, id)}
         />
@@ -369,7 +353,7 @@ import { isRowOrControlClick } from './shell';
                   first={flags.first}
                   last={flags.last}
                   top={flags.top}
-                  onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', id)}
+                  onMove={(dir) => editor.organize(dir === -1 ? 'up' : 'down', id)}
                 />
               {:else if taskMode === 'draw'}
                 <!-- 2026-10-01：去框去说明——只留控件（状态栏已有操作指引） -->
@@ -398,7 +382,7 @@ import { isRowOrControlClick } from './shell';
                       value={brushRadius}
                       label="笔刷宽度"
                       width={130}
-                      onInput={(v) => onRadius?.(v)}
+                      onInput={(v) => (editor.draw = { ...editor.draw, radiusDeg: v })}
                     />
                     <span class="dim">{brushRadius.toFixed(1)}°</span>
                   </label>
@@ -449,7 +433,7 @@ import { isRowOrControlClick } from './shell';
                 first={flags.first}
                 last={flags.last}
                 top={flags.top}
-                onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', p.id)}
+                onMove={(dir) => editor.organize(dir === -1 ? 'up' : 'down', p.id)}
               />
             {/if}
           {/snippet}

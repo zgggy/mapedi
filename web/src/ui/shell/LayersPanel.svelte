@@ -8,6 +8,7 @@
    * - 内滚：.grid overflow-y auto（第十一轮根治「不能滚动」）。
    * 右键菜单：复制一个、删除。
    */
+  import { editor } from '../../app/store.svelte';
   import { tick } from 'svelte';
   import { LAYER_META } from '../workbench/layerMeta';
   import type { World } from '../../core/types';
@@ -23,34 +24,21 @@ import { isRowOrControlClick } from './shell';
   let {
     world,
     focusLayer = 'cells',
-    onSelect,
-    onDrawLayer,
-    onAddLayer,
-    onRandomName,
-    onCopyLayer,
-    onDeleteLayer,
+
     expandPanel,
     taskMode = 'check',
-    onOrganize,
   }: {
     world: World | null;
     focusLayer?: string;
     /** 工作区模式（组织 = 上移/下移/缩进/提升面板，替代已退役的拖动） */
     taskMode?: 'check' | 'gen' | 'draw' | 'organize';
     /** 组织四操作（App 转发 store） */
-    onOrganize?: (action: 'up' | 'down' | 'indent' | 'unindent', id: string, anchorId?: string | null) => void;
     /** 单击选中（并置顶显示） */
-    onSelect?: (id: string) => void;
     /** 选中（C1：单击只聚焦，不进绘制） */
-    onDrawLayer?: (id: string) => void;
     /** 创建（带本面板文本；store 内部清空自身 newName） */
-    onAddLayer?: (name: string) => void;
     /** 随机名（返回生成的名字，本面板回填文本框） */
-    onRandomName?: () => string;
     /** 右键菜单：复制一个 */
-    onCopyLayer?: (id: string) => void;
     /** 右键菜单：删除 */
-    onDeleteLayer?: (id: string) => void;
     /** 聚焦行下方的模式展开区（检查=InspectSection / 生成=GenerateSection / 绘制=不传=空） */
     expandPanel?: import('svelte').Snippet;
   } = $props();
@@ -159,9 +147,9 @@ import { isRowOrControlClick } from './shell';
   function openMenu(e: MouseEvent, id: string) {
     // 简化（2026-09-30 拍板 3）：显隐 → 行内 eye；信息/显示参数 → 检查模式展开区；
     // 上移/下移 → 组织模式行内四钮（拖动已退役）。只留无其他入口的复制/删除。
-    const items: MenuItem[] = [{ id: 'copy', label: '复制一个', action: () => onCopyLayer?.(id) }];
+    const items: MenuItem[] = [{ id: 'copy', label: '复制一个', action: () => editor.copyItem(id) }];
     if (id.startsWith('custom-')) {
-      items.push({ id: 'del', label: '删除', danger: true, action: () => onDeleteLayer?.(id) });
+      items.push({ id: 'del', label: '删除', danger: true, action: () => editor.deleteItem(id) });
     } else {
       items.push({ id: 'del', label: '删除（内置层不可删）', disabled: true });
     }
@@ -184,16 +172,17 @@ import { isRowOrControlClick } from './shell';
   function handleSelect(id: string) {
     if (focusLayer === id) {
       // 再点已聚焦行 = 收起（对称单开：聚焦取消 → 行展开区消失、工作区回空态提示）
-      onSelect?.('');
+      editor.clearLayerSelection();
       return;
     }
-    onSelect?.(id);
-    onDrawLayer?.(id);
+    editor.selectLayerTop(id);
+    // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐在检查模式展开区（第八轮）
+    editor.focusLayerForDraw(id);
   }
 
   function onBlankClick(e: MouseEvent) {
     if (isRowOrControlClick(e)) return;
-    onSelect?.('');
+    editor.clearLayerSelection();
   }
 
 </script>
@@ -208,11 +197,12 @@ import { isRowOrControlClick } from './shell';
       newName={text}
       onNewName={(v) => (text = v)}
       onRandom={() => {
-        const n = onRandomName?.();
+        const n = editor.randomLayerName();
+        editor.newName = n;
         if (n) text = n;
       }}
       onCreate={() => {
-        onAddLayer?.(text);
+        editor.addLayer(text);
         text = '';
       }}
     />
@@ -237,9 +227,9 @@ import { isRowOrControlClick } from './shell';
             last={!sib.next}
             top={!row.parentId}
             indentable={sib.canIndent}
-            onMove={(dir) => onOrganize?.(dir === -1 ? 'up' : 'down', row.id)}
-            onIndent={() => onOrganize?.('indent', row.id, sib.aboveId)}
-            onUnindent={() => onOrganize?.('unindent', row.id)}
+            onMove={(dir) => editor.organize(dir === -1 ? 'up' : 'down', row.id)}
+            onIndent={() => editor.organize('indent', row.id, sib.aboveId)}
+            onUnindent={() => editor.organize('unindent', row.id)}
           />
         {/snippet}
         <ItemButton

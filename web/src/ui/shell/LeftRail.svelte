@@ -6,6 +6,7 @@
    * ② 图层面板 ③ 元素面板（原“工作区”改名）——均为 ExpandPanel 单体（把手自身展开，
    *    不在下面另加面板）；块间 8px；开合本地 state + 持久化；宽度经 onState 回传（C7）。
    */
+  import { editor } from '../../app/store.svelte';
   import type { Snippet } from 'svelte';
   import ModeCapsule from './ModeCapsule.svelte';
   import ExpandPanel from './ExpandPanel.svelte';
@@ -17,8 +18,6 @@
     taskMode = 'check',
     globeLocked = false,
     onTaskMode,
-    onUndo,
-    onRedo,
     onState,
   }: {
     /** 图层面板内容（列表 + 聚焦行展开区） */
@@ -28,8 +27,6 @@
     taskMode?: 'check' | 'gen' | 'draw';
     globeLocked?: boolean;
     onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
-    onUndo?: () => void;
-    onRedo?: () => void;
     /** 面板开合 + 实测宽度回传（App 用于 C7 遮挡宽与高度标注条件） */
     onState?: (s: { layersOpen: boolean; wsOpen: boolean; width: number }) => void;
   } = $props();
@@ -76,8 +73,8 @@
       segMinW={46}
       disabledWhen={(id) => globeLocked && id !== 'check'}
     />
-    <button type="button" class="round" title="撤销 (Ctrl+Z)" aria-label="撤销" onclick={() => onUndo?.()}>↶</button>
-    <button type="button" class="round" title="重做 (Ctrl+Y)" aria-label="重做" onclick={() => onRedo?.()}>↷</button>
+    <button type="button" class="round" title="撤销 (Ctrl+Z)" aria-label="撤销" onclick={() => editor.undo()}>↶</button>
+    <button type="button" class="round" title="重做 (Ctrl+Y)" aria-label="重做" onclick={() => editor.redo()}>↷</button>
   </div>
 
   <!-- ② 图层面板 ③ 元素面板：同一 ExpandPanel 单体、只换内容 -->

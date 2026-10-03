@@ -5,11 +5,13 @@
    *
    * **生成 = 针对焦点层的三分支（读 `LayerDef.genStrategy`，禁比 id 字符串）**：
    * - `scatter`（cells）→ 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
-   * - `heightmap`（height）→ 「生成高度图」：只重跑地形 + 海陆删旧建新（onRegen(layerId)）
-   * - `elements`（缺省）有 profile params → 单层再生成（onRegen；params 类型化控件）
+   * - `heightmap`（height）→ 「生成高度图」：只重跑地形 + 海陆删旧建新（editor.regenLayer）
+   * - `elements`（缺省）有 profile params → 单层再生成（regenLayer；params 类型化控件）
    * - 路径类生成方法待设计（GEN R7）：暂无专属策略值，走 elements 分支（行为保持）
    * 防误触由「须先切生成模式」承担（原 D5 长按把手随把手架构退役）。
    */
+  import { editor } from '../../app/store.svelte';
+  import { heightmapLayerId } from '../../core/layer/flags';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ModeCapsule from './ModeCapsule.svelte';
   import StateCapsule from './StateCapsule.svelte';
@@ -30,9 +32,6 @@
     freeform = false,
     layerParams = null as Record<string, number | string | boolean> | null,
     onGenerate,
-    onShape,
-    onRegen,
-    onParam,
   }: {
     generating?: boolean;
     genProgress?: number;
@@ -40,7 +39,7 @@
     seedInput?: string;
     densityInput?: number;
     shape?: WorldShape | null;
-    /** 焦点层 id（onRegen 目标；分支判定走 strategy） */
+    /** 焦点层 id（regen 目标；分支判定走 strategy） */
     layerId?: string;
     layerName?: string;
     /** 该层生成策略（App 经 core/layer/flags 取，单源） */
@@ -51,11 +50,11 @@
     layerParams?: Record<string, number | string | boolean> | null;
     /** 整世界重建（仅 scatter 层走此入口） */
     onGenerate: (seed: number, n: number) => void;
-    onShape?: (key: keyof WorldShape, value: number | string | boolean) => void;
+
     /** 单层再生成（store.regenLayer；heightmap 会连带删旧建新海陆） */
-    onRegen?: (layerId: string) => void;
+
     /** 单层参数写回（store.setProfileParam，已含草稿防抖持久化） */
-    onParam?: (key: string, value: number | string | boolean) => void;
+
   } = $props();
 
   const isScatter = $derived(strategy === 'scatter');
@@ -91,10 +90,18 @@
   /** 当前值落档（不精确匹配 → '' → 滑钮隐藏，不冒充任何档） */
   const tierId = (v: number) => LAND_TIERS.find((t) => Math.abs(Number(t.id) - v) < 0.005)?.id ?? '';
 
+  /** 动作下沉（5-c，2026-10-03）：地形参数始终写高度层 profile；布局参数写本层 profile */
+  function setShape(k: keyof WorldShape, v: number | string | boolean): void {
+    editor.setProfileParam(heightmapLayerId(editor.world?.layers ?? []), k, v);
+  }
+  function setParam(k: string, v: number | string | boolean): void {
+    editor.setProfileParam(layerId, k, v);
+  }
+
   function fire() {
     if (generating || !canGen) return;
     if (isScatter) onGenerate(Number(seedInput) || 1, densityInput);
-    else onRegen?.(layerId);
+    else editor.regenLayer(layerId);
   }
 </script>
 
@@ -112,30 +119,30 @@
           <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 重新撒点</button>
         </div>
         <div class="hint">撒点将重建整个世界（高度、海陆及所有图层元素）</div>
-        {#if shape && onShape}
+        {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
             <label class="tcell wide"><span>大陆占比</span>
               <ModeCapsule
                 value={tierId(shape.landRatio)}
-                onChange={(id) => onShape('landRatio', Number(id))}
+                onChange={(id) => setShape('landRatio', Number(id))}
                 items={LAND_TIERS}
                 ariaLabel="大陆占比"
                 segMinW={46}
               />
             </label>
             <label class="tcell"><span>落差</span>
-              <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
+              <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => setShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
             </label>
-            <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => onShape('continentScale', v)} /></label>
-            <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => onShape('coastBreak', v)} /></label>
-            <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => onShape('mountain', v)} /></label>
-            <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => onShape('detail', v)} /></label>
-            <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => onShape('seaRugged', v)} /></label>
-            <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => onShape('flatness', v)} /></label>
-            <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => onShape('latBias', v)} /></label>
+            <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => setShape('continentScale', v)} /></label>
+            <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => setShape('coastBreak', v)} /></label>
+            <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => setShape('mountain', v)} /></label>
+            <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => setShape('detail', v)} /></label>
+            <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => setShape('seaRugged', v)} /></label>
+            <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => setShape('flatness', v)} /></label>
+            <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
             <label class="tcell"><span>侵蚀</span>
-              <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
+              <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
             </label>
           </div>
         {/if}
@@ -146,30 +153,30 @@
           <button type="button" class="primary" disabled={generating} onclick={fire}>⛰️ 生成高度图</button>
         </div>
         <div class="hint">按下方地形参数重跑地形（种子不变 = 同参同果）；海陆元素删旧建新</div>
-        {#if shape && onShape}
+        {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
             <label class="tcell wide"><span>大陆占比</span>
               <ModeCapsule
                 value={tierId(shape.landRatio)}
-                onChange={(id) => onShape('landRatio', Number(id))}
+                onChange={(id) => setShape('landRatio', Number(id))}
                 items={LAND_TIERS}
                 ariaLabel="大陆占比"
                 segMinW={46}
               />
             </label>
             <label class="tcell"><span>落差</span>
-              <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => onShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
+              <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => setShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
             </label>
-            <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => onShape('continentScale', v)} /></label>
-            <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => onShape('coastBreak', v)} /></label>
-            <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => onShape('mountain', v)} /></label>
-            <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => onShape('detail', v)} /></label>
-            <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => onShape('seaRugged', v)} /></label>
-            <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => onShape('flatness', v)} /></label>
-            <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => onShape('latBias', v)} /></label>
+            <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => setShape('continentScale', v)} /></label>
+            <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => setShape('coastBreak', v)} /></label>
+            <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => setShape('mountain', v)} /></label>
+            <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => setShape('detail', v)} /></label>
+            <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => setShape('seaRugged', v)} /></label>
+            <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => setShape('flatness', v)} /></label>
+            <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
             <label class="tcell"><span>侵蚀</span>
-              <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => onShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
+              <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
             </label>
           </div>
         {/if}
@@ -180,7 +187,7 @@
           <span class="bh-t">重新生成「{layerName}」</span>
           {#if freeform}<span class="rb">生成方法待设计（GEN R7）</span>{/if}
         </div>
-        {#if layerParams && onParam}
+        {#if layerParams}
           <div class="prow-wrap">
             {#each Object.entries(layerParams).filter(([k]) => k !== 'fromLayerId') as [k, v] (k)}
               {#if typeof v === 'boolean'}
@@ -191,7 +198,7 @@
                     onText="开"
                     offText="关"
                     on={v}
-                    onchange={(nv) => onParam(k, nv)}
+                    onchange={(nv) => setParam(k, nv)}
                   /></span
                 >
               {:else if typeof v === 'number'}
@@ -206,7 +213,7 @@
                       const r = PARAM_RANGE[k];
                       const n = Number(e.currentTarget.value);
                       if (!Number.isNaN(n)) {
-                        onParam(k, r ? Math.max(r.min, Math.min(r.max, n)) : n);
+                        setParam(k, r ? Math.max(r.min, Math.min(r.max, n)) : n);
                       }
                     }}
                   /></label
@@ -214,7 +221,7 @@
               {:else}
                 <label class="sm"
                   >{PARAM_LABELS[k] ?? k}
-                  <input value={String(v)} onchange={(e) => onParam(k, e.currentTarget.value)} /></label
+                  <input value={String(v)} onchange={(e) => setParam(k, e.currentTarget.value)} /></label
                 >
               {/if}
             {/each}

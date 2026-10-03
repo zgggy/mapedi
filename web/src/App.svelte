@@ -12,7 +12,7 @@
   import LeftRail from './ui/shell/LeftRail.svelte';
   import { clearViewMemory } from './ui/viewMemory';
   import { isLayerShown, isFreeLayerId } from './core/displayCompose';
-  import { genStrategyOf, editsHeightAt, editsHeightLayerId, heightmapLayerId } from './core/layer/flags';
+  import { genStrategyOf, editsHeightAt, editsHeightLayerId } from './core/layer/flags';
   import LayersPanel from './ui/shell/LayersPanel.svelte';
   import WorkspaceDrawer from './ui/shell/WorkspaceDrawer.svelte';
   import StatusBar from './ui/shell/StatusBar.svelte';
@@ -69,31 +69,6 @@
    * 选中元素（C1）：**只选中，不武装笔刷**——列表单击与画布反选共用同一语义。
    * id = null（列表空白点击）= 清空选中；画布点空白则不动作（onpick 自行短路）。
    */
-  function selectElement(id: string | null) {
-    if (id === null) {
-      editor.selectedRegionId = null;
-      editor.notify();
-      return;
-    }
-    // 高度域层（editsHeight）：选中区间 = 工作区间（与其它层同一列表）
-    if (editsHeightAt(world, focusLayer)) {
-      editor.setHeightInterval(id);
-      editor.selectedRegionId = id;
-      editor.notify();
-      return;
-    }
-    editor.selectedRegionId = id;
-    const reg = world?.regions?.find((r) => r.id === id);
-    if (reg) {
-      editor.selectLayerTop(reg.layerId);
-      editor.selectedRegionId = id;
-      editor.status = `选中「${reg.name}」`;
-      editor.notify();
-      return;
-    }
-    editor.notify();
-  }
-
   /** C1 画布反选：cell → 焦点层包含归属 → 与列表单击同语义 */
   function pickElement(cellId: number | null) {
     if (cellId === null || !world) return;
@@ -102,7 +77,7 @@
       const r = world.regions.find((x) => x.id === id);
       if (r?.layerId === focusLayer) hit = id; // 同层多归属时取列表末（与叠放一致）
     }
-    if (hit) selectElement(hit);
+    if (hit) editor.selectElement(hit);
   }
 
   /**
@@ -315,7 +290,6 @@
     onSwitchView={switchView}
     worldName={world?.meta.name || (world?.meta ? `世界 ${world.meta.seed}` : '未命名世界')}
     autosaveAt={editor.autosaveAt}
-    onRename={(n) => editor.renameWorld(n)}
     onExport={(k) => {
       if (k === 'json') editor.exportJson();
       else if (k === 'gz') editor.exportGz();
@@ -330,7 +304,6 @@
         if (editor.status.startsWith('已导入')) bootError = '';
       }
     }}
-    onClearCache={() => editor.clearAutosave()}
     {styleId}
     onStyle={(s) => (styleId = s)}
     projection={projection}
@@ -368,9 +341,6 @@
         strategy={focusStrategy}
         freeform={!!world && isFreeLayerId(world, focusLayer)}
         layerParams={focusStrategy === 'heightmap' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
-        onShape={(k, v) => editor.setProfileParam(heightmapLayerId(world?.layers), k, v)}
-        onRegen={(id) => editor.regenLayer(id)}
-        onParam={(k, v) => editor.setProfileParam(focusLayer, k, v)}
         onGenerate={(s, n) => {
           bootError = '';
           // 重新生成完成 → 进入球面展示（用户定）
@@ -396,24 +366,8 @@
   <LayersPanel
     {world}
     {focusLayer}
-    onSelect={(id) => {
-      if (!id) {
-        editor.clearLayerSelection();
-        return;
-      }
-      editor.selectLayerTop(id);
-    }}
-    onDrawLayer={(id) => {
-      // 图层行点击 = 聚焦 + 工作区切换上下文（§3.2）；显隐在检查模式展开区（第八轮）
-      editor.focusLayerForDraw(id);
-    }}
-    onOrganize={(action, id, anchorId) => editor.organize(action, id, anchorId)}
     taskMode={shell.wsMode}
-    onAddLayer={(n) => editor.addLayer(n)}
-    onRandomName={() => (editor.newName = editor.randomLayerName())}
     expandPanel={layerExpand}
-    onCopyLayer={(id) => editor.copyItem(id)}
-    onDeleteLayer={(id) => editor.deleteItem(id)}
   />
   {/snippet}
 
@@ -432,27 +386,6 @@
     bind:expandedIds
     drawActive={draw.active}
     brushRadius={draw.radiusDeg}
-    onSelect={selectElement}
-    onDelete={(id) => {
-      editor.selectedRegionId = id;
-      editor.deleteSelected();
-    }}
-    onPaintValue={(id, v) => editor.setHeightPaint(id, v)}
-    onRadius={(v) => {
-      editor.draw = { ...editor.draw, radiusDeg: v };
-    }}
-    onCreate={(n) => {
-      editor.newName = n;
-      editor.createRegion(editor.focusLayer);
-    }}
-    onRandomName={() =>
-      (editor.newName = editor.randomName(
-        editor.focusLayer === 'province' ? 'province' : 'country',
-      ))}
-    onNewName={(n) => (editor.newName = n)}
-    onOrganize={(action, id, anchorId) => editor.organize(action, id, anchorId)}
-    onMoveItem={(id, dir) => editor.moveItemStep(id, dir)}
-    onCopyItem={(id) => editor.copyItem(id)}
   />
   {/snippet}
 
@@ -463,8 +396,6 @@
     taskMode={shell.wsMode}
     globeLocked={shell.viewMode === 'view-globe'}
     onTaskMode={setWsMode}
-    onUndo={() => editor.undo()}
-    onRedo={() => editor.redo()}
     onState={(s) => (railState = s)}
   />
 
@@ -478,7 +409,7 @@
     mode={shell.viewMode}
     autosaveAt={editor.autosaveAt}
     copyText={editor.lastError}
-    onPickElement={(id) => selectElement(id)}
+    onPickElement={(id) => editor.selectElement(id)}
   />
 
   <!-- 三张信息 popover（图层信息/元素信息/显示参数）已退役（2026-09-30 拍板 3）：
