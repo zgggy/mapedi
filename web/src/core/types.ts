@@ -146,7 +146,7 @@ export interface Region {
   /** 兼容旧字段 */
   centerLabel?: string;
   parentId?: RegionId;
-  /** 基本色：与主元素一致；子元素不得单独改基本色 */
+  /** 基本色 = 自身渲染色；子元素与所属父元素**同色系微调**（palette.tintOf，2026-10-04）；不得单独改 */
   color: string;
   /** 专属色：仅本元素，UI 上以边框内阴影呈现 */
   exclusiveColor?: string;

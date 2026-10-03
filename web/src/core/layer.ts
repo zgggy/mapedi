@@ -23,6 +23,8 @@ export type { ElementStyle } from './layer/style';
 export { HEIGHT_INTERVALS, heightToIntervalIndex, intervalById, intervalByIndex } from './layer/heightIntervals';
 
 /** 各图层默认生成配置（唯一真相，registry 只引用此处） */
+// 色池已删（2026-10-04 用户定）：缺省取色 = core/layer/palette 彩虹板 24 色轮转；
+// 子图层元素 = 父元素色 tintOf 微调（生成聚合与缩进两路共用）。
 export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
   const base: GenConfig = {
     method: 'randomConnected', scope: 'unlimited', pattern: 'scattered',
@@ -42,7 +44,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'noCrossLandSea', pattern: 'partitionLand',
         coreSelector: 'random', count: 15,
         names: ['甲郡', '乙道', '丙州', '丁都', '戊府', '己县', '庚乡', '辛里', '壬亭', '癸邑'],
-        colors: ['#6B8E23', '#8FBC8F', '#556B2F', '#9ACD32', '#6B8E23', '#808000', '#9ACD32', '#6B8E23'],
       };
     case 'country':
       return {
@@ -51,7 +52,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         coreSelector: 'centermost', count: 8,
         fromLayerCount: 3, // 源层从层树派生（D1），原 province 常量退役
         names: ['华夏', '罗马', '波斯', '埃及', '印度', '希腊', '腓尼基', '阿拉伯'],
-        colors: ['#8B4513', '#A0522D', '#D2691E', '#CD853F', '#8B4513', '#A0522D', '#D2691E', '#CD853F'],
       };
     case 'environment':
       return {
@@ -59,7 +59,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'unlimited', pattern: 'scattered',
         coreSelector: 'random', count: 8,
         names: ['雨林', '草原', '沙漠', '冻原', '湿地', '山地', '海岸', '丛林'],
-        colors: ['#2E8B57', '#3CB371', '#20B2AA', '#008B8B', '#2E8B57', '#3CB371', '#20B2AA', '#008B8B'],
       };
     case 'vegetation':
       return {
@@ -67,7 +66,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'landOnly', pattern: 'cluster',
         coreSelector: 'random', count: 8,
         names: ['阔叶林', '针叶林', '草原', '灌丛', '竹林', '苔原', '红树林', '高山草甸'],
-        colors: ['#228B22', '#2E8B57', '#32CD32', '#3CB372', '#228B22', '#2E8B57', '#32CD32', '#3CB372'],
       };
     case 'fauna':
       return {
@@ -75,7 +73,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'unlimited', pattern: 'scattered',
         coreSelector: 'random', count: 6,
         names: ['鹿群', '狼群', '狮群', '象群', '鹰群', '鱼群'],
-        colors: ['#8B4513', '#A0522D', '#D2691E', '#CD853F', '#8B4513', '#A0522D'],
       };
     case 'race':
       return {
@@ -83,7 +80,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'landOnly', pattern: 'partitionLand',
         coreSelector: 'random', count: 5,
         names: ['山民', '平原民', '林民', '海民', '雪民'],
-        colors: ['#4169E1', '#6495ED', '#4682B4', '#5F9EA0', '#4169E1'],
       };
     case 'culture':
       return {
@@ -91,7 +87,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'landOnly', pattern: 'cluster',
         coreSelector: 'highElevation', count: 8,
         names: ['阿尔泰', '瓦兰', '赛里斯', '努米底亚', '维京', '高棉', '玛雅', '波斯'],
-        colors: ['#9370DB', '#8A2BE2', '#9932CC', '#BA55D3', '#9370DB', '#8A2BE2', '#9932CC', '#BA55D3'],
       };
     case 'religion':
       return {
@@ -99,7 +94,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'landOnly', pattern: 'scattered',
         coreSelector: 'lowElevation', count: 5,
         names: ['日曜教', '月影宗', '大地母神', '海神殿', '星象会'],
-        colors: ['#FFD700', '#FFA500', '#FF8C00', '#DAA520', '#FFD700'],
       };
     case 'military':
       return {
@@ -107,7 +101,6 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         method: 'randomConnected', scope: 'landOnly', pattern: 'longStrip',
         coreSelector: 'nearBoundary', count: 6,
         names: ['北境军团', '南洋舰队', '东海卫', '西陆骑', '苍岭营', '赤原哨'],
-        colors: ['#AA3333', '#CC4444', '#BB3333', '#DD5555', '#AA3333', '#CC4444'],
       };
     default:
       return base;

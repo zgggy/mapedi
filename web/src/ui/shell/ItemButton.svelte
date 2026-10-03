@@ -17,7 +17,7 @@
     depth = 0,
     selected = false,
     hidden = false,
-    hasChild = false,
+    badge = false,
     open = false,
     content,
     onClick,
@@ -37,8 +37,8 @@
     selected?: boolean;
     /** 已隐藏（L0 可见态：**显示中才画 👁，不显示就无图标**——2026-10-03 用户定，不用 🚫） */
     hidden?: boolean;
-    /** 含子层（EXPAND 包4 L0 子层结构点：不展开可读层级锚点） */
-    hasChild?: boolean;
+    /** 该行有显隐语义（图层/路径画 👁 徽章）——元素行已废除单体显隐（2026-10-04 用户定），不传 */
+    badge?: boolean;
     /** 本行展开态（选中/聚焦驱动；open 时原地长出 content） */
     open?: boolean;
     /** 展开内容（检查/生成/绘制/组织模式区；缺省 = 纯行不可展开） */
@@ -77,14 +77,11 @@
       {/if}
       <span class="txt">
         <span class="nm">{name}</span>
-        {#if hasChild}
-          <span class="kidp" title="含子层（生成单元/显示叠放随层树）">子层</span>
-        {/if}
         {#if desc}
           <span class="desc">{desc}</span>
         {/if}
       </span>
-      {#if !hidden}
+      {#if badge && !hidden}
         <span class="badge" title="显示中">👁</span>
       {/if}
       {#if content}
@@ -188,16 +185,5 @@
     font-size: var(--fs-xs);
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
-  }
-  /* 子层结构点（EXPAND 包4 L0）：紧凑小药丸，随名称流式排布 */
-  .kidp {
-    flex: 0 0 auto;
-    font-size: 9px;
-    line-height: 1;
-    color: var(--text-dim);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--r-pill);
-    padding: 1px 4px;
-    white-space: nowrap;
   }
 </style>

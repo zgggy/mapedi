@@ -311,6 +311,7 @@ import { isRowOrControlClick } from './shell';
         body: import('svelte').Snippet | null,
         depth: number,
         hidden = false,
+        badge = false,
       )}
         <ItemButton
           logoColor={color}
@@ -318,6 +319,7 @@ import { isRowOrControlClick } from './shell';
           {depth}
           selected={selectedRegionId === id}
           {hidden}
+          {badge}
           {open}
           content={body}
           onClick={() => {
@@ -399,7 +401,6 @@ import { isRowOrControlClick } from './shell';
               selectedRegionId === id,
               selectedRegionId === id && modeBodyOf(id) ? rowBody : null,
               n.depth,
-              n.region.hidden ?? false,
             )}
           {/if}
         </li>
@@ -452,6 +453,7 @@ import { isRowOrControlClick } from './shell';
               selectedRegionId === p.id && taskMode === 'organize' ? pathBody : null,
               0,
               p.hidden ?? false,
+              true,
             )}
           </li>
           {/each}

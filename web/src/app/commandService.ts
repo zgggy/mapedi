@@ -22,6 +22,7 @@ import { resolveLayerStyle } from '../core/layer/config';
 import { defaultFocusLayerId } from '../core/layer/flags';
 import { layerTreeOf } from '../core/hierarchy/derive';
 import { planIndent, planPromote, layerCopyAsRoot, bestParentFor, reparentElement } from '../core/hierarchy/ops';
+import { tintOf } from '../core/layer/palette';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
@@ -31,6 +32,7 @@ import {
 import {
   AddLayerCommand,
   AnnexCommand,
+  CompositeCommand,
   CreateRegionCommand,
   DeleteLayerCommand,
   DeleteRegionCommand,
@@ -197,31 +199,6 @@ export class CommandService {
     this.status = '已删除元素（子层保留为未分配）';
   }
 
-  /** 右键菜单：显隐切换（元素/路径级，仅显示层过滤） */
-  toggleItemHidden(id: string) {
-    if (!this.world) return;
-    const r = this.world.regions.find((x) => x.id === id);
-    if (r) {
-      // 1-b：元素显隐经字段快照入栈（可撤销）；path 分支仍为直改（1-b 剩余）
-      const wasHidden = !!r.hidden;
-      const name = r.name;
-      this.patchRegions(wasHidden ? '显示元素' : '隐藏元素', () => {
-        const cur = this.world!.regions.find((x) => x.id === id);
-        if (cur) cur.hidden = !cur.hidden;
-      });
-      this.status = wasHidden ? `已显示「${name}」（Ctrl+Z 可撤销）` : `已隐藏「${name}」（Ctrl+Z 可撤销）`;
-      return;
-    }
-    const p = (this.world.paths ?? []).find((x) => x.id === id);
-    if (p) {
-      this.withPaths(p.hidden ? '显示路径' : '隐藏路径', () => {
-        const t = this.world!.paths!.find((x) => x.id === id);
-        if (t) t.hidden = !t.hidden;
-      });
-      this.status = p.hidden ? `已隐藏「${p.name}」` : `已显示「${p.name}」`;
-    }
-  }
-
   /**
    * 图层显示列表（组织模式用，**与 LayersPanel 渲染同序**）：根在前、子递归，
    * 兄弟取 layers 数组出现序 = 面板自上而下。
@@ -259,16 +236,32 @@ export class CommandService {
     }
     const { plan } = res;
     w.layers.find((x) => x.id === plan.id)!.parentLayerId = plan.after;
-    history.run(
-      w,
+    // ④（2026-10-04 用户定）：缩进成子层 → 本层元素按**所属父元素**同色系微调
+    // （palette.tintOf，与生成聚合同规则）；与 parentLayerId 同一条 Composite 入栈。
+    const colorPatches: { id: string; before: Partial<Region>; after: Partial<Region> }[] = [];
+    let ti = 0;
+    for (const r of w.regions) {
+      if (r.layerId !== plan.id || !r.parentId) continue;
+      const p = w.regions.find((x) => x.id === r.parentId);
+      if (!p) continue;
+      const next = tintOf(p.color, ti++);
+      if (next !== r.color) {
+        colorPatches.push({ id: r.id, before: { color: r.color }, after: { color: next } });
+        r.color = next; // alreadyApplied：与 parentLayerId 同步落地，栈内已是新值
+      }
+    }
+    const cmds: EditCommand[] = [
       new LayerFieldsCommand(
         [{ id: plan.id, before: { parentLayerId: plan.before }, after: { parentLayerId: plan.after } }],
         '缩进',
       ),
-      { alreadyApplied: true },
-    );
+    ];
+    if (colorPatches.length) cmds.push(new RegionFieldsCommand(colorPatches, '缩进配色'));
+    history.run(w, cmds.length > 1 ? new CompositeCommand(cmds, '缩进') : cmds[0], {
+      alreadyApplied: true,
+    });
     this.touchWorld();
-    this.status = res.status;
+    this.status = res.status + (colorPatches.length ? ` · ${colorPatches.length} 个元素随父配色` : '');
   }
 
   /**

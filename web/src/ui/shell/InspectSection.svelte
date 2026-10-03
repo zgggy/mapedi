@@ -68,11 +68,9 @@
     const l = kind === 'layer' && id && world ? (world.layers.find((x) => x.id === id) ?? null) : null;
     const meta = kind === 'layer' ? (LAYER_META[id ?? ''] ?? null) : null;
     const a = r?.attributes;
-    const basic = !r
-      ? '#888888'
-      : !r.parentId
-        ? r.color
-        : (world?.regions.find((x) => x.id === r.parentId)?.color ?? r.color);
+    // 元素基本色 = 自身渲染色（2026-10-04：子元素改为父色同系微调后，父色≠自色，
+    // 面板必须显示地图上真实画的颜色；仍然禁止单独改——色随生成/挂靠策略走）
+    const basic = r ? r.color : '#888888';
     const heightIv =
       r && a && a.kind === 'interval'
         ? {
@@ -188,20 +186,10 @@
 </script>
 
 <div class="ins">
-  <!-- 状态条（2026-10-02 方案 §4.3）：显隐胶囊 · 区间徽章（只读，涂改在绘制） · 隶属跳转 -->
+  <!-- 状态条（2026-10-02 方案 §4.3；2026-10-04：元素显隐胶囊废除——单体显隐无意义）：
+       图层显隐胶囊 · 区间徽章（只读，涂改在绘制） · 隶属/子元素跳转 · 挂靠 -->
   <div class="srow">
-    {#if kind === 'element' && view.regionId}
-      <StateCapsule
-        size="md"
-        onIcon="👁"
-        offIcon="🚫"
-        onText="显示中"
-        offText="已隐藏"
-        on={!view.hidden}
-        title={view.hidden ? '点击显示' : '点击隐藏'}
-        onchange={() => editor.toggleItemHidden(view.regionId!)}
-      />
-    {:else if kind === 'layer' && view.layerId}
+    {#if kind === 'layer' && view.layerId}
       <StateCapsule
         size="md"
         onIcon="👁"

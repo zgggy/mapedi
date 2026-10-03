@@ -11,6 +11,7 @@
 import type { CellId, LayerId, Region, World } from '../types';
 import { childLayerIdOf } from '../hierarchy/derive';
 import { bestParentAmong } from '../hierarchy/ops';
+import { colorAt, tintOf } from '../layer/palette';
 import { isLand as isLandCell } from '../types';
 import type { GenConfig } from '../layer/genTypes';
 import { layerAllowsOverlap } from '../layer';
@@ -300,7 +301,7 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
 
   const rng = createRng(hashSeed(config.seed, layerId.length * 53));
   const names = config.names ?? [];
-  const colors = config.colors ?? [];
+  const colors = config.colors;
 
   const srcById = new Map(sources.map((r) => [r.id, r]));
   const srcAdj = new Map<string, Set<string>>();
@@ -365,7 +366,7 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
 
     const coreCellId = selectCoreCell(world, filtered, config.coreSelector, rng);
     const name = names.length ? names[ci % names.length] : `${layerId}-${ci}`;
-    const color = colors.length ? colors[ci % colors.length] : '#888888';
+    const color = colorAt(colors, ci);
     const el: Region = {
       id: `${layerId}-${ci}`,
       layerId,
@@ -401,6 +402,15 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
     }
   }
   world.regions = world.regions.concat(out);
+  // ④（2026-10-04）子图层元素 = 所属父元素同色系微调：聚合关系落定后统一重着色
+  {
+    const colorOf = new Map(out.map((el) => [el.id, el.color]));
+    let ti = 0;
+    for (const s of sources) {
+      const pc = s.parentId ? colorOf.get(s.parentId) : undefined;
+      if (pc) s.color = tintOf(pc, ti++);
+    }
+  }
   materializeParentCells(world);
   return out;
 }
@@ -424,7 +434,7 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
   const rng = createRng(hashSeed(config.seed, layerId.length * 31 + 7));
   const allowOverlap = layerAllowsOverlap(world, layerId);
   const names = config.names ?? [];
-  const colors = config.colors ?? [];
+  const colors = config.colors;
 
   const effScope: GenConfig['scope'] =
     config.allowOcean && config.scope === 'landOnly' ? 'unlimited' : config.scope;
@@ -490,7 +500,7 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
         cells,
         coreCellId,
         centerCellId: coreCellId,
-        color: colors.length ? colors[i % colors.length] : '#888888',
+        color: colorAt(colors, i),
         attributes: { kind: layerId },
         adjacentElementIds: new Set(),
         overlaps: [],
@@ -549,7 +559,7 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
       cells: comp,
       coreCellId,
       centerCellId: coreCellId,
-      color: colors.length ? colors[i % colors.length] : '#888888',
+      color: colorAt(colors, i),
       attributes: { kind: layerId },
       adjacentElementIds: new Set(),
       overlaps: [],

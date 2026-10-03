@@ -509,10 +509,6 @@ export class EditorStore {
   }
 
   /** 右键菜单：显隐切换（元素/路径级，仅显示层过滤） */
-  toggleItemHidden(id: string) {
-    this.cmds.toggleItemHidden(id);
-  }
-
   indentItem(id: string, anchorId: string | null = null): void {
     this.cmds.indentItem(id, anchorId);
   }
