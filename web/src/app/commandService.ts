@@ -696,7 +696,7 @@ export class CommandService {
       new Map<string, Snap>(
         this.world!.regions.map((r) => [
           r.id,
-          Object.fromEntries(FIELDS.map((f) => [f, (r as unknown as Snap)[f]])),
+          Object.fromEntries(FIELDS.map((f) => [f, r[f]])),
         ]),
       );
     const before = snap();

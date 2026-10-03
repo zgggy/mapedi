@@ -23,7 +23,7 @@ function postDone(world: ReturnType<typeof createWorld>) {
   for (const p of projCache.polys) if (p.length) transfer.push(p.buffer as ArrayBuffer);
   transfer.push(projCache.centers.buffer as ArrayBuffer, projCache.bboxes.buffer as ArrayBuffer);
   for (const v of projCache.polarOutlines.values()) transfer.push(v.buffer as ArrayBuffer);
-  (self as unknown as Worker).postMessage({ type: 'done', world: plain, projCache }, transfer);
+  self.postMessage({ type: 'done', world: plain, projCache }, transfer);
 }
 
 self.onmessage = (ev: MessageEvent<GenRequest>) => {

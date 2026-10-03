@@ -20,6 +20,7 @@
  */
 import { EPS_FP } from '../../core/tolerances';
 import type { DisplayRing } from '../../core/ring/displayRing';
+import type { ProjCache } from '../projCache';
 import {
   buildPieceParams,
   cssToRgba,
@@ -226,8 +227,7 @@ function compile(
 }
 
 function pushErr(msg: string): void {
-  const w = globalThis as unknown as { __gpuErr?: string[] };
-  (w.__gpuErr ??= []).push(msg);
+  (globalThis.__gpuErr ??= []).push(msg);
   console.error('[mapGl]', msg);
 }
 
@@ -290,8 +290,8 @@ export class MapGlRenderer {
   private bufAll = new Set<GpuBuf>();
   private frame = 0;
   /** 环数组 → 合并几何（同一环集跨帧复用，副本变化不影响它） */
-  private geoCache = new WeakMap<object, Map<string, PieceGeo>>();
-  private meshCache = new WeakMap<object, { buf: GpuBuf | null; geo: CellMeshGeo }>();
+  private geoCache = new WeakMap<DisplayRing[], Map<string, PieceGeo>>();
+  private meshCache = new WeakMap<ProjCache, { buf: GpuBuf | null; geo: CellMeshGeo }>();
   private failed = false;
   /** 上下文丢失等待恢复（区别于致命 failed：上下文回来即可整实例重建） */
   dead = false;
@@ -416,20 +416,15 @@ export class MapGlRenderer {
       if (channels.cellsMesh && env.showCellMesh) this.drawCellMesh(env);
       for (const piece of pieces) this.drawPiece(env, piece, s);
       const tEnd = performance.now();
-      const gp = globalThis as unknown as {
-        __glParamsMs?: number;
-        __glSubmitMs?: number;
-        __glSeg?: { params: number; submit: number }[];
-      };
-      gp.__glParamsMs = tSubmit - tParams;
-      gp.__glSubmitMs = tEnd - tSubmit;
-      (gp.__glSeg ??= []).push({ params: tSubmit - tParams, submit: tEnd - tSubmit });
-      if (gp.__glSeg.length > 240) gp.__glSeg.shift();
+      globalThis.__glParamsMs = tSubmit - tParams;
+      globalThis.__glSubmitMs = tEnd - tSubmit;
+      const seg = (globalThis.__glSeg ??= []);
+      seg.push({ params: tSubmit - tParams, submit: tEnd - tSubmit });
+      if (seg.length > 240) seg.shift();
       gl.disable(gl.SCISSOR_TEST);
       gl.flush();
-      const w = globalThis as unknown as { __gpuMs?: number; __gpuRan?: number };
-      w.__gpuMs = performance.now() - t0;
-      w.__gpuRan = (w.__gpuRan ?? 0) + 1;
+      globalThis.__gpuMs = performance.now() - t0;
+      globalThis.__gpuRan = (globalThis.__gpuRan ?? 0) + 1;
       return true;
     } catch (e) {
       if (gl.isContextLost()) {
@@ -633,10 +628,10 @@ export class MapGlRenderer {
   /** 同一环集的合并几何（fan/strip + 环并集 bbox） */
   private pieceGeo(rings: DisplayRing[], smooth: number): PieceGeo | null {
     const key = smooth.toFixed(2);
-    let byKey = this.geoCache.get(rings as unknown as object);
+    let byKey = this.geoCache.get(rings);
     if (!byKey) {
       byKey = new Map();
-      this.geoCache.set(rings as unknown as object, byKey);
+      this.geoCache.set(rings, byKey);
     }
     const hit = byKey.get(key);
     if (hit) return hit;
@@ -901,13 +896,13 @@ export class MapGlRenderer {
     const color = cssToRgba(stroke.color);
     if (!color) return;
     // 每 pcache 构建一次网格条带（共享边去重 + 桶化）；相机变化只改 uniform
-    let entry = this.meshCache.get(env.pcache as unknown as object);
+    let entry = this.meshCache.get(env.pcache);
     if (!entry) {
       // 极区闭合边 unwrap 只在圆柱族 polarOutlines 路径执行（罗宾森无 polarOutlines）
       const period = projectionWorldPeriod(env.proj) ?? Math.PI * 2;
       const geo = buildCellMeshStrips(env.pcache.polys, env.pcache.polarOutlines, period);
       entry = { geo, buf: geo.data.length ? this.bufFor(geo.data, 'strip') : null };
-      this.meshCache.set(env.pcache as unknown as object, entry);
+      this.meshCache.set(env.pcache, entry);
     }
     if (!entry.buf) return;
     const scale = env.cam.scale;

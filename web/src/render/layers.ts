@@ -431,7 +431,7 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
 }
 
 /** raw MidRing[] → display pieces。键含 frameY，换投影不得复用旧 unwrap/闭合 */
-const prepCache = new WeakMap<object, Map<string, DisplayRing[]>>();
+const prepCache = new WeakMap<MidRing[], Map<string, DisplayRing[]>>();
 function preparePieces(
   env: RenderEnv,
   rings: MidRing[],
@@ -439,10 +439,10 @@ function preparePieces(
   frameFlip = false,
 ): DisplayRing[] {
   const fk = `${env.proj}|${frameY.minX},${frameY.maxX},${frameY.minY},${frameY.maxY},${frameY.cylindrical}|${frameFlip ? 1 : 0}`;
-  let byF = prepCache.get(rings as unknown as object);
+  let byF = prepCache.get(rings);
   if (!byF) {
     byF = new Map();
-    prepCache.set(rings as unknown as object, byF);
+    prepCache.set(rings, byF);
   }
   const cached = byF.get(fk);
   if (cached) return cached;

@@ -69,7 +69,19 @@ export function defaultPathColor(kind: PathKind): string {
 /** 旧 BezierPath → PathFeature */
 export function migrateToPathFeature(raw: Record<string, unknown>): PathFeature {
   if (Array.isArray(raw.points) && raw.points.length) {
-    return raw as unknown as PathFeature;
+    // 显式构造（2026-10-03 as-unknown 收敛）：保留未知字段（...raw），已知字段逐个窄化
+    const layerId = raw.layerId === 'route' || raw.layerId === 'river' ? raw.layerId : 'road';
+    return {
+      ...raw,
+      id: typeof raw.id === 'string' ? raw.id : '',
+      layerId,
+      name: typeof raw.name === 'string' ? raw.name : '',
+      points: raw.points as LonLat[],
+      color: typeof raw.color === 'string' ? raw.color : defaultPathColor(layerId),
+      widthStart: typeof raw.widthStart === 'number' ? raw.widthStart : undefined,
+      widthEnd: typeof raw.widthEnd === 'number' ? raw.widthEnd : undefined,
+      attributes: (raw.attributes as Record<string, unknown> | undefined) ?? undefined,
+    };
   }
   const start = raw.start as LonLat | undefined;
   const end = raw.end as LonLat | undefined;

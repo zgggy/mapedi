@@ -222,7 +222,7 @@ import { isRowOrControlClick } from './shell';
   /** 点击面板空白处 = 无选中元素 = 收起（绘制退出由 App 推导）；守卫与图层面板同源 */
   function onBlankClick(e: MouseEvent) {
     if (isRowOrControlClick(e)) return;
-    if (selectedRegionId) onSelect(null as unknown as string);
+    if (selectedRegionId) onSelect(null);
   }
 
   // —— 右键菜单 ——

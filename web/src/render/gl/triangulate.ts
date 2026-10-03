@@ -93,7 +93,7 @@ function flatOf(pts: { x: number; y: number }[]): number[] {
 }
 
 /** 组级剖分缓存：同一外环（含其洞签名）不重复 earcut（笔刷 tick 只重建受牵连组） */
-const groupCache = new WeakMap<object, { holesKey: string; tris: Float32Array; areaOk: boolean }>();
+const groupCache = new WeakMap<DisplayRing, { holesKey: string; tris: Float32Array; areaOk: boolean }>();
 
 export interface PieceFill {
   /** 三角形顶点 [x,y]×3×n（直绘） */
@@ -117,7 +117,7 @@ export interface RingSample {
 export function triangulateRings(entries: RingSample[]): PieceFill | null {
   const closed = entries.filter((e) => e.ring.closed && e.pts.length >= 3);
   if (!closed.length) return null;
-  const { outers, holes } = splitOuterHoleRings(closed.map((e) => e.ring) as unknown as MidRing[]);
+  const { outers, holes } = splitOuterHoleRings(closed.map((e) => e.ring));
   if (!outers.length) return null;
   // 采样点（几何唯一来源）；分类用环自身（拓扑属性），几何全用采样点
   const sampled = new Map<DisplayRing, Pt[]>();
@@ -157,7 +157,7 @@ export function triangulateRings(entries: RingSample[]): PieceFill | null {
     const outerFlat = cleanPoly(flatOf(op));
     const holeFlats = (holeByOuter.get(o) ?? []).map((hp) => cleanPoly(flatOf(hp)));
     const holesKey = holeFlats.map((f) => `${f.length / 2}@${f[0]},${f[1]}`).join(';');
-    const cached = groupCache.get(o as unknown as object);
+    const cached = groupCache.get(o);
     if (cached && cached.holesKey === holesKey) {
       for (let t = 0; t < cached.tris.length; t++) parts.push(cached.tris[t]);
       expectArea += Math.abs(signedAreaFlat(outerFlat));
@@ -187,7 +187,7 @@ export function triangulateRings(entries: RingSample[]): PieceFill | null {
         groupTris.push(verts[k * 2], verts[k * 2 + 1]);
       }
     }
-    groupCache.set(o as unknown as object, {
+    groupCache.set(o, {
       holesKey,
       tris: Float32Array.from(groupTris),
       areaOk: true, // 组级自检在总自检里过；分组缓存只挡重复剖分

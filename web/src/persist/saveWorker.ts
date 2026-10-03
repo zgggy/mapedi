@@ -1,3 +1,4 @@
+/// <reference lib="webworker" />
 /**
  * 自动保存 Worker（2026-10-01 还债步骤 3）：
  * world **结构化克隆**进线程 → serializeWorld + idbSave 全程离主线程。
@@ -18,7 +19,7 @@ interface Res {
   error?: string;
 }
 
-const ctx = self as unknown as Worker;
+const ctx = self;
 ctx.onmessage = (e: MessageEvent<Req>) => {
   const { id, world } = e.data;
   try {

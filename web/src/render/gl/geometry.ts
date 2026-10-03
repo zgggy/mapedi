@@ -93,7 +93,7 @@ function buildFan(pts: Pt[]): Float32Array {
   return out;
 }
 
-const geoCache = new WeakMap<object, Map<string, RingGeo>>();
+const geoCache = new WeakMap<DisplayRing, Map<string, RingGeo>>();
 
 /** 环几何（缓存）。mode='fill' → fan；'outline' → strip。 */
 export function ringGeo(
@@ -101,10 +101,10 @@ export function ringGeo(
   smooth: number,
   mode: 'fill' | 'outline',
 ): RingGeo | null {
-  let byKey = geoCache.get(ring as unknown as object);
+  let byKey = geoCache.get(ring);
   if (!byKey) {
     byKey = new Map();
-    geoCache.set(ring as unknown as object, byKey);
+    geoCache.set(ring, byKey);
   }
   const key = `${mode}:${smooth.toFixed(2)}`;
   const hit = byKey.get(key);

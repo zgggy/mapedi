@@ -85,3 +85,15 @@
   - 留原地（模块头注明）：一次性孤值 1e-8/1e-10/1e-15、GLSL 内字面量。
   - 验收：tsc/svelte-check 0；冒烟=平面 hover 拾取（#70115 全字段）+球面往返×2 零错。**未跑测试**（纪律）。
   - 存量进度：容差 ✓ / 图层名标志位 ☐ / as-unknown ☐。
+
+
+## 剪出（2026-10-03）：第二十九轮 还债步骤7大扫除
+
+- **◐ 第二十九轮（2026-10-01，还债步骤 7 大扫除：死码/孤儿/两修复全清）**：
+  - **七项死码按当日现状复核**：cellIndex **整文件删**（索引零读者，invalidate 无读者=无效失效）+ rebuildNeighborsFromSharedVerts + NamePlacement/nameStyle + cellsLayer 空桩出双管线；centerLabel/PathFeature.name 判**活**保留；Viewport 旧注释已随重构漂移无存。
+  - **孤儿链全删（外部零调用实证）**：store（applyNature/regenPolitical/regenNetworks/applyHeightmap/measureClick）、CommandService（rename/recolorSelected）、DrawController（roadBreaks）、GenerationService（applyGenPreset/toggleProfile）；**nature.ts 整文件删**+biomes 瘦至 83 行活核+climate.test 删 nature 两案+networks/perf 夹具换 computeBiomes；SOFT_MAX_DENSITY 死导出删；store **888→803**。
+  - **修复①路网**：校验先于清空（roads+routes）——合成探针双分支 verdict=true（早退保留/正常清空）。
+  - **修复②撤销父残留**：undo/redo 补物化 + materializeParentCells 改**精确派生（父≡∪子）**——6/7 对恒等、唯一 extra=历史残留→**自愈 extraNow=[]**、撤销 unrestored=[] 逐位还原。**语义注**：从空重建的前提=「父 cells≡∪子」实测成立（AGENTS §3 字面语义）；若未来出现父直接持有子外 cell 的合法流程，需回看此假设。
+  - **转独立小包三项存量**：容差字面量 65 处 / 图层名硬编码 30 处（=LayerDef 标志位数据模型级）/ as unknown 25 处 11 文件——详见 ROADMAP 步骤7。
+  - 基线：tsc 0、svelte-check 0 errors；冒烟=四次模式切换+建层撤销零错。
+  - 进度：**1 ✓ 2 ✓ 3 ✓ 4 ✓ 5 ◐（剩 shell 协调+两小包）6 ◐ 7 ◐（三项存量转包）**。

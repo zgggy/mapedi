@@ -17,6 +17,14 @@ export class RegionIndex {
   private overlapByLayer = new Map<LayerId, Map<CellId, OverlapMember[]>>();
   private key = '';
 
+  /** 失效：清 key 与三索引（下次 ensure 全量重建）——invalidateRegionIndex 的唯一入口 */
+  reset(): void {
+    this.key = '';
+    this.byLayer.clear();
+    this.fillByLayer.clear();
+    this.overlapByLayer.clear();
+  }
+
   rebuild(world: World): void {
     this.key = worldKey(world);
     this.byLayer.clear();
@@ -127,10 +135,5 @@ export function getRegionIndex(world: World): RegionIndex {
 }
 
 export function invalidateRegionIndex(): void {
-  if (idx) {
-    (idx as unknown as { key: string }).key = '';
-    (idx as unknown as { byLayer: Map<string, unknown> }).byLayer.clear();
-    (idx as unknown as { fillByLayer: Map<string, unknown> }).fillByLayer.clear();
-    (idx as unknown as { overlapByLayer: Map<string, unknown> }).overlapByLayer.clear();
-  }
+  idx?.reset();
 }

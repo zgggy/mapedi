@@ -252,11 +252,11 @@ export function drawWorld(
     }
   }
   {
-    const g = globalThis as unknown as { __restMs?: number; __restSeg?: number[] };
     const ms = performance.now() - restT0;
-    g.__restMs = ms;
-    (g.__restSeg ??= []).push(ms);
-    if (g.__restSeg.length > 240) g.__restSeg.shift();
+    globalThis.__restMs = ms;
+    const seg = (globalThis.__restSeg ??= []);
+    seg.push(ms);
+    if (seg.length > 240) seg.shift();
   }
   env.drawDx = contentOffsetX;
   // 渐现：冷件（环未预热）已跳过——空闲补热，就绪即重绘（拖缓元素出现，不阻塞交互）
@@ -281,16 +281,12 @@ export function drawWorld(
     idle(warmStep);
   }
   // 帧计时（两后端同一咽喉点，A/B 可比）：环形样本 + 帧计数常驻 window，验收/回归用
-  const g = globalThis as unknown as {
-    __drawMs?: number;
-    __drawSamples?: number[];
-    __drawCount?: number;
-  };
   const ms = performance.now() - drawT0;
-  g.__drawMs = ms;
-  (g.__drawSamples ??= []).push(ms);
-  if (g.__drawSamples.length > 240) g.__drawSamples.shift();
-  g.__drawCount = (g.__drawCount ?? 0) + 1;
+  globalThis.__drawMs = ms;
+  const samples = (globalThis.__drawSamples ??= []);
+  samples.push(ms);
+  if (samples.length > 240) samples.shift();
+  globalThis.__drawCount = (globalThis.__drawCount ?? 0) + 1;
 }
 
 export function screenToWorld(
