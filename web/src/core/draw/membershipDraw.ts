@@ -5,7 +5,6 @@
 import type { CellId, Region, World } from '../types';
 import type { PlacementRule, SplitPolicy } from '../layer/config';
 import { placementAllows } from '../layer/config';
-import { markManualSplit, isLandSeaLayer } from '../layer/landSea';
 
 export type OverwriteMode = 'emptyOnly' | 'replace';
 
@@ -110,7 +109,6 @@ export function membershipDrawStroke(
           changes.push({ cellId: id, fromElementId: o.id, toElementId: target.id });
         }
       }
-      if (isLandSeaLayer(actor.layerId) && landSeaIsOcean(target)) markManualSplit(target);
     }
     target.cells = [...set];
   } else if (removeMode) {
@@ -118,18 +116,13 @@ export function membershipDrawStroke(
       if (set.has(id)) {
         set.delete(id);
         changes.push({ cellId: id, fromElementId: target.id, toElementId: null });
-        if (isLandSeaLayer(actor.layerId) && landSeaIsOcean(target)) markManualSplit(target);
-      }
+        }
     }
     target.cells = [...set];
   }
 
   const split = applySplitPolicy(world, actor, target);
   return { membershipChanges: changes, elementSplit: split };
-}
-
-function landSeaIsOcean(r: Region): boolean {
-  return r.attributes?.kind === 'ocean';
 }
 
 /** splitPolicy: newElement → 断开的额外连通块拆成新元素 */

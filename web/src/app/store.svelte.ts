@@ -12,7 +12,6 @@ import { DrawController } from './drawController';
 import { CommandService } from './commandService';
 import { createRng } from '../core/rng';
 import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
-import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID, editsHeightAt } from '../core/layer/flags';
 import { childLayerIdOf } from '../core/hierarchy/derive';
@@ -329,7 +328,6 @@ export class EditorStore {
     touchRegions: () => this.touchRegions(),
     touchRegionsIncremental: () => this.touchRegionsIncremental(),
     touchPaint: () => this.touchPaint(),
-    markHeightDirty: (ids) => this.markHeightDirty(ids),
     flushHeightRegions: (samples) => this.flushHeightRegions(samples),
   });
 
@@ -379,7 +377,6 @@ export class EditorStore {
     touchRegions: () => this.touchRegions(),
     touchLayerView: () => this.touchLayerView(),
     touchHeight: (full) => this.touchHeight(full),
-    markHeightDirty: (ids) => this.markHeightDirty(ids),
     flushHeightRegions: (samples) => this.flushHeightRegions(samples),
   });
 
@@ -429,11 +426,7 @@ export class EditorStore {
     this.pipeline.touchHeight(full);
   }
 
-  private markHeightDirty(ids: Iterable<number>) {
-    this.pipeline.markHeightDirty(ids);
-  }
-
-  /** commit 后：拓扑变才 rebuild；尽量增量（区间/landsea 派生重建 + 补丁入队） */
+  /** commit 后：区间归属派生重算 + Δ 补丁入队（门面） */
   private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]) {
     this.pipeline.flushHeightRegions(samples);
   }
@@ -491,8 +484,11 @@ export class EditorStore {
     // ensure 补入内置父链后再过一次闸，报告给状态栏（不静默）。
     const hrep = repairHierarchy(w);
     if (!w.astro) w.astro = defaultStarSystem(w.meta.seed, w.climate);
-    rebuildLandSeaRegions(w);
     this.replaceWorld(w);
+    // 焦点层回落（案A/删层兜底）：持久化的焦点 id 已不存在 → 回默认层
+    if (!w.layers.some((l) => l.id === this.focusLayer)) {
+      this.focusLayer = defaultFocusLayerId(w);
+    }
     this.status =
       `已从浏览器恢复 · ${w.cells.length} 地块` +
       (hrep.fixed ? ` · 层级修复 ${hrep.fixed} 处` : '');
@@ -784,8 +780,10 @@ export class EditorStore {
       const w = await importProjectFile(file);
       if (seq !== generationSeq) return;
       ensureBuiltinLayers(w);
-      rebuildLandSeaRegions(w);
       this.replaceWorld(w);
+      if (!w.layers.some((l) => l.id === this.focusLayer)) {
+        this.focusLayer = defaultFocusLayerId(w);
+      }
       this.status = `已导入 ${w.cells.length} 地块`;
     } catch (e) {
       this.status = `导入失败 ${e}`;

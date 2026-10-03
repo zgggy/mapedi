@@ -17,7 +17,6 @@ import { layerAllowsOverlap } from '../layer';
 import { createRng, hashSeed } from '../rng';
 import { projectMercator } from '../project/mercator';
 import { generateDemoContinents } from '../height';
-import { rebuildLandSeaRegions, landSeaLayerRegions } from '../layer/landSea';
 import { genStrategyOf } from '../layer/flags';
 import { rebuildHeightIntervalElements } from '../layer/heightElements';
 import { computeRelationships } from '../layer/relationships';
@@ -411,13 +410,10 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
 export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfig): Region[] {
   world.regions = world.regions.filter((r) => r.layerId !== layerId);
 
-  // height 策略层：连续场 + 海陆派生 + 12 嵌套区间元素（等高线）
+  // height 策略层：连续场 + 12 嵌套区间元素（等高线）
   if (genStrategyOf(world, layerId) === 'heightmap') {
     generateDemoContinents(world, config.seed, undefined, config.worldShape);
-    rebuildLandSeaRegions(world);
     const els = rebuildHeightIntervalElements(world);
-    // 海陆关系单独算；区间关系已在 rebuild 内用 count 记录
-    computeRelationships(world, landSeaLayerRegions(world));
     return els;
   }
 

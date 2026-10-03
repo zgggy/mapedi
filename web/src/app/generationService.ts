@@ -14,7 +14,6 @@ import { childLayerIdOf } from '../core/hierarchy/derive';
 import { generateWorldAsync } from '../core/generate/runGenerate';
 import { cascadeEnabled, type GenerationProfile } from '../core/generate/profile';
 import { defaultStarSystem } from '../core/astro';
-import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { defaultExclusiveColor } from '../core/layer/style';
 import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
 import { installProjCache } from '../render/projCache';
@@ -100,7 +99,6 @@ export class GenerationService {
     for (const r of world.regions) {
       if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
     }
-    rebuildLandSeaRegions(world);
     world.astro = defaultStarSystem(seed, world.climate);
     this.ctx.replaceWorld(world);
     // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
@@ -131,7 +129,6 @@ export class GenerationService {
     for (const r of world.regions) {
       if (!r.exclusiveColor && r.color) r.exclusiveColor = defaultExclusiveColor(r.color);
     }
-    rebuildLandSeaRegions(world);
     if (seq !== this.ctx.seq) return;
     this.ctx.replaceWorld(world);
     // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
@@ -160,11 +157,6 @@ export class GenerationService {
       params ? { [layerId]: params } : undefined,
       enabled,
     );
-    if (genStrategyOf(world, layerId) === 'heightmap') {
-      // 「生成高度图 = 删除海陆图层[元素]」（2026-09-30 用户语义）：地形重跑后旧海陆
-      // 划分失效 → 删旧建新（rebuildLandSeaRegions 全量重建派生元素）
-      rebuildLandSeaRegions(world);
-    }
     this.ctx.touchWorld();
     // focusAfterGen 层（height）重生成后默认显示并聚焦（与整世界生成同规则）
     const fg = world.layers.find((l) => l.id === layerId && l.focusAfterGen);
@@ -192,7 +184,6 @@ export class GenerationService {
       params ? { [child]: params } : undefined,
       new Set([child]),
     );
-    if (genStrategyOf(world, child) === 'heightmap') rebuildLandSeaRegions(world);
     this.ctx.setStatus(`已生成单元子层：${child}`);
   }
 

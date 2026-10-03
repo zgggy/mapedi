@@ -1,6 +1,5 @@
 import { MIN_RATIO } from './tolerances';
 import type { World } from '../core/types';
-import { assignContinents } from '../core/height';
 
 /**
  * 将灰度高程图映射到现有 cell。
@@ -46,6 +45,5 @@ export async function applyHeightmapFile(
       ocean++;
     }
   }
-  assignContinents(world);
   return { land, ocean };
 }

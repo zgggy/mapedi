@@ -18,9 +18,7 @@ import {
   updateHeightIntervalElements,
   rebuildHeightIntervalElements,
 } from '../core/layer/heightElements';
-import { heightTopologyChanged } from '../core/heightRegions';
-import { rebuildLandSeaRegions, landSeaLayerRegions } from '../core/layer/landSea';
-import { queueHeightDelta, queuePiecePatch } from '../render/patchQueues';
+import { queueHeightDelta } from '../render/patchQueues';
 
 /** store 注入的宿主能力 */
 export interface PipelineCtx {
@@ -33,8 +31,6 @@ export interface PipelineCtx {
 
 export class ChangePipeline {
   /** 高度提交：仅在拓扑变化时增量 rebuild 大陆/湖/海 */
-  private heightGeomDirty = false;
-  private heightDirtyIds: Set<number> | null = null;
   private paintFrame = 0;
 
   constructor(private ctx: PipelineCtx) {}
@@ -92,17 +88,16 @@ export class ChangePipeline {
 
   /**
    * 高度笔刷的失效：**永不全清环缓存**（全清 = 下一帧重建所有可见件 = 秒级冻结）。
-   * forward：tick 已增量维护高度件 → 只定向失效 landsea 件（拓扑翻转重塑大陆）；
-   * undo：区间归属被反向套用而未打补丁 → 定向失效高度件。
+   * forward：tick 已增量维护高度件；undo：区间归属被反向套用而未打补丁 →
+   * 走 flushHeightRegions 的 Δ 队列补丁。
    */
   touchHeight(_full = false): void {
     invalidateRegionIndex();
     invalidateCellGrid();
-    // 件环**不删缓存**（删 = 内容消失 + 重暖风暴）：区间/landsea 的成员增减都以
-    // Δ 补丁落盘（pendingHeightDeltas / pendingPiecePatches），见 flushHeightRegions。
+    // 件环**不删缓存**（删 = 内容消失 + 重暖风暴）：区间成员增减以 Δ 补丁
+    // 落盘（pendingHeightDeltas），见 flushHeightRegions。
     bumpHeightRev();
     bumpRegionsRev();
-    this.heightGeomDirty = true;
     this.swapIdentity();
     this.ctx.scheduleAutosave();
     this.ctx.notify();
@@ -119,17 +114,10 @@ export class ChangePipeline {
     }
   }
 
-  markHeightDirty(ids: Iterable<number>): void {
-    if (!this.heightDirtyIds) this.heightDirtyIds = new Set();
-    for (const id of ids) this.heightDirtyIds.add(id);
-    this.heightGeomDirty = true;
-  }
-
-  /** commit 后：拓扑变才 rebuild；尽量增量 */
+  /** commit 后：区间归属一次重算（松手带 samples；否则全量）；Δ 交渲染侧打件环补丁 */
   flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]): void {
     const world = this.ctx.world;
     if (!world) return;
-    const sampleIds = samples?.map((s) => s.id) ?? null;
     // 【绘制模型】区间归属只在松手时一次重算；Δ 交给渲染侧打件环补丁
     if (samples && samples.length) {
       const deltas = updateHeightIntervalElements(world, samples);
@@ -137,42 +125,6 @@ export class ChangePipeline {
     } else {
       rebuildHeightIntervalElements(world);
     }
-    if (!this.heightGeomDirty) {
-      bumpHeightRev();
-      return;
-    }
-    if (samples && samples.length && !heightTopologyChanged(samples)) {
-      this.heightGeomDirty = false;
-      this.heightDirtyIds = null;
-      bumpHeightRev();
-      return;
-    }
-    const dirty = this.heightDirtyIds;
-    const dirtyList = dirty && dirty.size ? [...dirty] : sampleIds;
-    // rebuild 前后 diff landsea 成员 → 件环增量补丁（与高度 Δ 同型）
-    const prevCells = new Map<string, Set<number>>();
-    for (const r of landSeaLayerRegions(world)) {
-      prevCells.set(r.id, new Set(r.cells));
-    }
-    rebuildLandSeaRegions(world, dirtyList ?? null);
-    for (const r of landSeaLayerRegions(world)) {
-      const prev = prevCells.get(r.id);
-      const now = new Set(r.cells);
-      const added: number[] = [];
-      const removed: number[] = [];
-      if (prev) {
-        for (const id of now) if (!prev.has(id)) added.push(id);
-        for (const id of prev) if (!now.has(id)) removed.push(id);
-      } else {
-        for (const id of now) added.push(id);
-      }
-      if (added.length || removed.length) {
-        queuePiecePatch(`piece:landsea:${r.id}:0`, added, removed);
-      }
-    }
-    this.heightGeomDirty = false;
-    this.heightDirtyIds = null;
     bumpHeightRev();
-    bumpRegionsRev();
   }
 }

@@ -40,16 +40,6 @@ export function builtinLayers(): LayerDef[] {
       styleSetId: 'default',
     },
     {
-      id: 'landsea',
-      name: '海陆',
-      kind: 'environment',
-      modeDefault: 'edit',
-      allowOverlap: false,
-      requireAdjacency: false,
-      requireCenter: false,
-      styleSetId: 'default',
-    },
-    {
       id: 'environment',
       name: '环境',
       kind: 'environment',
@@ -232,6 +222,24 @@ export function ensureBuiltinLayers(world: World): World {
   const builtins = builtinLayers();
   const have = new Map(world.layers.map((l) => [l.id, l]));
   let changed = false;
+  // 海陆案 A（2026-10-03 拍板执行）：产品级删除 landsea——旧档在唯一读入口
+  // 一次性清理层定义与海陆派生实体（含历史上寄居 height 层的 kind 派生物；
+  // 高度区间元素 kind='interval' 不在清理集）。
+  const landSeaAttr = (r: { attributes?: Record<string, unknown> }) => {
+    const k = r.attributes?.kind;
+    return k === 'lake' || k === 'ocean' || k === 'continent';
+  };
+  if (have.has('landsea')) {
+    world.layers = world.layers.filter((l) => l.id !== 'landsea');
+    changed = true;
+  }
+  const cleaned = world.regions.filter(
+    (r) => r.layerId !== 'landsea' && !(r.layerId === 'height' && landSeaAttr(r)),
+  );
+  if (cleaned.length !== world.regions.length) {
+    world.regions = cleaned;
+    changed = true;
+  }
   for (const b of builtins) {
     if (!have.has(b.id)) {
       world.layers.push({ ...b });

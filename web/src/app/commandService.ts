@@ -66,7 +66,6 @@ export interface CommandCtx {
   touchRegions(): void;
   touchLayerView(): void;
   touchHeight(full?: boolean): void;
-  markHeightDirty(ids: Iterable<number>): void;
   flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]): void;
 }
 
@@ -131,9 +130,6 @@ export class CommandService {
   private touchHeight(full = false): void {
     this.ctx.touchHeight(full);
   }
-  private markHeightDirty(ids: Iterable<number>): void {
-    this.ctx.markHeightDirty(ids);
-  }
   private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]): void {
     this.ctx.flushHeightRegions(samples);
   }
@@ -165,14 +161,13 @@ export class CommandService {
   /**
    * 1-c 命令纯数据化的副作用分发：undo/redo 后按**命令类型**执行增量失效/派生
    * （原 HeightStrokeCommand 闭包 afterApply/afterRevert 的去处——命令本体只持数据，
-   * 失效管线归 store）。高度笔画必须走 flushHeightRegions：区间/landsea 归属是
+   * 失效管线归 store）。高度笔画必须走 flushHeightRegions：区间归属是
    * 派生数据，数据回滚后不重算 = 归属过期（不只是显示问题）。
    */
   private historyEffect(cmd: EditCommand, dir: 'apply' | 'revert'): void {
     if (!(cmd instanceof HeightCellsCommand)) return;
     const samples = cmd.samples;
     if (!samples.length) return;
-    this.markHeightDirty(samples.map((s) => s.id));
     if (dir === 'apply') {
       this.flushHeightRegions(samples);
       this.touchHeight(false);

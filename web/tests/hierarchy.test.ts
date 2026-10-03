@@ -1,50 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld } from '../src/core/world';
 import { generateDemoContinents } from '../src/core/height';
-import {
-  absorbLandCell,
-  rebuildHeightRegions,
-  heightKindOf,
-} from '../src/core/heightRegions';
 import { checkElementReparent } from '../src/core/hierarchy/gate';
 import { reparentElement } from '../src/core/hierarchy/ops';
 import { generatePolitical } from '../src/core/political';
-
-describe('height absorb + identity', () => {
-  it('land cell joins neighbor continent id', () => {
-    const w = createWorld({ seed: 3, count: 400 });
-    generateDemoContinents(w, 3);
-    rebuildHeightRegions(w);
-    const cont = w.regions.filter((r) => r.layerId === 'landsea' && heightKindOf(r) === 'continent');
-    expect(cont.length).toBeGreaterThan(0);
-    // 取一个大陆边缘的海洋格，抬升后应 absorb 到邻接 continentId
-    const land = new Set(cont.flatMap((r) => r.cells));
-    let target = -1;
-    for (const c of w.cells) {
-      if (c.height > 0) continue;
-      if (c.neighbors.some((n) => land.has(n))) {
-        target = c.id;
-        break;
-      }
-    }
-    expect(target).toBeGreaterThanOrEqual(0);
-    w.cells[target].height = 0.5;
-    w.cells[target].isOcean = false;
-    absorbLandCell(w, target);
-    expect(w.cells[target].continentId).toBeGreaterThanOrEqual(0);
-  });
-
-  it('rebuild keeps overlapping continent identity', () => {
-    const w = createWorld({ seed: 11, count: 600 });
-    generateDemoContinents(w, 11);
-    rebuildHeightRegions(w);
-    const a = w.regions.find((r) => r.layerId === 'landsea' && heightKindOf(r) === 'continent')!;
-    const id = a.id;
-    rebuildHeightRegions(w);
-    const still = w.regions.find((r) => r.id === id);
-    expect(still).toBeTruthy();
-  });
-});
 
 // demote/promote 死路径已随拖动退役删除（HIERARCHY §7 清账，2026-10-03 包1）；
 // 其业务规则（跨层挂靠方向、升级清父）迁至闸/ops 规则面，规则不变。

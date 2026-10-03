@@ -15,7 +15,7 @@ import type { GenMethod, GenScope, GenPattern, CoreSelector } from './genTypes';
 
 export type SplitPolicy = 'newElement' | 'keepEnclave' | 'reject';
 export type LandSeaRule = 'landOnly' | 'oceanOnly' | 'any' | 'noCrossLandSea';
-export type ElementSource = 'explicit' | 'derivedFromHeight' | 'derivedFromLandSea' | 'onePerCell';
+export type ElementSource = 'explicit' | 'derivedFromHeight' | 'onePerCell';
 
 export interface PlacementRule {
   landSea: LandSeaRule;
@@ -109,20 +109,6 @@ export function defaultLayerConfigs(): LayerConfig[] {
       }),
       workspace: { listElements: true },
       fixedElements: true,
-    },
-    {
-      id: 'landsea',
-      name: '海陆',
-      kind: 'environment',
-      elementSource: 'derivedFromLandSea',
-      splitPolicy: 'newElement',
-      placement: { landSea: 'any' },
-      gen: { ...genBase(0), method: 'diffusion' },
-      style: style({
-        border: { enabled: true, width: 1.5, color: '#ffffff', smooth: 1 },
-        fill: { enabled: true, alpha: 0.85, color: '#2A6A9B' },
-      }),
-      workspace: { listElements: true },
     },
     {
       id: 'province',

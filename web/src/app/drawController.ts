@@ -31,7 +31,6 @@ import { defaultLayerConfig, placementAllows } from '../core/layer/config';
 import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
 import { setHeightStroke } from '../core/draw/heightDraw';
 import { buildRoadSegments, dragRoadEndpoint } from '../core/draw/roads';
-import { absorbLandCell, releaseOceanCell } from '../core/heightRegions';
 import {
   HeightCellsCommand,
   MultiRegionCommand,
@@ -53,7 +52,6 @@ export interface DrawCtx {
   touchRegions(): void;
   touchRegionsIncremental(): void;
   touchPaint(): void;
-  markHeightDirty(ids: Iterable<number>): void;
   flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]): void;
 }
 
@@ -230,13 +228,6 @@ export class DrawController {
     // 【v2 语义】笔刷只写「选定值」（擦除 → pointer right → 写 0）；拖动中零重算，只回传命中供色块高亮
     const paintValue = this.heightPaintValue ?? intervalById(this.heightIntervalId)?.min ?? 0;
     setHeightStroke(world, hits, paintValue, pointer === 'right');
-    for (const id of hits) {
-      const c = world.cells[id];
-      if (!c) continue;
-      if (c.isOcean) releaseOceanCell(world, c.id);
-      else absorbLandCell(world, c.id);
-      this.ctx.markHeightDirty([c.id]);
-    }
     return hits;
   }
 
@@ -249,7 +240,6 @@ export class DrawController {
         h1: this.ctx.world!.cells[id].height,
       }));
       const w = this.ctx.world!;
-      const dirtyIds = samples.map((s) => s.id);
       // 1-c：命令纯数据（只有 samples+label）；undo/redo 后的失效副作用由
       // historyEffect 按命令类型分发，不再作为闭包存进命令。
       const cmd = new HeightCellsCommand(samples, '高度笔刷');
@@ -258,7 +248,6 @@ export class DrawController {
       this.strokeRegionId = null;
       this.strokeSnap = null;
       this.paintDirty = false;
-      this.ctx.markHeightDirty(dirtyIds);
       this.ctx.flushHeightRegions(samples);
       const cw = this.ctx.world;
       if (cw) this.ctx.setWorld({ ...cw });

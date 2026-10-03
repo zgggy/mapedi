@@ -15,7 +15,6 @@ import { prepareDisplayRings } from '../core/ring/normalize';
 import { sampleMidRing } from '../core/ring/hermite';
 import type { ProjCache } from './projCache';
 import { dataRev, geomRev } from '../core/rev';
-import { landSeaContinentRegions } from '../core/layer/landSea';
 import {
   projectionPeriodAt,
   projectionWraps,
@@ -47,7 +46,6 @@ let ringsCache = new Map<string, Entry>();
 let pairEdgeCache: Map<string, BoundEdge> | null = null;
 let pseudoEdgeCache: BoundEdge[] | null = null;
 let pairEdgeGeomRev = -1;
-let continentCentersCache: { sig: string; centers: { x: number; y: number }[] } | null = null;
 let baseRev = '';
 let cachedWorld: World | null = null;
 
@@ -56,7 +54,7 @@ export function hasPieceEntry(setKey: string, projKey: ProjectionId): boolean {
   return ringsCache.has(ringCacheKey(setKey, projKey));
 }
 
-/** 按 setKey 前缀失效（如拓扑翻转只清 landsea 件）——避免全清的松手卡顿 */
+/** 按 setKey 前缀失效（定向清一类件，避免全清的松手卡顿） */
 export function invalidatePieceEntries(prefix: string): void {
   for (const k of ringsCache.keys()) {
     if (k.startsWith(prefix)) ringsCache.delete(k);
@@ -68,7 +66,6 @@ export function invalidateBorderCache(): void {
   pairEdgeCache = null;
   pseudoEdgeCache = null;
   pairEdgeGeomRev = -1;
-  continentCentersCache = null;
   baseRev = '';
   cachedWorld = null;
 }
@@ -120,9 +117,8 @@ export function patchPieceEntry(
 
 function ensureRev(world: World): string {
   const rev = dataRev();
-  // continentCenters 随内容 rev 失效；环缓存按内容指纹命中，这里不清（见 ringCacheKey）
+  // 环缓存按内容指纹命中，这里不清（见 ringCacheKey）
   if (rev !== baseRev) {
-    continentCentersCache = null;
     baseRev = rev;
     cachedWorld = world;
   }
@@ -408,39 +404,3 @@ export function ringBBoxHitsView(
   );
 }
 
-export function getContinentCentersCached(
-  world: World,
-  pcache: ProjCache,
-): { x: number; y: number }[] {
-  const rev = ensureRev(world);
-  const sig = `${rev}|${pcache.key}`;
-  if (continentCentersCache && continentCentersCache.sig === sig) {
-    return continentCentersCache.centers;
-  }
-  // 从 continent Regions 派生（单一真相）；选择器与 landSeaKindOf 同口径
-  const continentRegions = landSeaContinentRegions(world);
-  const centers = continentRegions.map((r) => {
-    const comp = r.cells;
-    if (!comp.length) return { x: 0, y: 0 };
-    const x0 = pcache.centers[comp[0] * 2];
-    const y0 = pcache.centers[comp[0] * 2 + 1];
-    let sx = x0;
-    let sy = y0;
-    for (let i = 1; i < comp.length; i++) {
-      const id = comp[i];
-      sx += unwrapXAgainstLocal(x0, pcache.centers[id * 2]);
-      sy += pcache.centers[id * 2 + 1];
-    }
-    return { x: sx / comp.length, y: sy / comp.length };
-  });
-  continentCentersCache = { sig, centers };
-  return centers;
-}
-
-function unwrapXAgainstLocal(refX: number, x: number, period = Math.PI * 2): number {
-  let v = x;
-  const half = period / 2;
-  while (v - refX > half) v -= period;
-  while (v - refX < -half) v += period;
-  return v;
-}

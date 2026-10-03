@@ -26,7 +26,6 @@ export class HeightCellsCommand implements EditCommand {
       if (!c) continue;
       c.height = s.h1;
       c.isOcean = s.h1 <= 0;
-      if (s.h1 <= 0) c.continentId = undefined;
     }
   }
 
@@ -36,7 +35,6 @@ export class HeightCellsCommand implements EditCommand {
       if (!c) continue;
       c.height = s.h0;
       c.isOcean = s.h0 <= 0;
-      if (s.h0 <= 0) c.continentId = undefined;
     }
   }
 
