@@ -7,6 +7,7 @@
 import type { CellId, LayerDef, Region, World } from './types';
 import { dataRev } from './rev';
 import { displayCellsOfInterval } from './layer/heightElements';
+import { effectiveVisible, layerRootOf, layerStackComparator } from './hierarchy/derive';
 
 export const VIRTUAL_PARENT = '—';
 
@@ -252,7 +253,8 @@ export function isLayerShown(
   if (l.baseMesh) return false;
   // 选中即显示：焦点层（且仅焦点层本身）读时强制显示
   if (focusLayerId && layerId === focusLayerId) return true;
-  return isVisible(l, defaultLayerVisible(l));
+  // I6 有效显隐（HIERARCHY 包2）：自身 ∧ 祖先链——读时派生，旧档「父隐子显」自愈
+  return effectiveVisible(world, layerId);
 }
 
 /**
@@ -285,47 +287,13 @@ function composeShownPiecesUncached(
 ): DisplayPiece[] {
   const focus = focusLayerId || null;
   const byId = new Map(world.layers.map((l) => [l.id, l]));
-  const listIndex = new Map<string, number>();
-  world.layers.forEach((l, i) => listIndex.set(l.id, i));
-
-  /** 沿 parentLayerId 爬到第一层级根 */
-  const rootOf = (id: string): string => {
-    let cur = id;
-    for (let g = 0; g < 16; g++) {
-      const p = byId.get(cur)?.parentLayerId;
-      if (!p || !byId.has(p)) break;
-      cur = p;
-    }
-    return cur;
-  };
-  /** 树深度：0 = 第一层级，越大越「子」 */
-  const depthOf = (id: string): number => {
-    let d = 0;
-    let cur = id;
-    for (let g = 0; g < 16; g++) {
-      const p = byId.get(cur)?.parentLayerId;
-      if (!p || !byId.has(p)) break;
-      cur = p;
-      d++;
-    }
-    return d;
-  };
 
   const shown = world.layers
     .filter((l) => isLayerShown(world, l.id, focus))
     .map((l) => l.id);
 
-  // 先画：非焦点；同组内列表下层根 → 列表上层根；同根内 父 → 子
-  shown.sort((a, b) => {
-    const fa = a === focus ? 1 : 0;
-    const fb = b === focus ? 1 : 0;
-    if (fa !== fb) return fa - fb;
-    const ra = listIndex.get(rootOf(a)) ?? 0;
-    const rb = listIndex.get(rootOf(b)) ?? 0;
-    // 列表 index 小 = 列表更靠上 = 更高 z = 后画 → 先画 index 大者
-    if (ra !== rb) return rb - ra;
-    return depthOf(a) - depthOf(b);
-  });
+  // 叠放键 = derive 层叠放比较器单源（HIERARCHY §6.1 包2：焦点整段最后画）
+  shown.sort(layerStackComparator(world, focus));
 
   const selRegion = highlightRegionId
     ? world.regions.find((r) => r.id === highlightRegionId)
@@ -335,7 +303,7 @@ function composeShownPiecesUncached(
     const layer = byId.get(layerId);
     if (!layer) continue;
     const anc = displayAncestors(world, layerId);
-    const rootId = rootOf(layerId);
+    const rootId = layerRootOf(world, layerId);
     const tree = displayTree(world, rootId);
     const treeIds = new Set(tree.map((t) => t.layerId));
     const regions = world.regions.filter((r) => r.layerId === layerId && !r.hidden);

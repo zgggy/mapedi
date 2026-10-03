@@ -600,17 +600,10 @@ export class CommandService {
       void roots;
       this.status = `显示「${layer.name || id}」`;
     } else {
+      // D8（HIERARCHY 包2，2026-10-03 用户委托按推荐实施）：关 = **只写自身**——
+      // 子孙有效隐藏由 I6 读时派生承担，各自 visible 保留；父层再开时子孙回到
+      // 原状态（原「关=写穿子树」退役，LayersVisibilityCommand 快照域随之变小）。
       layer.visible = false;
-      // 关父则关整棵子树
-      const kids = (pid: string) => layers.filter((l) => l.parentLayerId === pid);
-      const stack = [id];
-      while (stack.length) {
-        const curId = stack.pop()!;
-        for (const k of kids(curId)) {
-          k.visible = false;
-          stack.push(k.id);
-        }
-      }
       this.status = `隐藏「${layer.name || id}」`;
     }
     commitVis();
