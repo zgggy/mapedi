@@ -18,7 +18,6 @@
  *
  * 闭合语义只来自 hermite（geometry.ringGeo 的 willClose），此处不另立规则。
  */
-import { EPS_FP } from '../../core/tolerances';
 import type { DisplayRing } from '../../core/ring/displayRing';
 import type { ProjCache } from '../projCache';
 import {
@@ -30,7 +29,7 @@ import {
 } from '../layers';
 import { ringGeo, buildCellMeshStrips, type Pt , type CellMeshGeo } from './geometry';
 import { triangulateRings, trianglesMatchRings } from './triangulate';
-import { frameOutline } from '../space';
+import { frameOutline, copyOffRange, copyIntersectsBox } from '../space';
 import {
   project,
   projectionWorldPeriod,
@@ -70,23 +69,6 @@ interface GpuBuf {
   vao: WebGLVertexArrayObject;
   count: number;
   last: number;
-}
-
-/**
- * 副本可见性（并集判定，与 space.worldCopyKs 同口径）：
- * 副本占位 = [minX+lo, maxX+hi]（off = scale(y)·T 随 y 取值域 [lo,hi]，恒 lo≤hi），
- * 与视口相交即保留。交形式（maxX+lo / minX+hi）只认「各 y 位移的公共核心」，
- * 会把仅以剪切尖端入视的副本整件裁掉 → 罗宾森 + 平移下的渲染缺口/填充消失。
- */
-function copyVisibleIn(
-  minX: number,
-  maxX: number,
-  lo: number,
-  hi: number,
-  viewL: number,
-  viewR: number,
-): boolean {
-  return maxX + hi > viewL - EPS_FP && minX + lo < viewR + EPS_FP;
 }
 
 /**
@@ -706,21 +688,15 @@ export class MapGlRenderer {
     // 副本 = k；位移 = scale(y)·(Δλ+k·2π) 且随 y 变 → 用 scale 极值算位移区间做保守可见判定
     const pan = env.contentOffsetX ?? 0;
     const [sLo, sHi] = this.scaleRange(env.proj, gbox.minY, gbox.maxY);
-    const offRangeOf = (k: number): [number, number] => {
-      const T = pan + k * Math.PI * 2;
-      const lo = Math.min(sLo * T, sHi * T);
-      const hi = Math.max(sLo * T, sHi * T);
-      return [lo, hi];
-    };
     const copies = all.filter((k) => {
-      const [lo, hi] = offRangeOf(k);
-      return copyVisibleIn(gbox.minX, gbox.maxX, lo, hi, viewL, viewR);
+      const [lo, hi] = copyOffRange(sLo, sHi, pan + k * Math.PI * 2);
+      return copyIntersectsBox(gbox.minX, gbox.maxX, lo, hi, viewL, viewR);
     });
     if (!copies.length) return;
     let minOff = Infinity;
     let maxOff = -Infinity;
     for (const k of copies) {
-      const [lo, hi] = offRangeOf(k);
+      const [lo, hi] = copyOffRange(sLo, sHi, pan + k * Math.PI * 2);
       if (lo < minOff) minOff = lo;
       if (hi > maxOff) maxOff = hi;
     }
@@ -916,10 +892,8 @@ export class MapGlRenderer {
     const pan = env.contentOffsetX ?? 0;
     const [msLo, msHi] = this.scaleRange(env.proj, bb.minY, bb.maxY);
     const copies = all.filter((k) => {
-      const T = pan + k * Math.PI * 2;
-      const lo = Math.min(msLo * T, msHi * T);
-      const hi = Math.max(msLo * T, msHi * T);
-      return copyVisibleIn(bb.minX, bb.maxX, lo, hi, viewL, viewR);
+      const [lo, hi] = copyOffRange(msLo, msHi, pan + k * Math.PI * 2);
+      return copyIntersectsBox(bb.minX, bb.maxX, lo, hi, viewL, viewR);
     });
     if (!copies.length) return;
     this.setKs(copies);

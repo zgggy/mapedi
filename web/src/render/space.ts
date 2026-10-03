@@ -11,7 +11,7 @@
  * - OpenLayers：数据 CRS 不动，渲染时由 view/extent 决定显示范围与 wrap。
  */
 
-import { SCALE_FLOOR } from '../core/tolerances';
+import { EPS_FP, SCALE_FLOOR } from '../core/tolerances';
 import {
   projectionFrameLat,
   projectionPeriodAt,
@@ -163,6 +163,34 @@ export function contentOffsetAt(proj: ProjectionId, y: number, lambdaOff: number
  * 保守相交判定（off 区间 = [sMin·T, sMax·T]，T=Δλ+k·2π）。
  * 数学前提：透镜轮廓宽 = 局部周期 → 副本逐纬度首尾相接（奇偶接缝精确）。
  */
+/**
+ * 副本位移区间：off = scale(y)·T 对 y 取值域的像（sLo/sHi 任意序，恒 lo≤hi）。
+ * 单一原语（2026-10-04 拍板④：世界级 worldCopyKs 与件级 GL 过滤此前各写一遍）。
+ */
+export function copyOffRange(sLo: number, sHi: number, T: number): [number, number] {
+  const lo = Math.min(sLo * T, sHi * T);
+  const hi = Math.max(sLo * T, sHi * T);
+  return [lo, hi];
+}
+
+/**
+ * 副本占位与视口相交（世界级候选筛选与件级 copy 过滤**同一谓词**）：
+ * 占位 = [minX+lo, maxX+hi] 与 (viewL, viewR) 相交（EPS 收边，取宽不取窄
+ * ——漏画可见副本是缺口、多画微出屏副本无感）。
+ * **历史坑（勿回退）**：交形式若只取「各 y 位移的公共核心」（maxX+lo / minX+hi），
+ * 会把仅以剪切尖端入视的副本整件裁掉 → 罗宾森 + 平移下的渲染缺口/填充消失。
+ */
+export function copyIntersectsBox(
+  minX: number,
+  maxX: number,
+  lo: number,
+  hi: number,
+  viewL: number,
+  viewR: number,
+): boolean {
+  return maxX + hi > viewL - EPS_FP && minX + lo < viewR + EPS_FP;
+}
+
 export function worldCopyKs(
   panLambda: number,
   cam: CameraLike,
@@ -196,10 +224,9 @@ export function worldCopyKs(
   const ks: number[] = [];
   for (let k = kMin; k <= kMax && ks.length < 12; k++) {
     const T = panLambda + k * Math.PI * 2;
-    const lo = Math.min(sMin * T, sMax * T);
-    const hi = Math.max(sMin * T, sMax * T);
+    const [lo, hi] = copyOffRange(sMin, sMax, T);
     // 内容平移后覆盖 [cL+lo, cR+hi]（off 随 scale 取区间），与视口相交即保留
-    if (cL + lo <= viewR && cR + hi >= viewL) ks.push(k);
+    if (copyIntersectsBox(cL, cR, lo, hi, viewL, viewR)) ks.push(k);
   }
   if (!ks.length) ks.push(Math.round(-panLambda / (Math.PI * 2)));
   return ks;
