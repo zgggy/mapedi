@@ -65,11 +65,16 @@ import { isRowOrControlClick } from './shell';
   const rows = $derived.by(() => {
     const layers = world?.layers ?? [];
     const byId = new Map(layers.map((l) => [l.id, l]));
+    const exists = new Set(layers.map((l) => l.id));
+    const parentIds = new Set(
+      layers.filter((l) => l.parentLayerId && exists.has(l.parentLayerId)).map((l) => l.parentLayerId),
+    );
     const out: {
       id: string;
       depth: number;
       parentId: string | null;
       chain: string;
+      hasChild: boolean;
       meta: Meta;
       hidden: boolean;
     }[] = [];
@@ -87,6 +92,7 @@ import { isRowOrControlClick } from './shell';
         depth: r.depth,
         parentId: r.parentId,
         chain: r.chain,
+        hasChild: parentIds.has(r.id),
         meta: { ...base, name: layer.name || base.name },
         hidden: !(layer.visible ?? defaultLayerVisible(layer)),
       });
@@ -240,6 +246,7 @@ import { isRowOrControlClick } from './shell';
           logo={row.meta.emoji}
           name={row.meta.name}
           depth={row.depth}
+          hasChild={row.hasChild}
           selected={focusLayer === row.id}
           hidden={row.hidden}
           open={focusLayer === row.id}
