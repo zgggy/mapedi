@@ -14,6 +14,7 @@ import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/
 import { rebuildLandSeaRegions } from '../core/layer/landSea';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID } from '../core/layer/flags';
+import { childLayerIdOf } from '../core/layer/tree';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { loadWorldAsync } from '../core/generate/runGenerate';
@@ -789,7 +790,7 @@ export class EditorStore {
     if (!this.world || !this.draw.active || !this.draw.targetRegionId) return '';
     const region = this.world.regions.find((r) => r.id === this.draw.targetRegionId);
     if (!region) return '';
-    const childLayer = this.world.layers.find((l) => l.parentLayerId === region.layerId);
+    const childLayer = childLayerIdOf(this.world, region.layerId);
     if (childLayer) {
       const kids = this.world.regions.filter((r) => r.parentId === region.id);
       const kid = kids.find((k) => k.id === this.draw.parentRegionId) ?? kids[0];

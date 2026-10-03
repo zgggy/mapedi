@@ -15,6 +15,7 @@
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
+  import { layerTreeOf } from '../../core/layer/tree';
   import { measureSlot } from './liftDrag';
 import { isRowOrControlClick } from './shell';
   import OrganizeRow from './OrganizeRow.svelte';
@@ -59,64 +60,37 @@ import { isRowOrControlClick } from './shell';
 
   type Meta = { emoji: string; name: string; kind: string; category: string; pending?: boolean };
 
-  /** 组织面包屑（2026-10-02 方案 §5.4）：父链名字，根在前（'' = 顶层） */
-  function chainOf(pid: string | null): string {
-    const byId = new Map((world?.layers ?? []).map((l) => [l.id, l]));
-    const parts: string[] = [];
-    let cur = pid;
-    while (cur) {
-      const l = byId.get(cur);
-      if (!l) break;
-      parts.unshift(l.name || cur);
-      cur = l.parentLayerId ?? null;
-    }
-    return parts.join(' › ');
-  }
+  // 组织面包屑链由 layerTreeOf 单源携带（O2，原 chainOf 内联 walk 已删）
 
   const rows = $derived.by(() => {
     const layers = world?.layers ?? [];
-    const parentOf = new Map<string, string>();
-    for (const l of layers) if (l.parentLayerId) parentOf.set(l.id, l.parentLayerId);
-    const children = new Map<string | null, string[]>();
-    for (const l of layers) {
-      const p = parentOf.get(l.id);
-      const key = p && layers.some((x) => x.id === p) ? p : null;
-      let arr = children.get(key);
-      if (!arr) {
-        arr = [];
-        children.set(key, arr);
-      }
-      arr.push(l.id);
-    }
     const byId = new Map(layers.map((l) => [l.id, l]));
     const out: {
       id: string;
       depth: number;
       parentId: string | null;
+      chain: string;
       meta: Meta;
       hidden: boolean;
     }[] = [];
-    const walk = (pid: string | null, depth: number) => {
-      for (const id of children.get(pid) ?? []) {
-        const layer = byId.get(id);
-        if (!layer) continue;
-        const base = (LAYER_META[id] ?? {
-          emoji: '📄',
-          name: layer.name,
-          kind: layer.kind,
-          category: 'custom',
-        }) as Meta;
-        out.push({
-          id,
-          depth,
-          parentId: pid,
-          meta: { ...base, name: layer.name || base.name },
-          hidden: !(layer.visible ?? defaultLayerVisible(layer)),
-        });
-        walk(id, depth + 1);
-      }
-    };
-    walk(null, 0);
+    for (const r of layerTreeOf(world)) {
+      const layer = byId.get(r.id);
+      if (!layer) continue;
+      const base = (LAYER_META[r.id] ?? {
+        emoji: '📄',
+        name: layer.name,
+        kind: layer.kind,
+        category: 'custom',
+      }) as Meta;
+      out.push({
+        id: r.id,
+        depth: r.depth,
+        parentId: r.parentId,
+        chain: r.chain,
+        meta: { ...base, name: layer.name || base.name },
+        hidden: !(layer.visible ?? defaultLayerVisible(layer)),
+      });
+    }
     return out;
   });
 
@@ -251,7 +225,7 @@ import { isRowOrControlClick } from './shell';
           {@const sib = sibFlags.get(row.id) ?? { prev: false, next: false, canIndent: false }}
           <OrganizeRow
             name={row.meta.name}
-            chain={chainOf(row.parentId)}
+            chain={row.chain}
             first={!sib.prev}
             last={!sib.next}
             top={!row.parentId}

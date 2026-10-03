@@ -11,7 +11,7 @@
   import { rebuildHeightIntervalElements, heightIntervalRegions } from '../../core/layer/heightElements';
   import { editsHeightAt } from '../../core/layer/flags';
   import { isFreeLayerId } from '../../core/displayCompose';
-  import { childLayerIdOf } from '../../core/regionOps';
+  import { childLayerIdOf } from '../../core/layer/tree';
   import ItemButton from './ItemButton.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';

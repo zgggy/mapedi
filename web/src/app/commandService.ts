@@ -19,6 +19,7 @@ import {
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
 import { defaultFocusLayerId } from '../core/layer/flags';
+import { layerTreeOf } from '../core/layer/tree';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
@@ -231,24 +232,13 @@ export class CommandService {
    * 与图层面板（顶=数组首）相反 → 「视觉上一个」取成了下一行，缩进/提升锚点错位、顺序乱。
    * 图层显示 = 数组前序 DFS（父必在子前、同级保持数组序）——这是本方法与
    * indent/unindent「只改 parent、不动数组序」推理的不变量。
+   * O2（2026-10-03）：walk 收编 core/layer/tree 单源，本方法只做形状适配。
    */
   private layerDisplayList(): { id: string; parentId: string | undefined }[] {
-    const w = this.world;
-    if (!w) return [];
-    const layers = w.layers;
-    const validParent = (p: string | undefined) =>
-      p && layers.some((x) => x.id === p) ? p : undefined;
-    const items = layers.map((l) => ({ id: l.id, parentId: validParent(l.parentLayerId) }));
-    const out: { id: string; parentId: string | undefined }[] = [];
-    const walk = (pid: string | undefined) => {
-      for (const k of items) {
-        if (k.parentId !== pid) continue;
-        out.push(k);
-        walk(k.id);
-      }
-    };
-    walk(undefined);
-    return out;
+    return layerTreeOf(this.world).map((r) => ({
+      id: r.id,
+      parentId: r.parentId ?? undefined,
+    }));
   }
 
   /**

@@ -1,5 +1,6 @@
 import type { Region, World } from './types';
 import { defaultExclusiveColor } from './layer/style';
+import { childLayerIdOf } from './layer/tree';
 import { scrubRegionDiplomacy } from './diplomacy';
 
 /** 列表拖放提示（与 ui/shell/dnd 对齐） */
@@ -107,9 +108,7 @@ export function layerHasChildLayer(world: World, layerId: string): boolean {
   return world.layers.some((l) => l.parentLayerId === layerId);
 }
 
-export function childLayerIdOf(world: World, layerId: string): string | null {
-  return world.layers.find((l) => l.parentLayerId === layerId)?.id ?? null;
-}
+// childLayerIdOf 已收编 core/layer/tree（O2 树遍历单源，2026-10-03）
 
 export function parentLayerIdOf(world: World, layerId: string): string | null {
   return world.layers.find((l) => l.id === layerId)?.parentLayerId ?? null;

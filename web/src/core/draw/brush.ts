@@ -1,5 +1,6 @@
 import type { Cell, CellId, Region, World } from '../types';
 import { isLand } from '../types';
+import { childLayerIdOf } from '../layer/tree';
 import { getCellGrid } from '../index/cellGrid';
 import { getRegionIndex, invalidateRegionIndex } from '../index/regionIndex';
 
@@ -59,8 +60,8 @@ export function resolveDrawTarget(
     return { region };
   }
   // 有子层（国家 → 行省）：笔刷画子层
-  const childLayer = world.layers.find((l) => l.parentLayerId === region.layerId);
-  if (!childLayer) return { region };
+  const childLayerId = childLayerIdOf(world, region.layerId);
+  if (!childLayerId) return { region };
 
   if (session.parentRegionId) {
     const child = world.regions.find(
@@ -73,8 +74,8 @@ export function resolveDrawTarget(
 
   // 自动创建子 Region
   const created: Region = {
-    id: `${childLayer.id}-${region.id}-auto`,
-    layerId: childLayer.id,
+    id: `${childLayerId}-${region.id}-auto`,
+    layerId: childLayerId,
     name: `${region.name}·行省`,
     cells: [],
     parentId: region.id,
