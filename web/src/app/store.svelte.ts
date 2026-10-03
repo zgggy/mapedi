@@ -442,8 +442,8 @@ export class EditorStore {
   }
 
   /** 单层再生成（实现体在 GenerationService；height 连带删旧建新海陆） */
-  regenLayer(layerId: string) {
-    this.gen.regenLayer(layerId);
+  regenLayer(layerId: string, seed?: number) {
+    this.gen.regenLayer(layerId, seed);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean) {

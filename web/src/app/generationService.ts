@@ -141,17 +141,19 @@ export class GenerationService {
     this.ctx.notify();
   }
 
-  regenLayer(layerId: string): void {
+  regenLayer(layerId: string, seed?: number): void {
     const world = this.ctx.world;
     if (!world) return;
+    // 种子（2026-10-04 用户报障）：UI 种子行/🎲 直传；不传或非法 = 世界种子（旧行为）。
+    const s = Number.isFinite(seed) ? (seed as number) : world.meta.seed;
     // R2 递归（HIERARCHY §6.3 包3）：先确保单元源（子层）可用——
     // 无元素 → 递归生成（孙层优先），再生成本层；有元素则不重算（非破坏）。
-    this.ensureUnitsReady(layerId);
+    this.ensureUnitsReady(layerId, s);
     const params = this.ctx.profiles.find((p) => p.layerId === layerId)?.params;
     const enabled = new Set([layerId]);
     runCascade(
       world,
-      world.meta.seed,
+      s,
       [layerId],
       undefined,
       params ? { [layerId]: params } : undefined,
@@ -164,21 +166,21 @@ export class GenerationService {
       fg.visible = true;
       this.ctx.setFocusLayer(fg.id);
     }
-    this.ctx.setStatus(`已重新生成：${layerId}`);
+    this.ctx.setStatus(`已重新生成：${layerId} · 种子 ${s}`);
   }
 
   /** 单元源兜底（R2）：childLayer 无元素 → 先递归生成子层链（自底向上） */
-  private ensureUnitsReady(layerId: string): void {
+  private ensureUnitsReady(layerId: string, seed: number): void {
     const world = this.ctx.world;
     if (!world) return;
     const child = childLayerIdOf(world, layerId);
     if (!child || !generatorFor(child)) return;
     if (world.regions.some((r) => r.layerId === child)) return; // 已可用
-    this.ensureUnitsReady(child); // 孙层优先
+    this.ensureUnitsReady(child, seed); // 孙层优先
     const params = this.ctx.profiles.find((p) => p.layerId === child)?.params;
     runCascade(
       world,
-      world.meta.seed,
+      seed,
       [child],
       undefined,
       params ? { [child]: params } : undefined,

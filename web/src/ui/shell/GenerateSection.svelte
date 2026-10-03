@@ -5,7 +5,7 @@
    *
    * **生成 = 针对焦点层的三分支（读 `LayerDef.genStrategy`，禁比 id 字符串）**：
    * - `scatter`（cells）→ 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
-   * - `heightmap`（height）→ 「生成高度图」：只重跑地形 + 海陆删旧建新（editor.regenLayer）
+   * - `heightmap`（height）→ 「生成高度图」：只重跑地形（editor.regenLayer(layerId, seed)）
    * - `elements`（缺省）有 profile params → 单层再生成（regenLayer；params 类型化控件）
    * - 路径类生成方法待设计（GEN R7）：暂无专属策略值，走 elements 分支（行为保持）
    * 防误触由「须先切生成模式」承担（原 D5 长按把手随把手架构退役）。
@@ -51,7 +51,7 @@
     /** 整世界重建（仅 scatter 层走此入口） */
     onGenerate: (seed: number, n: number) => void;
 
-    /** 单层再生成（store.regenLayer；heightmap 会连带删旧建新海陆） */
+    /** 单层再生成（store.regenLayer(layerId, seed)） */
 
     /** 单层参数写回（store.setProfileParam，已含草稿防抖持久化） */
 
@@ -100,8 +100,19 @@
 
   function fire() {
     if (generating || !canGen) return;
-    if (isScatter) onGenerate(Number(seedInput) || 1, densityInput);
-    else editor.regenLayer(layerId);
+    if (isScatter) {
+      onGenerate(Number(seedInput) || 1, densityInput);
+      return;
+    }
+    // 种子行（2026-10-04 用户报障：高度/布局重生成没有改种子的地方）——
+    // 空/非法回退世界种子（regenLayer 内 isFinite 兜底）
+    const t = seedInput.trim();
+    editor.regenLayer(layerId, t === '' ? undefined : Number(t));
+  }
+
+  /** 种子行（撒点/高度/布局三分支同款；seedInput = App 草稿持久化字段） */
+  function rollSeed(): void {
+    seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF));
   }
 </script>
 
@@ -113,12 +124,12 @@
         <div class="bhead"><span class="sb">🎲 撒点</span><span class="bh-t">重新撒点</span></div>
         <div class="row">
           <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
-            <button type="button" class="dice" title="随机种子" onclick={() => (seedInput = String(Math.floor(Math.random() * 0xFFFFFFFF)))}>🎲</button>
+            <button type="button" class="dice" title="随机种子" onclick={rollSeed}>🎲</button>
           </label>
           <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
           <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 重新撒点</button>
         </div>
-        <div class="hint">撒点将重建整个世界（高度、海陆及所有图层元素）</div>
+        <div class="hint">撒点将重建整个世界（高度及所有图层元素）</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -147,12 +158,15 @@
           </div>
         {/if}
       {:else if isHeightmap}
-        <!-- 高度层 = 生成高度图（同参重跑；海陆元素随之删旧建新） -->
+        <!-- 高度层 = 生成高度图（种子+参数可调重跑） -->
         <div class="bhead"><span class="sb">⛰️ 地形</span><span class="bh-t">生成高度图「{layerName}」</span></div>
-        <div class="row end">
-          <button type="button" class="primary" disabled={generating} onclick={fire}>⛰️ 生成高度图</button>
+        <div class="row">
+          <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
+            <button type="button" class="dice" title="随机种子" onclick={rollSeed}>🎲</button>
+          </label>
+          <button type="button" class="primary" disabled={generating} onclick={fire} style="margin-left:auto">⛰️ 生成高度图</button>
         </div>
-        <div class="hint">按下方地形参数重跑地形（种子不变 = 同参同果）；海陆元素删旧建新</div>
+        <div class="hint">按下方地形参数重跑地形——同种子同参 = 同参同果，🎲 换种子即换地形</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -188,6 +202,11 @@
           {#if freeform}<span class="rb">生成方法待设计（GEN R7）</span>{/if}
         </div>
         {#if layerParams}
+          <div class="row">
+            <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
+              <button type="button" class="dice" title="随机种子" onclick={rollSeed}>🎲</button>
+            </label>
+          </div>
           <div class="prow-wrap">
             {#each Object.entries(layerParams).filter(([k]) => k !== 'fromLayerId') as [k, v] (k)}
               {#if typeof v === 'boolean'}
