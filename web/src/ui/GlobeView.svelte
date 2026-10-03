@@ -453,6 +453,19 @@
       const nowTs = performance.now();
       const dt = Math.min(0.05, Math.max(0, (nowTs - prevFrameTs) / 1000));
       prevFrameTs = nowTs;
+      // 逐帧尺寸自校（2026-10-04）：本环境 ResizeObserver 实测**零回调**（IAB 坑，
+      // 连自建元素自改宽度都不触发）——与平面 syncBackingStore 同策：面板开合内缩后
+      // 一帧内同步缓冲与纵横比；RO 保留（正常环境下等价冗余）。
+      {
+        const ww = container.clientWidth;
+        const hh = container.clientHeight;
+        const pr = renderer.getPixelRatio();
+        if (ww && hh && (renderer.domElement.width !== Math.floor(ww * pr) || renderer.domElement.height !== Math.floor(hh * pr))) {
+          camera.aspect = ww / hh;
+          camera.updateProjectionMatrix();
+          renderer.setSize(ww, hh);
+        }
+      }
       if (spinPreview && meshHolder) {
         const dir = prograde ? 1 : -1;
         spinT += dir * (24 / Math.max(6, rotHours)) * 0.004;

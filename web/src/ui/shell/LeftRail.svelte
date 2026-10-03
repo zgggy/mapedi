@@ -28,7 +28,7 @@
     globeLocked?: boolean;
     onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
     /** 面板开合 + 实测宽度回传（App 用于 C7 遮挡宽与高度标注条件） */
-    onState?: (s: { layersOpen: boolean; wsOpen: boolean; width: number }) => void;
+    onState?: (s: { layersOpen: boolean; wsOpen: boolean; right: number }) => void;
   } = $props();
 
   let layersOpen = $state(readPanelOpen('layers', true));
@@ -43,7 +43,12 @@
   }
 
   function emit() {
-    onState?.({ layersOpen, wsOpen, width: railEl?.clientWidth ?? 220 });
+    // right = 栏右缘（fixed left8 + 实测宽）——地图居中偏移用（2026-10-04）
+    onState?.({
+      layersOpen,
+      wsOpen,
+      right: (railEl?.offsetLeft ?? 8) + (railEl?.clientWidth ?? 220),
+    });
   }
 
   let toprowEl: HTMLElement | undefined = $state();

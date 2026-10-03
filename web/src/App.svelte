@@ -34,7 +34,13 @@
   let bootError = $state('');
   // panels 状态已退役（2026-09-30 终稿：图层区恒在，开合把手架构随三模式胶囊化取消）
   /** 左栏两面板开合（LeftRail 回传）：驱动高度标注显示条件（workspaceOpen）；width 为回传遥测 */
-  let railState = $state({ layersOpen: true, wsOpen: true, width: 220 });
+  let railState = $state({ layersOpen: true, wsOpen: true, right: 307 });
+  /**
+   * 地图居中偏移（2026-10-04 用户定）：图层/元素**任一**面板展开 → 视图画布
+   * 内缩到栏右缘，自动对准剩余空间中心；双收起 → 内缩归零回屏幕中心。
+   * 平面/球面共用 .view 的 CSS 变量（canvas rect 相对坐标全链自适应）。
+   */
+  const mapInset = $derived(railState.layersOpen || railState.wsOpen ? railState.right : 0);
 
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
@@ -229,7 +235,7 @@
   {/if}
 
   {#if world}
-    <div class="view" style="opacity:{viewFade}">
+    <div class="view" style="opacity:{viewFade}; --map-inset-l: {mapInset}px">
       {#if shell.viewMode === 'view-2d'}
         <Viewport
           {world}
@@ -426,6 +432,8 @@
   .view {
     position: absolute;
     inset: 0;
+    /* 地图居中偏移：左缘让开左栏（面板展开=剩余空间中心，双收起=0 回屏幕中心） */
+    left: var(--map-inset-l, 0px);
     transition: opacity 0.2s ease;
   }
   .loading,
