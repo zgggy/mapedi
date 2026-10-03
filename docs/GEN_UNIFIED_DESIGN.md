@@ -99,12 +99,12 @@ regen(L, params):
 | 包 | 内容 | 状态 |
 |---|---|---|
 | **语义接线包** | 三分支生成把手、cells=撒点、height=高度图+海陆、路径禁用、四把手 UI、⚙ 挪位、球面组回迁、紧凑统一、搜索按钮化 | ✓ 本包（随 UI 重排落地） |
-| **引擎包（待本设计过目）** | ① `genParent` 单源表进 `LayerDef`（或独立 registry）；② CASCADE/dependsOn 删除改拓扑推导；③ regen 递归化（R2）；④ `parentLayerId` 改为 genParent 投影 + 旧档校验/迁移；⑤ 单元邻接图的统一获取（cells=cell.neighbors，元素=共享边聚合） | ☐ |
+| **引擎包** | 已被 HIERARCHY 包3 吸收落地（2026-10-03 `268b307`）：units=childLayer 派生（方向反转）、CASCADE→拓扑级联、regen 递归（R2）、dependsOn 只留真数据依赖；逐位哈希相等验收 | ✓ |
 | **路径生成（R7）** | river/road/route 的非 cell 单元生成方法 | ☐ 待设计（用户明示先不做） |
-| **海陆案 A** | 产品级删除海陆图层 | ☐ 待拍板 |
+| **海陆案 A** | 产品级删除海陆图层——**已拍并落地（2026-10-03 `fc8664e`）**：builtin 删除+旧档清理+rebuild 全链/continentId/拆海语义退役，海色=底色+高度区间实测不变 | ✓ |
 
 ## 7. 待拍板
 
-1. **海陆案 A/B**：B 已按原话语义落地（生成时删旧建新）；A（产品级删除图层）做不做？
-2. **引擎包**是否按 §6 范围实施（genParent 单源 + CASCADE 推导 + 递归 + parentLayerId 投影）。
-3. `parentLayerId` 投影规则的细节：`cells/height` 作单元源时不产生显示父（底座层），仅语义层聚合产生显示父——认可此规则？
+1. ~~海陆案 A/B~~ **双落地**：B（2026-09-30 生成删旧建新）→ A（2026-10-03 `fc8664e` 产品级删除，A 落地后 B 的海陆重建环节随之消失）。
+2. ~~引擎包~~ **已按 HIERARCHY 包3 实施**（2026-10-03 `268b307`）：方向按 D1 反转——不是 parentLayerId 从 genParent 投影，而是 units 从 parentLayerId 派生。
+3. ~~底座层投影规则~~ **随方向反转消解**：parentLayerId 即显示树唯一真相，units 单独派生（childLayer ?? cells），无第二套投影。

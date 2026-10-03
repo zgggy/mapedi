@@ -14,7 +14,7 @@
 ### ◐ 1. 变更纪律闭环（P0）——1-a ✓（`3b43698`）、1-b ✓（`4492ba4`→`43ff5d1`→第十八轮）、1-c ✓（第十九轮），2026-10-01
 
 - **内容**：① 修 undo 腐蚀——**✓ 1-a**：笔画快照-diff 多元素补丁（`MultiRegionCommand`）；② 高频直改命令化——**✓ 1-b 已全覆盖**：显隐（3 树连动整批）、样式、建层、保存信息（改名/描述/颜色）、外交三操作（`RegionFields/LayersVisibility/LayerStyle/AddLayer` 四纯数据命令 + `patchRegions` 快照执行器）、顺序（`moveItemStep`）、**路径域（`43ff5d1`）**——`withPaths` 快照执行器 + 控制点拖动会话（begin/commit，一次手势一条命令）+ `PathsCommand`（apply/revert 手动平面拷贝）覆盖 Viewport 六处与 store 五处（**坑：path.points 经 $state 深代理，structuredClone 必炸** → 手动平面拷贝 + `dispatchSave` 规范化重试）、**复制·删除·拖拽死码（第十八轮）**——`copyItem` 层支 `AddLayerCommand`/元素支 `CreateRegionCommand(at)`、`deleteItem` 层支 `DeleteLayerCommand`（ctor 快照层定义+regions+renderCfg，revert 全量恢复）、`dragLayer/dragRegion`/DropHint/`onMoveLayer` 死码删除（十轮拖动退役后零调用）；**判定残余（不阻塞 1-b 收口）**：climate/astro 无 UI 写入口=孤儿归步骤 7 大扫除、道路端点 `endpointOverrides` 属 region 域（独立于 paths，随 1-c 收口核对）；③ 命令纯数据化——**✓ 1-c（第十九轮）**：`PatchRegionsCommand`（死码，store.patchRegions 已用 RegionFieldsCommand）物理删除；`HeightStrokeCommand`（afterApply/afterRevert 闭包）合并入纯数据 `HeightCellsCommand`——**副作用改 store `historyEffect(cmd, dir)` 按命令类型分发**（`History.undo/redo` 返回被执命令或 null；高度笔画必须走 flushHeightRegions：区间/landsea 归属是派生数据，不重算=归属过期）；history.ts 闭包清零、grep 全库无残余。
-- **验收**：每类编辑撤销后 world 与改前**逐位一致**（"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a/1-b 已验（浏览器干净复测：撤笔画还原/显隐三态/改名列表回滚/建层消失/路径拖点撤销还原、**第十八轮：元素复制 9→8 撤销、图层复制 15→16→15、建层→右键删除→Ctrl+Z 恢复 15→16→15→16，零 error overlay**）。**1-c 已验（第十九轮）**：高度笔画画→Ctrl+Z→Ctrl+Y——cell 高度/海陆旗/区域成员**逐位回滚**（hD/oD/rD=0）、重做全 0、常规建层撤销 15→16→15→16 回归零错误；**stash A/B 证新旧码数字逐位相同**（行为保持）。**两注（诚实边界）**：① JSON round-trip 残余=快照类命令（删除/吞并/多元素）载荷含 Set/Map，编解码在历史面板需要持久化时补（面板会话内只读 label+跳转不需要）；② 高度笔画撤销后 `continentId` 标签与 region 数组序存在**预存漂移**（分区等价、真值 Region.cells 精确，A/B 证明非 1-c 引入）——已登记下方已知问题表。
+- **验收**：每类编辑撤销后 world 与改前**逐位一致**（"输出逐位不变法"）；命令可 JSON round-trip；grep 无绕过 history 的 `world.` 直改（生成/导入除外）。1-a/1-b 已验（浏览器干净复测：撤笔画还原/显隐三态/改名列表回滚/建层消失/路径拖点撤销还原、**第十八轮：元素复制 9→8 撤销、图层复制 15→16→15、建层→右键删除→Ctrl+Z 恢复 15→16→15→16，零 error overlay**）。**1-c 已验（第十九轮）**：高度笔画画→Ctrl+Z→Ctrl+Y——cell 高度/海陆旗/区域成员**逐位回滚**（hD/oD/rD=0）、重做全 0、常规建层撤销 15→16→15→16 回归零错误；**stash A/B 证新旧码数字逐位相同**（行为保持）。**两注（诚实边界）**：① JSON round-trip 残余=快照类命令（删除/吞并/多元素）载荷含 Set/Map，编解码在历史面板需要持久化时补（面板会话内只读 label+跳转不需要）；② ~~continentId 标签漂移~~**已随海陆案 A 消解**（2026-10-03 字段整体退役，域外零读者）；region 数组序漂移仍在（分区等价、真值 Region.cells 精确）。
 
 ### ✓ 2. GL 恢复路径（P0，单点故障）——2026-10-01 完成
 
@@ -48,11 +48,11 @@
 - **✓ 5-b3 相机运算出库（2026-10-01 第二十四轮）**：勘察结论=**MapTransform 原语早已成形**（`render/space.ts`/`render/map2d.ts`），本轮抽 `ui/planeCamera.ts`（145 行纯函数）：`zoomCamAt`（锚点缩放）/`panCam`/`contentPanDeltaX`/`bestDrawDxFor`（可见副本挑选）/`revealCamTarget`（C7 遮挡反解）/`startCamTween`（180ms easeOut 补间）——手势监听与绘制状态机留 Viewport（事件边界不动）。**验收（浏览器实测）**：缩放 ratio=1.331=1.1³、**锚点世界点误差 1.6e-16**；右键内容平移 +0.563、中键相机 dx=-80/319、dy=+40/319 精确；C7 露出端到端=元素拖至 sx137（轨下）→点行→补间 camDx=-2.059→sx794 入可见区、仅越界轴修正（dy=0）；tsc/svelte-check 0。**环境坑**：失焦页 rAF 冻结（0 帧）→ 补间不跑——**连拍截图泵 BeginFrame 即恢复**（4s/54 帧），以泵帧法验通。
 - **✓ 5-b4 DrawController（绘制会话出库，2026-10-01 第二十六轮）**：`app/drawController.ts`（400 行）——会话启停（成员/高度/道路）、笔刷命中、笔画快照-diff 入栈（undo 腐蚀采集端）、洪水填充/设中心/道路端点路段全量出库；状态（paintDirty/strokeSnap/高度样本/区间选择）随类迁移，选中/状态/失效族经 Ctx 注入；store 六段 facade 调用点零改动（1686→1462）。**验收**：高度三态=画 17/17/4 → 撤销全 0 → 重做全 0（stack0=0 干净栈）；成员笔画=无主地 +17 收编 → 撤销**被画子层精确还原 du=0**/depth=0；drawGuard「行省已隐藏」正常；tsc/svelte-check 0。
 - **✓ 5-b5 CommandService（命令 CRUD 出库，2026-10-01 第二十七轮）**：`app/commandService.ts`（814 行，**方法体自 store 原样搬运**——`this.*` 经类内代理映射 Ctx，零改写）：undo/redo+类型分发、删除/复制/吞并、图层树缩进·提升·移序、样式·显隐·透明度、路径快照执行器+拖动会话、字段快照执行器、新建·重命名·换色；选中类（selectLayerTop/clearLayerSelection/focusLayerForDraw）留 store（App 直连）。store **888 行**（日初 2045）。**验收（浏览器八组门面回归）**：建层/元素复制/删除层/缩进提升/显隐/样式（border.width 0.8→4.2→0.8）/withPaths/patchRegions 全部经 facade 生效且撤销回滚、栈归零、IDB 15 层清净、零 console 错。**教训**：undo 换 world 身份后**数组长度断言读旧引用=假阴**——对象字段级断言+栈计数+IDB 实读才是可信口径。孤儿 import 29 项清理；tsc/svelte-check 0。
-- **◐ 5-c App 转发器瘦身——首批完成（2026-10-01 第二十八轮），shell 面板面待协调**：
+- **✓ 5-c App 转发器瘦身（2026-10-03 全量收口，`716e03f`；步骤 5 至此全清）**：
   - **审计**：双向比对=真实 on* 赋值 **39 个、零死转发**（canPaint/onMoveLayer 类已在前轮清完）。
   - **✓ 首批（不碰 shell prop 面）**：① Viewport 四个纯 editor 转发下沉（onpaint/onradius/onendpoint/onstrokeend → 组件内直调 editor——该组件本就直连 store，路径编辑同先例），App 的 Viewport 标签 6 props→2；② `organize` 业务规则（图层 up=-1/元素 up=+1 映射）下沉 CommandService.organize+门面，App 删 9 行函数；③ 死 CSS `.gen-pending` 删除。App 532→**509**、Viewport 1437→1423。
   - **验收（浏览器）**：真指针笔画 down→move→up（走下沉 paint/commitStroke 链）61→撤销精确回 10、栈 1；alt+滚轮半径 1.5→1.65（下沉 onradius）；organize('indent') parentLayerId 翻转+撤销回弹；tsc/svelte-check 0、零 console 错。
-  - **☐ 剩余（~35 个，待与 UI 重构线协调后动）**：TopBar12/WorkspaceDrawer11/LayersPanel7/GenerateSection4/LeftRail4——均为 shell 面板面，单方面删改会与 UI 线撞车；清单在 HANDOFF。
+  - **✓ shell 面全量下沉（2026-10-03，`716e03f`）**：24 项纯转发改组件直连 editor（TopBar rename/clearCache、LeftRail undo/redo、GenerateSection shape/regen/param、LayersPanel 七项、WorkspaceDrawer 十项含 selectElement 整体下沉 store）+2 个零调用死 prop 删除；App 只余真数据流（style/projection/globe/railState）与编排（export/import/generate 后 switchView）。验收=冒烟（高度区间选中/空白收起/撤销钮）+ tsc/svelte-check 0。
 - **验收（总）**：各模块独立可测；App 不再是回调转发器；渲染不反向 import store。
 
 ### ◐ 6. 热路径与缓存保险（P1）——2026-10-01 核心三项落地，两项缓发
@@ -128,7 +128,7 @@
 
 - **地图模式三按钮 + 投影动画**（墨卡托基准烘焙 + LUT 插值）：待用户拍板，见记忆与 HANDOFF 日志第五十九次前后讨论。
 - **图集三选一**：已被 ✗（见上）。
-- **全新父子层级系统设计（2026-10-02）**：`docs/HIERARCHY_DESIGN_2026-10-02.md` —— 层显示树/生成单元源/元素行政树三处真相收敛为**一片层森林 + 一片元素森林**（`parentLayerId` 单源、units=子层、桥不变量 I-bridge），并含焦点整段叠放修复、读时有效显隐、删除策略表、元素 UI 重设计（承接 2026-10-01「子元素先删之后重设计」原话）。**待拍板 D1–D8（D1 单源统一 = 地基）**；拍板后按 包1 层级内核 → 包2 显示 → 包3 生成 → 包4 元素 UI 实施。**吸收 GEN_UNIFIED_DESIGN §6 引擎包**（指针方向反转：genParent 改为从 parentLayerId 派生）。
+- **全新父子层级系统设计（2026-10-02）**：`docs/HIERARCHY_DESIGN_2026-10-02.md` —— 层显示树/生成单元源/元素行政树三处真相收敛为**一片层森林 + 一片元素森林**（`parentLayerId` 单源、units=子层、桥不变量 I-bridge），并含焦点整段叠放修复、读时有效显隐、删除策略表、元素 UI 重设计（承接 2026-10-01「子元素先删之后重设计」原话）。**已拍（2026-10-03 用户委托全按推荐实施）并全部落地**：包1 层级内核 `c4ba324` → 包2 显示 `1980fdc` → 包3 生成 `268b307`（逐位哈希相等）→ 包4 元素 UI `b01c906`（子元素逐跳+手动挂靠）；读档修复/删除策略表/双路径清账（regionOps 溶解）齐。**吸收 GEN_UNIFIED_DESIGN §6 引擎包**（指针方向反转：genParent 改为从 parentLayerId 派生）。
 
 ## 六、UI 重构（设计定稿待实施）
 
@@ -146,4 +146,4 @@
 - **✓ U3 完成（2026-09-30，`04dcff1`+`e492241`）**：C7 有效视口（选中遮挡区 180ms easeOut 拉回；修 `viewportRoot` 未绑定、tween 漏 `requestRender` 两处根因）+ 生成段按层补全（非 height 层 params 类型化控件 + regenLayer、无配置层禁用、height 原样）+ 草稿持久化（mapedi.ui.gen 500ms 防抖）。浏览器端到端验证过（按层面板/草稿回读/遮挡判定+tween 帧数断言）。
 - **✓ 四把手重排包（2026-09-30 第三轮需求，`6ceb132`）**：左栏=图层把手+绘制/生成/显示三把手（FoldHandle 单源）+列表；**生成三分支**（cells=重新撒点 / height=生成高度图+海陆删旧建新 / 普通 regen / 路径禁用）；⚙ 移模式胶囊右、视图面板 3d/2d 互斥、星球组迁回；搜索按钮化；紧凑统一。配套架构设计：**`docs/GEN_UNIFIED_DESIGN.md`**（genParent 单源/递归/CASCADE 推导——引擎包待过目）。
 - **✓ 三模式双树包（2026-09-30 第四轮 E1-E5，`fc827ce`）**：**取代四把手结构**（需求演进非缺陷）——检查/生成/绘制 tab + 双树行级展开区 + C1 二修（推导式会话）+ 右键收敛（三 popover 退役）+ 平面编辑更名 + 球面锁。后续：**包2 新绘制语义（范围/自动扩展/笔刷类型）= 还债步骤 1 命令化后**；**包3 元素级生成 = 生成引擎包后**（GEN_UNIFIED_DESIGN §6）。
-- **待验收**：100k 性能回归、非 height 层长按生成、liftDrag/绘制会话全量回归（用户验收轮）；引擎包/海陆案 A 待拍板（设计稿 §6/§7）。
+- **待验收**：100k 性能回归、非 height 层长按生成、liftDrag/绘制会话全量回归（用户验收轮）。~~引擎包~~已随 HIERARCHY 包3 落地；**海陆案 A ✓（2026-10-03 `fc8664e` 产品级删除 landsea，-1171 行）**。

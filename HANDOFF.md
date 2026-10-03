@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = HIERARCHY O2 树遍历单源（`7622abe`）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 海陆案 A 删除 landsea（`fc8664e`）。**
 
 ## 先读
 
@@ -13,7 +13,15 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第三十六轮完成；在案：`56574f9` 滑块挤压修复 → `7622abe` O2 树遍历单源）
+## 当前状态（第三十七轮完成；在案：`c4ba324` HIERARCHY 包1 → `1980fdc` 包2 → `268b307` 包3 → `b01c906` 包4 → `8ef38d6` EXPAND 包4 → `716e03f` 5-c 全量 → `fc8664e` 海陆案 A）
+
+- **✓ 第三十七轮（2026-10-03 用户委托「把我没拍的全部做完」——四件全清）**：
+  - **HIERARCHY 包1–4（D1–D8 全按推荐拍板并落地）**：包1 `c4ba324` hierarchy/{derive,gate,ops,policy} 四件+读档修复+DeleteLayer 链拼接+copy 成根+D3 锚点同源+**regionOps 整体溶解**（死路径删、测试迁 history/ops/gate 规则面）；包2 `1980fdc` 焦点整段叠放（derive.layerStackComparator 单源）+I6 effective 显隐+**D8 关=只写自身**（stash 像素 A/B 底0%/信号10%格状斑块）；包3 `268b307` units=层树派生（fromLayerId 三处退役）+拓扑级联替 CASCADE_ORDER（dependsOn 真消费、profiles 零迁移）+递归 regen——**全级联 serialize 哈希新旧逐位相等**；包4 `b01c906` 子元素逐跳（O1）+手动挂靠（D4，打分单源 bestParentAmong）。
+  - **EXPAND 包4 `8ef38d6`**（L0 子层结构点，配置标随 D6 撤销）→ **EXPAND 五包全清**；**还债 5-c `716e03f`** 24 项纯转发下沉+selectElement 入 store+2 死 prop → **步骤 5 全清**。
+  - **海陆案 A `fc8664e`（破坏性，-1171 行）**：产品级删 landsea——builtin/旧档清理（ensureBuiltinLayers 唯一入口）、landSea.ts+heightRegions.ts 整删、rebuild 十处调用链、拆海 manualSplit、**continentId 全链退役**（域外零读者）、piecePatch 队列机制删除；海色=底色+高度区间实测不变（12 区间出件）；旧档载入 14 层/87 实体清零；高度涂改真实路径 commit→undo 精确复原；scratch heightmap 12 区间+序列化回环幂等。
+  - **验证教训**：① 合成笔画的 pointerup 必须派到**画布本体**（Viewport onpointerup → commitStroke），派 window 或走 Esc = endDraw 不提交、笔画悬空——回滚法=`drawCtl.heightStroke` 快照仍驻内存，按 {id,h} 逐格复原+清 paint 态即可精确还原；② 全严格档 tsc 扫 tests 有存量类型漂移（vitest 不做类型检查）——只对自己动过的测试文件认账。
+  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
+
 
 - **✓ 第三十六轮（2026-10-03 用户报障修复 + HIERARCHY O2）**：
   - **地形网格挤压（包3 引入的真 bug）**：山脉/细节/海床三格滑块被压成 2px 横线——根因=`.tcell` 列向 flex 格里 `.cap` 是 `flex:1 1 0%`（**basis 0 不计容器固有高度**），中间行三格全滑块 → 行高只剩标签 16px；有数字输入格的行被抬到 40px 才掩盖。修=`.cap` 改 `flex:1 1 auto`（行向仍靠 grow 填满=视觉不变，列向恢复固有高），组件级一处修全。**全库扫描**（生成三分支/检查四态/绘制/组织/⚙弹层）压扁+裁切控件 = 0（`56574f9`）。
@@ -83,27 +91,14 @@
   - **环境坑（入 quirks）**：失焦页 rAF 冻结（0 帧）→ 补间类验证全假阴——**连拍 `tab.screenshot()` 泵 BeginFrame 即恢复**（4s/54 帧），泵帧后再读结果。
   - 子包进度：5-a ✓ 5-b1 ✓ 5-b2 ✓ 插单 ✓ **5-b3 ✓** / 5-b4 ☐（Command/Draw）/ 5-c ☐。
 
-- **✓ 第二十三轮（2026-10-01，还债 5-b2：GenerationService 生成编排出库）**：
-  - `app/generationService.ts`（239 行）：Worker/主线程双路+regenLayer+profiles·worldShape·预设·开关出库；**generationSeq 模块化**（与 tryRestore/import 共享互斥闸）；store 六门面调用点零改动；store 1810→1686。
-  - **修预存静默缺陷**：profileParams 直传 ui=$state 深代理 → Worker postMessage DataCloneError → **生成一直无声回退主线程**（旧 catch 吞错，本批加 console.warn 才暴露）；修=params `{...p.params}` 平面化 → 实测「100000 地块 · Worker」11.2s 零 warn。
-  - **验收**：参数三件快照-还原逐位一致（toggle/setProfileParam/预设 landRatio 0.12）；3k Worker 路径 status「地块 · Worker」；regenLayer 回显；tsc/svelte-check 0。
-  - **⚠ 事故（诚实记录）**：真点生成的 invalidate 保护法**失手**——3k 测试世界写进 autosave（唯一键）覆盖用户 100k 旧档；已默认参数重生成 100k（seed=页面草稿 188943080）落盘恢复。**教训：保护法用 IDB 快照（先读 json 留底、测后回写），invalidate 不保险**（见 generation-harness memory）。
-  - 子包进度：5-a ✓/5-b1 ✓/**5-b2 ✓**/5-b3 ☐（MapTransform/ViewportController）/5-b4 ☐（Command/Draw，UI 态耦合最重殿后）/5-c ☐。
-
-- **✓ 第二十二轮（2026-10-01，还债 5-b1：自动保存机械出库）**：
-  - **`app/autosaveService.ts`（新 ~140 行）**：2s 防抖+epoch 作废+Worker 派发（busy/latest-wins）+DataCloneError 平面化重试+同步降级链+drain 等待器整体出库；Ctx={world/snapPaths/autosaveAt/status}（**$state 写仍走 store 闭包**）；Worker URL `../persist/saveWorker.ts` 从 app/ 出发同深度不变。
-  - **store**：删 saveTimer/saveEpoch/saveQueue/saveWorker* 七字段 + scheduleAutosave/saveDrain/releaseSaveWaiters/ensureSaveWorker/dispatchSave/saveSync 六方法体；留 `scheduleAutosave()` 门面；`replaceWorld/clearAutosave` 改 `autosave.invalidate()/drainQueue()/drain()`；孤儿 import（idbSave/serializeWorld）清。store 1900→1810。
-  - **验收**：显隐触碰→防抖 2s→Worker→回显 3:51:36→3:51:59；**IDB 实读** at 新鲜/cells=100000/regions=162/无 cellClimate/biome（步骤4 回归✓）；Ctrl+Z 复原；tsc/svelte-check 0。**注**：clearAutosave 未实跑（删用户存档=破坏性，机械移植+tsc 兜底）；DataCloneError 重试=1-b 已验收逻辑原样搬运。
-  - **步骤 5 子包进度**：5-a ✓ / **5-b1 ✓** / 5-b2 ☐（CommandService/Generation/DrawController）/ 5-b3 ☐（MapTransform/ViewportController）/ 5-c ☐。
-
 ## 遗留清单（按优先级）
 
 1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
-2. ~~1-c~~ **已收口（第十九轮）**：闭包清零、undo/redo 返回命令+store 类型分发；残余=Set/Map 载荷 JSON 编解码（历史面板持久化时补）+ 高度撤销 continentId 标签漂移（预存已登记）。
-3. 还债步骤 **1 ✓ / 2 ✓ / 3 ✓ / 4 ✓ / 5 ◐（5-a ✓ 5-b1 ✓ 5-b2 ✓，剩 5-b3 Viewport 变换、5-b4 命令/绘制、5-c App 回调）/ 6 ◐**、步骤 7 大扫除（顺带判 climate/astro 孤儿 + nature.ts 死码 + 路网再生成设计）。
+2. ~~1-c~~ **已收口（第十九轮）**：闭包清零、undo/redo 返回命令+store 类型分发；残余=Set/Map 载荷 JSON 编解码（历史面板持久化时补）+ ~~高度撤销 continentId 标签漂移~~（随海陆案 A 字段退役消解）。
+3. 还债步骤 **1 ✓ / 2 ✓ / 3 ✓ / 4 ✓ / 5 ✓（第三十七轮 5-c 全量收口）/ 6 ◐（GL/2D 副本统一、borderCache rev 键两项缓发）**、步骤 7 ✓。
 4. ~~两面板创建行共用 newName~~ **已拆**（第十二轮：各面板局部 text 独立过滤）；全局 newName 现只服务子级 CreateBox。
 5. 同类 stale 潜力点按 view 快照模式逐步收编（DisplayStylePanel 内部直读 style 的模板等——见 ROADMAP_REFACTOR 已知问题表）。
-6. **专属色/外交 = UI 已删、数据层 legacy 保留**：`Region.exclusiveColor`、`core/diplomacy.ts`、piece 传递与 regionOps 自动填充仍在（无 UI 入口）——若要"概念彻底消失"需动渲染/序列化，待用户拍板再清。
+6. **专属色/外交 = UI 已删、数据层 legacy 保留**：`Region.exclusiveColor`、`core/diplomacy.ts`、piece 传递与 AnnexCommand 重挂仍在（无 UI 入口；regionOps 已随 HIERARCHY 包1 溶解）——若要"概念彻底消失"需动渲染/序列化，待用户拍板再清。
 
 ## 验证方法论（本会话累积的坑，务必沿用）
 
@@ -139,5 +134,5 @@
 
 ## 下一轮候选
 
-- **EXPAND 全包近清（包1✓2✓3✓5✓、包4◐ 余配置态/子层点）**；下一步候选：5-c 剩余 shell 协调（~35 转发）、EXPAND 包4 收尾、HIERARCHY O2（树遍历收敛，不依赖拍板）、或用户点名（历史面板/功能包）。
+- **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓）**；下一步只剩用户点名：功能包（比例尺/指南针/测量/搜索跳转/历史面板）、100k 性能与绘制会话回归验收、路径生成 R7（明示先不做）。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。
