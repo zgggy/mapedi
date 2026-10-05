@@ -60,8 +60,8 @@ function perlin3(x: number, y: number, z: number, seed: number): number {
 }
 
 /** 分形布朗运动：多倍频叠加（lacunarity=2, gain=0.5），输出 ≈ [-1,1] */
-/** 分层 fbm（IQ 形式：lacunarity=2、gain=0.5）——buildTerrain 与 refineHeight 单源共用 */
-export function fbm(x: number, y: number, z: number, seed: number, octaves = 5): number {
+/** 分层 fbm（IQ 形式：lacunarity=2、gain=0.5） */
+function fbm(x: number, y: number, z: number, seed: number, octaves = 5): number {
   let amp = 0.5, freq = 1, sum = 0, norm = 0;
   for (let i = 0; i < octaves; i++) {
     sum += amp * perlin3(x * freq, y * freq, z * freq, seed + i * 131);
@@ -73,8 +73,8 @@ export function fbm(x: number, y: number, z: number, seed: number, octaves = 5):
 }
 
 /** 山脊 FBM：(1−|n|)² 累积 → 连绵山脊（非鼓包） */
-/** 山脊 fbm [0,1]——细化（山系混合）与建地形同源 */
-export function ridged(x: number, y: number, z: number, seed: number, octaves = 5): number {
+/** 山脊 fbm [0,1] */
+function ridged(x: number, y: number, z: number, seed: number, octaves = 5): number {
   let amp = 0.5, freq = 1, sum = 0, norm = 0;
   for (let i = 0; i < octaves; i++) {
     const n = perlin3(x * freq, y * freq, z * freq, seed + 700 + i * 37);
@@ -87,14 +87,14 @@ export function ridged(x: number, y: number, z: number, seed: number, octaves = 
   return sum / norm;
 }
 
-export const smoothstep = (e0: number, e1: number, x: number): number => {
+const smoothstep = (e0: number, e1: number, x: number): number => {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
 };
 
 type V3 = { x: number; y: number; z: number };
 
-export function unitOf(lonDeg: number, latDeg: number): V3 {
+function unitOf(lonDeg: number, latDeg: number): V3 {
   const λ = (lonDeg * Math.PI) / 180;
   const φ = (latDeg * Math.PI) / 180;
   const c = Math.cos(φ);

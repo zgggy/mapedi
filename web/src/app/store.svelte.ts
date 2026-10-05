@@ -469,9 +469,9 @@ export class EditorStore {
     this.gen.regenLayer(layerId, seed, cascadeDown);
   }
 
-  /** 基于已有高度图细化（2026-10-06：开关开 → 不重新生成，只细化） */
-  refineHeight(detail: number, mountain: number, seed?: number) {
-    this.gen.refineHeightLayer(detail, mountain, seed);
+  /** 基于已有海岸线生成（2026-10-06：开关开 → 按 mask 走完整重新生成+分位重映射） */
+  refineHeight(shape: WorldShape, seed?: number) {
+    this.gen.refineHeightLayer(shape, seed);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean) {

@@ -19,6 +19,7 @@
   import type { WorldShape } from '../../core/layer/genTypes';
   import type { GenStrategy } from '../../core/types';
   import { HARD_MAX_DENSITY } from '../../core/world';
+  import { DEFAULT_WORLD_SHAPE } from '../../core/layer/genTypes';
 
   let {
     generating = false,
@@ -133,8 +134,8 @@
     const t = seedInput.trim();
     const sv = t === '' ? undefined : Number(t);
     if (isHeightmap && basedOn) {
-      // 基于已有（拍板 1b）：细节量/山脉强度两钮即细化参数（shape 单源），其余旋钮已隐藏
-      editor.refineHeight(shape?.detail ?? 0.5, shape?.mountain ?? 0.5, sv);
+      // 基于已有（2026-10-06 澄清）：按绘制海岸线走完整重新生成（地形旋钮全套有效）
+      editor.refineHeight(shape ?? DEFAULT_WORLD_SHAPE, sv);
       return;
     }
     editor.regenLayer(layerId, sv, cascadeDown);
@@ -177,7 +178,7 @@
           <span
             class="based"
             style="margin-left:auto"
-            title="开 = 基于已绘制的高度图细化：大陆形状不变、档间长出中间层（参数 = 下方「细节量 / 山脉强度」两钮）；关 = 按旋钮重新生成"
+            title="开 = 基于已绘制的海岸线重新生成（山系/细节/海底/侵蚀全套算法，海岸线逐格不变，顶峰到深海齐全）；关 = 按旋钮常规重新生成"
           >基于已有
             <StateCapsule
               icon="🧱"
@@ -197,7 +198,7 @@
             ? basedOn ? '⚠ 确认细化（清除其他图层）？' : '⚠ 确认（清除其他图层）？'
             : basedOn ? '⛰️ 基于已有细化' : '⛰️ 生成高度图'}</button>
         </div>
-        <div class="hint">{#if basedOn}保持已绘制的大陆形状不变，细化出更丰富的高度层次（参数 = 细节量 / 山脉强度）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
+        <div class="hint">{#if basedOn}按地形旋钮完整重新生成（同一套算法：山系/细节/海底/侵蚀），**海岸线保持你绘制的轮廓**，从顶峰到深海各档齐全（大陆占比/落差由海岸线与满谱取代已隐藏）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -217,28 +218,16 @@
               <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => setShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
             </label>
             {/if}
-            {#if !basedOn}
             <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => setShape('continentScale', v)} /></label>
-            {/if}
-            {#if !basedOn}
             <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => setShape('coastBreak', v)} /></label>
-            {/if}
             <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => setShape('mountain', v)} /></label>
             <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => setShape('detail', v)} /></label>
-            {#if !basedOn}
             <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => setShape('seaRugged', v)} /></label>
-            {/if}
-            {#if !basedOn}
             <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => setShape('flatness', v)} /></label>
-            {/if}
-            {#if !basedOn}
             <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
-            {/if}
-            {#if !basedOn}
             <label class="tcell"><span>侵蚀</span>
               <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
             </label>
-            {/if}
           </div>
         {/if}
       {:else}

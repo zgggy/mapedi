@@ -164,19 +164,19 @@ export class GenerationService {
   }
 
   /**
-   * 基于已有高度图细化（2026-10-06 用户拍板 1b）：不重新生成——用户绘制的粗高度图
-   * 走 refineHeight（同侧扩散梯度化 + fbm/ridged 细节 + 侧 clamp），**海陆 mask 不变**、
-   * 档间长出中间层；细节量/山脉强度 = 地形旋钮两个（shape.detail/shape.mountain）。
-   * 快照→变更→HeightCellsCommand 入栈（可撤销）→ flushHeightRegions 重物化区间元素。
+   * 基于已有高度图生成（2026-10-06 用户澄清）：**基于绘制的海岸线**走完整重新
+   * 生成管线（buildTerrain 同套）→ 分位重映射到 mask（陆 [1,64] 顶峰 / 海 [-63,0]
+   * 深海，gamma=flatness）——从顶峰到深海各档全有，海岸线逐格=绘制。
+   * 快照→变更→HeightCellsCommand 入栈（可撤销，保用户手稿）→ flushHeightRegions。
    */
-  refineHeightLayer(detail: number, mountain: number, seed?: number): void {
+  refineHeightLayer(shape: WorldShape, seed?: number): void {
     const world = this.ctx.world;
     if (!world) return;
     const s = Number.isFinite(seed) ? (seed as number) : world.meta.seed;
     const snap = world.cells.map((c) => c.height);
-    const changed = refineHeight(world, { seed: s, detail, mountain });
+    const changed = refineHeight(world, { seed: s, shape });
     if (!changed) {
-      this.ctx.setStatus('已有高度图无可细化内容（先绘制高度或调大细节量）');
+      this.ctx.setStatus('无可基于的海岸线（先绘制出陆地）');
       this.ctx.notify();
       return;
     }
@@ -187,7 +187,7 @@ export class GenerationService {
     history.run(world, new HeightCellsCommand(samples, '基于已有细化'), { alreadyApplied: true });
     this.ctx.flushHeightRegions?.(samples);
     this.ctx.touchWorld();
-    this.ctx.setStatus(`已基于已有高度图细化 · 种子 ${s} · ${samples.length} 格`);
+    this.ctx.setStatus(`已按绘制海岸线重新生成地形 · 种子 ${s} · ${samples.length} 格`);
     this.ctx.scheduleAutosave();
     this.ctx.notify();
   }
