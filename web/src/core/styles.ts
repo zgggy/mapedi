@@ -1,3 +1,5 @@
+import type { ElementStylePatch } from './layer/style';
+
 export interface StrokeStyle {
   color: string;
   width: number;
@@ -38,6 +40,13 @@ export interface StyleSet {
    * 保色相（层间/国家间区分度不变）只压饱和与鲜度，覆盖彩虹板等所有数据色渲染点。
    */
   desaturate?: number;
+  /**
+   * **视图级图层默认样式**（2026-10-06 用户定架构「不同视图下各图层颜色集与默认显示
+   * 参数不同」）：键 = layerId，值 = ElementStylePatch。解析链 = 静态默认 → **视图覆盖**
+   * → 存档覆盖（存档优先：用户显式调过的不被视图压掉；写入走数据基线不含视图，零污染）。
+   * 图层颜色集 = `heightBands`（同属视图携带的图层配置）。
+   */
+  layerStyles?: Record<string, ElementStylePatch>;
   cellStroke: StrokeStyle;
   regionStroke: StrokeStyle;
   continentStroke: StrokeStyle;
@@ -98,14 +107,17 @@ export const PRESET_STYLES: StyleSet[] = [
     // 123freevectors/historicpictoric 交叉）。
     ocean: '#a9c0b7',
     landBase: '#e4d5b0',
-    // 高度 12 档（古地图羊皮纸系：水=灰蓝绿四档渐浅、陆=沙黄→赭黄→棕四档渐深、
-    // 山=棕褐两档、顶峰米白；饱和度整体压低——「羊皮纸上没有丰富色彩」）
+    // 高度 12 档（古地图羊皮纸系；2026-10-06 用户定「分别减少海洋和陆地几个高度
+    // 之间的差别」→ 组内步进压缩：海四档 Δ≈8、陆六档 Δ≈6-13（原 10-30）——层次弱化
+    // 但不抹平；**组间**（浅滩→海岸蓝→沙、高山→顶峰米白）保持清晰分界）
     heightBands: [
-      '#7e97a1', '#8fa9b2', '#a3bbc2', '#b7ccd1',
-      '#d9cfa6', '#cfc08a', '#c4b377', '#b9a466',
-      '#a98f55', '#96794a', '#7e6440', '#efe6ce',
+      '#7f98a2', '#879fa9', '#8fa7b1', '#97afb9',
+      '#d6cca4', '#cec191', '#c7ba8a', '#c0b383',
+      '#b3a678', '#a6996d', '#94875f', '#ece2cd',
     ],
     desaturate: 0.45,
+    // 高度层不显示边界（同日用户定）：档间/陆海描边关（选中态仍画专属色——sel 优先）
+    layerStyles: { height: { border: { enabled: false } } },
     /** 框外 = 旧地图装裱底（深暖褐，区别于默认黑） */
     frameVoid: 'rgba(52, 40, 26, 0.92)',
     symbols: { vegetation: true, capital: true, scale: 1 },

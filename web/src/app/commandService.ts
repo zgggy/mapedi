@@ -18,6 +18,7 @@ import {
   type ElementStylePatch,
 } from '../core/layer/style';
 import { resolveLayerStyle } from '../core/layer/config';
+import { styleById } from '../core/styles';
 import { defaultFocusLayerId } from '../core/layer/flags';
 import { layerTreeOf } from '../core/hierarchy/derive';
 import { planIndent, planPromote, layerCopyAsRoot, bestParentFor, reparentElement } from '../core/hierarchy/ops';
@@ -51,6 +52,8 @@ import {
 /** store 注入的宿主能力（方法体内的 this.* 经下方代理映射到此） */
 export interface CommandCtx {
   readonly world: World | null;
+  /** 当前视图风格 id（层样式解析的视图层入参；面板显示**生效值**用） */
+  readonly styleId: string;
   get selectedRegionId(): string | null;
   set selectedRegionId(v: string | null);
   get focusLayer(): string;
@@ -600,9 +603,9 @@ export class CommandService {
     return pool[Math.floor(Math.random() * pool.length)] + ' ' + (1 + Math.floor(Math.random() * 9));
   }
 
-  /** 图层显示样式（DisplayStyle 面板） */
+  /** 图层显示样式（DisplayStyle 面板）：显示**生效值**（含视图级默认覆盖，与地图一致） */
   layerStyleConfig(id: string): ElementStyle {
-    return resolveLayerStyle(this.world, id);
+    return resolveLayerStyle(this.world, id, styleById(this.ctx.styleId));
   }
 
   /**

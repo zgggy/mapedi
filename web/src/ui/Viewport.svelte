@@ -43,6 +43,7 @@
   import { editsHeightAt } from '../core/layer/flags';
   import type { LonLat } from '../core/types';
   import { resolveLayerStyle } from '../core/layer/config';
+  import { styleById } from '../core/styles';
   import { editor } from '../app/store.svelte';
   import {
     consumeHeightDeltas,
@@ -698,7 +699,7 @@
           styleId,
           displayPieces: undefined,
           showCellMesh: false,
-          styleOf: (id: string) => resolveLayerStyle(world, id),
+          styleOf: (id: string) => resolveLayerStyle(world, id, styleById(styleId)),
         },
         world.layers.map((l) => l.id),
         (pieces) => gl?.prime(pieces),
@@ -876,7 +877,7 @@
       glScene: ensureMapGl() ?? undefined,
       onGeometryReady: requestRender,
       progressiveBoot: !warmDone,
-      styleOf: (id: string) => resolveLayerStyle(world, id),
+      styleOf: (id: string) => resolveLayerStyle(world, id, styleById(styleId)),
       borderStyle: focusLayer ? resolveLayerStyle(world, focusLayer) : undefined,
       showCellMesh: focusIsBaseMesh || (baseMeshLayer?.visible ?? false),
       hidePathId:

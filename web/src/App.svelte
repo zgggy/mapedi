@@ -19,7 +19,8 @@
 
   let shell = $state<ShellState>(initialShell());
   let hover = $state<HoverInfo | null>(null);
-  let styleId = $state('dark');
+  /** 视图风格（store 单源：命令服务的视图级层默认解析也要读它） */
+  const styleId = $derived(editor.styleId);
   let projection = $state<import('./core/project/projections').ProjectionId>('robinson');
   let globeAxis = $state(true);
   let globeEcliptic = $state(true);
@@ -339,7 +340,7 @@
       }
     }}
     {styleId}
-    onStyle={(s) => (styleId = s)}
+    onStyle={(s) => (editor.styleId = s)}
     projection={projection}
     onProjection={(p) => (projection = p as import('./core/project/projections').ProjectionId)}
     globeShowAxis={globeAxis}

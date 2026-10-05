@@ -203,12 +203,20 @@ export function defaultStyleForLayer(id: LayerId): ElementStyle {
   return cloneElementStyle(defaultLayerConfig(id).style);
 }
 
-/** 合并存档覆盖 → 完整样式（唯一入口，渲染/面板共用） */
+/**
+ * 合并**视图覆盖**与存档覆盖 → 完整样式（唯一入口，渲染/面板共用）。
+ * 链 = 静态默认 → 视图级默认（StyleSet.layerStyles，2026-10-06 架构：不同视图下各图层
+ * 颜色集与默认显示参数不同）→ 存档覆盖（存档优先：用户显式调过的不被视图压掉）。
+ * **写入侧不吃视图层**（setLayerStyle 走无 style 的数据基线）——存档零污染、切视图不残留。
+ */
 export function resolveLayerStyle(
   world: { layerRenderConfig?: Map<string, unknown> } | null | undefined,
   id: LayerId,
+  style?: { layerStyles?: Record<string, ElementStylePatch> } | null,
 ): ElementStyle {
-  const base = defaultStyleForLayer(id);
+  let base = defaultStyleForLayer(id);
+  const viewPatch = style?.layerStyles?.[id];
+  if (viewPatch) base = patchElementStyle(base, viewPatch);
   const stored = world?.layerRenderConfig?.get(id);
   if (!stored) return base;
   return patchElementStyle(base, normalizeStyle(stored) as ElementStylePatch);

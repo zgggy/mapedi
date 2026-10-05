@@ -46,6 +46,8 @@ const ui = $state({
   densityInput: DEFAULT_DENSITY,
   densityUnlocked: false,
   focusLayer: DEFAULT_FOCUS_LAYER_ID,
+  /** 当前视图风格（dark/parchment…）：视图级图层默认/颜色集的解析入参（2026-10-06 架构） */
+  styleId: 'dark',
   selectedRegionId: null as string | null,
   newName: '',
   annexPick: false,
@@ -166,6 +168,8 @@ export class EditorStore {
   set densityUnlocked(v: boolean) { ui.densityUnlocked = v; }
   get focusLayer() { return ui.focusLayer; }
   set focusLayer(v: string) { ui.focusLayer = v; }
+  get styleId() { return ui.styleId; }
+  set styleId(v: string) { ui.styleId = v; }
   get selectedRegionId() { return ui.selectedRegionId; }
   set selectedRegionId(v: string | null) { ui.selectedRegionId = v; }
   get newName() { return ui.newName; }
@@ -350,6 +354,7 @@ export class EditorStore {
 
   /** 命令 CRUD 与历史门面（还债 5-b5）——选中/焦点/状态/失效族经闭包注入 */
   private readonly cmds = new CommandService({
+    get styleId() { return ui.styleId; },
     get world() {
       return worldRaw;
     },
