@@ -26,6 +26,18 @@ export interface StyleSet {
     scale: number;
   };
   hillshade: boolean;
+  /**
+   * 高度 12 档覆盖色（2026-10-06 用户定「羊皮纸要改高度图每个高度的颜色——
+   * 羊皮纸上没有这么丰富的色彩」）：缺省 = 数据色（core/layer/heightIntervals
+   * 的 COLORS，逐元素 reg.color 落盘）；定义则渲染取色处按区间覆盖
+   * （填色/描边/符号同源），不改数据。
+   */
+  heightBands?: string[];
+  /**
+   * 元素色整体去饱和系数（0..1 = 饱和度保留比例；parchment=0.45）：古地图手绘淡彩式——
+   * 保色相（层间/国家间区分度不变）只压饱和与鲜度，覆盖彩虹板等所有数据色渲染点。
+   */
+  desaturate?: number;
   cellStroke: StrokeStyle;
   regionStroke: StrokeStyle;
   continentStroke: StrokeStyle;
@@ -86,6 +98,14 @@ export const PRESET_STYLES: StyleSet[] = [
     // 123freevectors/historicpictoric 交叉）。
     ocean: '#a9c0b7',
     landBase: '#e4d5b0',
+    // 高度 12 档（古地图羊皮纸系：水=灰蓝绿四档渐浅、陆=沙黄→赭黄→棕四档渐深、
+    // 山=棕褐两档、顶峰米白；饱和度整体压低——「羊皮纸上没有丰富色彩」）
+    heightBands: [
+      '#7e97a1', '#8fa9b2', '#a3bbc2', '#b7ccd1',
+      '#d9cfa6', '#cfc08a', '#c4b377', '#b9a466',
+      '#a98f55', '#96794a', '#7e6440', '#efe6ce',
+    ],
+    desaturate: 0.45,
     /** 框外 = 旧地图装裱底（深暖褐，区别于默认黑） */
     frameVoid: 'rgba(52, 40, 26, 0.92)',
     symbols: { vegetation: true, capital: true, scale: 1 },

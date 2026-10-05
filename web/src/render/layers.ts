@@ -15,6 +15,7 @@ import {
   hasPieceEntry,
 } from './borderCache';
 import { defaultExclusiveColor } from '../core/layer/style';
+import { heightToIntervalIndex } from '../core/layer/heightIntervals';
 import { prepareDisplayRings } from '../core/ring/normalize';
 import type { MidRing, DisplayRing } from '../core/ring/displayRing';
 import {
@@ -272,6 +273,37 @@ export function cssToRgba(c: string): [number, number, number, number] | null {
   return null;
 }
 
+/**
+ * 元素渲染取色（2026-10-06）：数据色 `reg.color` 是唯一真相；风格带 `StyleSet.heightBands`
+ * 定义时（羊皮纸）按高度区间覆盖——填色/描边/核心符号同走此函数，不改数据、暗色模式行为不变。
+ */
+function bandColorOf(
+  style: StyleSet,
+  region?: { color: string; attributes?: Record<string, unknown> },
+): string {
+  // 风格带（高度档）已是按风格调好的成品色 → 不再二次压饱和
+  if (style.heightBands && region?.attributes?.kind === 'interval') {
+    const lo = region.attributes.lo;
+    if (typeof lo === 'number') return style.heightBands[heightToIntervalIndex(lo)] ?? region.color;
+    return region.color;
+  }
+  const raw = region?.color ?? '#888';
+  const k = style.desaturate;
+  return k === undefined || k >= 1 ? raw : desaturateHex(raw, k);
+}
+/** 去饱和（保色相）+ 轻压亮：古地图淡彩。只认 #rrggbb；解析不了原样返回（护栏仅限格式） */
+function desaturateHex(hex: string, keep: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+  const mid = (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
+  // 向中点线性缩放：通道差 ×keep → 降饱和、保色相、中性色不变、单调（不跳变）
+  const out = (c: number) => Math.round(mid + (c - mid) * keep);
+  const hex2 = (c: number) => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0');
+  return `#${hex2(out(r))}${hex2(out(g))}${hex2(out(b))}`;
+}
+
 /** 元素显示参数（样式链唯一解析结果）：GL 直绘唯一消费。（Canvas2D 管线已归档） */
 export interface PieceParams {
   key: string;
@@ -386,12 +418,13 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       const fy = fr.minY;
       const fw = fr.maxX - fr.minX + pad * 2;
       const fh = fr.maxY - fr.minY;
+      const bandFill = bandColorOf(env.style, regionById.get(rid));
       out.push({
         key: dp.key,
         rings: [],
-        fullFrame: { color: dp.color, alpha, minX: fx, maxX: fx + fw, minY: fy, maxY: fy + fh },
+        fullFrame: { color: bandFill, alpha, minX: fx, maxX: fx + fw, minY: fy, maxY: fy + fh },
         fillOn: true,
-        fillColor: dp.color,
+        fillColor: bandFill,
         fillAlpha: alpha,
         stroke: 'transparent',
         strokeW: 0,
@@ -413,7 +446,8 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
     if (needBound && !sel) seenBound.add(dp.key);
 
     const region = regionById.get(rid);
-    const strokeCol = region ? darkenHex(region.color, 0.7) : elColor;
+    const effColor = bandColorOf(env.style, region);
+    const strokeCol = region ? darkenHex(effColor, 0.7) : elColor;
     // 选中：边界必须可见（颜色覆盖为专属色，宽度给已配置宽），与「选中元素最顶」配套
     const strokeW = (sel || elOn) ? (bw * (sel ? 1.6 : 1)) / cam.scale : 0;
     out.push({
@@ -421,7 +455,7 @@ export function buildPieceParams(env: RenderEnv): PieceParams[] {
       rings: prepared,
       fullFrame: null,
       fillOn: needFill,
-      fillColor: dp.color,
+      fillColor: effColor,
       fillAlpha: fillA * (dp.opacity ?? 1),
       stroke: sel ? defaultExclusiveColor(region?.color ?? '#f0c36a') : (elOn ? strokeCol : 'transparent'),
       strokeW,
@@ -1195,7 +1229,7 @@ export const decorationsLayer: RenderLayer = {
         symPlan.push({
           sym: d.coreSym,
           coreId,
-          color: r.color,
+          color: bandColorOf(style, r),
           size: spec.size,
           sx: sp.sx,
           sy: sp.sy,
