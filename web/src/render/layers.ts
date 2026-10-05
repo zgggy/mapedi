@@ -804,7 +804,7 @@ interface LabelFrameStat {
   cold: number;
   off: number;
   /** 已放置项（name + 屏幕坐标）：验收/回归读数 */
-  items: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number }[];
+  items: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number; fs: number }[];
   /** 视口盒 [vL,vR,vB,vT]（世界 y 向上） */
   view: number[];
   /** 本帧画出的核心符号数（累加各副本 pass）——R14「符号先消失」验收读数 */
@@ -1114,14 +1114,17 @@ export const decorationsLayer: RenderLayer = {
   repeat: true,
   draw(env) {
     const { ctx, world, cam, style, focus, pcache, dpr, w, h, showLabels } = env;
-    // 旧实现：`cam.scale < 90` 整层一刀切 → 现改为 **R14 分档缩放阶梯**：
-    // 名称按本层 `minScale`（档位表），核心符号 = 名称门槛 + 20（缩小过程中**符号先消失**），
-    // cell 级装饰（树 / id 标记，调试性质）保留旧的 90 地板。
+    // 显示契约（2026-10-06 用户定「缩放小了很多文字标签不显示——应该总是显示；
+    // 随缩放缩放、不因缩放重绘，相对大小与地图完全一致」）：
+    // - 文字标签**无缩放门槛**（R14 分档阶梯与 minScale 过滤一并废除——字号 ∝ cam.scale，
+    //   布局判定在世界空间做，缩放=全等变换 → 放置结果与缩放无关、不重排）；
+    // - 核心符号/格标同不再设阶梯（符号本身世界锚定）；cell 装饰（树 / id 标记）
+    //   保留旧的 90 地板（调试性，未在契约内）。
     const decorFloor = cam.scale < 90;
+    /** 字号缩放系数：基准 180（defaultCamera）→ 字号/占位/字距/光晕全 ×k = 与地图同缩放 */
+    const kScale = cam.scale / 180;
     const sc = style.symbols?.scale || 1;
     const font = style.labels.default;
-    /** 符号比名称早 20 个 scale 消失（R14：符号先消失、名称后消失） */
-    const SYM_LADDER = 20;
     const specMemo = new Map<string, LabelSpec>();
     const specOf = (layer: World['layers'][number]): LabelSpec => {
       let hit = specMemo.get(layer.id);
@@ -1213,7 +1216,6 @@ export const decorationsLayer: RenderLayer = {
     for (const d of decors) {
       if (d.coreSym === 'none') continue;
       const spec = specOf(d.layer);
-      if (cam.scale < spec.minScale + SYM_LADDER) continue; // 符号先消失（R14）
       for (const r of d.regions) {
         // 核心两形态单源（选项1）：coreRegionId（核心=子元素）→ 取其核心格
         const coreId = coreCellOf(world, r);
@@ -1268,7 +1270,7 @@ export const decorationsLayer: RenderLayer = {
     let hidNoFit = 0;
     let hidCollide = 0;
     /** 已放置项（name + 屏幕坐标）——验收/回归读数用，封顶防热路径膨胀 */
-    const debugInfo: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number }[] = [];
+    const debugInfo: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number; fs: number }[] = [];
     // 帧级防重令牌（**必须在模块级**：装饰层 draw 每个世界副本 pass 重入，局部变量
     //  每 pass 新建 = 防不住；按 __drawCount 与 labelFrameAcc 同一帧令牌重置）
     const frameNo0 = globalThis.__drawCount ?? 0;
@@ -1278,11 +1280,10 @@ export const decorationsLayer: RenderLayer = {
     }
     const labelT0 = performance.now();
     if (showLabels !== false) {
-      // 本帧要画名称的层 = 有 labelMode **且过了本档的缩放门槛**（R14 分档阶梯）
+      // 本帧要画名称的层 = 有 labelMode 即画（无缩放门槛，2026-10-06 用户定「总是显示」）
       const labelDecors = decors
         .filter((d) => d.labelMode !== 'none')
-        .map((d) => ({ d, spec: specOf(d.layer) }))
-        .filter((x) => cam.scale >= x.spec.minScale);
+        .map((d) => ({ d, spec: specOf(d.layer) }));
       if (labelDecors.length) {
         // 放置优先级 = 叠放同源（R12）：焦点层 → 层深度（父层先于子层）→ 列表序
         const depth = new Map(layerTreeOf(world).map((r) => [r.id, r.depth]));
@@ -1311,13 +1312,15 @@ export const decorationsLayer: RenderLayer = {
         ctx.lineJoin = 'round';
         for (const { d, spec } of labelDecors) {
           // 每档一套排版（R6/R7）：字重 + 字号 + 中英字体栈 + 字距（拉丁疏排、方块字也吃字距）
-          ctx.font = `${spec.weight} ${spec.size}px ${spec.family}`;
+          // 字号 = 档位字号 × 缩放系数（与地图同比缩放；布局在世界空间判定 → 与缩放无关）
+          const fs = spec.size * kScale;
+          ctx.font = `${spec.weight} ${fs}px ${spec.family}`;
           if (hasLetterSpacing) ctx.letterSpacing = `${spec.spacing}em`;
-          const padPx = Math.max(2, Math.round(spec.size / 4)); // 碰撞余量 = halo 宽度 = 字号/4（R8）
+          const padPx = fs / 4; // 碰撞余量 = halo 宽度 = 字号/4（R8，严格同比保证全等）
           const haloW = padPx;
           /** 量宽（键含字重/字号/字体/字距，跨帧复用）——排布与碰撞同源 */
           const widthOf = (t: string): number => {
-            const key = `${spec.weight}|${spec.size}|${spec.family}|${spec.spacing}|${t}`;
+            const key = `${spec.weight}|${fs}|${spec.family}|${spec.spacing}|${t}`;
             let cw = labelWidthCache.get(key);
             if (cw === undefined) {
               cw = ctx.measureText(t).width;
@@ -1340,8 +1343,8 @@ export const decorationsLayer: RenderLayer = {
             if (a > Math.PI / 2) a -= Math.PI;
             else if (a <= -Math.PI / 2) a += Math.PI;
             // 拉伸件（ls）按**拉伸后**的实际宽算盒：量宽时是档位字距，绘制时是 ls
-            const twI = widthOf(it.text) + (it.ls ? (it.ls - spec.spacing) * spec.size * Array.from(it.text).length : 0);
-            const thI = spec.size;
+            const twI = widthOf(it.text) + (it.ls ? (it.ls - spec.spacing) * fs * Array.from(it.text).length : 0);
+            const thI = fs;
             const hw = (Math.abs(twI * Math.cos(a)) + Math.abs(thI * Math.sin(a))) / 2 + padPx;
             const hh = (Math.abs(twI * Math.sin(a)) + Math.abs(thI * Math.cos(a))) / 2 + padPx;
             return { x: s0.sx - hw, y: s0.sy - hh, w: hw * 2, h: hh * 2, a, cx: s0.sx, cy: s0.sy };
@@ -1389,7 +1392,7 @@ export const decorationsLayer: RenderLayer = {
             }
             const tw = widthOf(name);
             // 选排布（包4）：非狭长=水平直排；狭长=沿轴重复 → 逐字弯曲 → 退回水平
-            const layout = pickLabelLayout(geom, name, tw, spec.size, padPx, cam.scale, widthOf, place, spec.spacing);
+            const layout = pickLabelLayout(geom, name, tw, fs, padPx, cam.scale, widthOf, place, spec.spacing);
             if (!layout.mode) {
               hid++;
               if (layout.blocked) hidCollide++;
@@ -1421,7 +1424,7 @@ export const decorationsLayer: RenderLayer = {
               const ls = o.it.ls ?? 0;
               if (ls > 0 && hasLetterSpacing) ctx.letterSpacing = `${ls}em`;
               // 尾距补偿：letterSpacing 在**每个字符后**都加（含尾），居中会左偏半格 → 右移 ls/2·字号
-              const tail = ls > 0 ? (ls * spec.size) / 2 : 0;
+              const tail = ls > 0 ? (ls * fs) / 2 : 0;
               const drawOne = (tx: number, ty: number, text: string) => {
                 if (spec.halo) {
                   ctx.lineWidth = haloW;
@@ -1458,6 +1461,7 @@ export const decorationsLayer: RenderLayer = {
                 ls: Math.round((layout.items[0]?.ls ?? 0) * 1000) / 1000,
                 sx: Math.round(first.b.cx),
                 sy: Math.round(first.b.cy),
+                fs: Math.round(fs * 100) / 100, // 验收读数：字号是否 ∝ cam.scale（2026-10-06）
               });
             }
           }

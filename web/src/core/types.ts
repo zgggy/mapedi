@@ -84,7 +84,7 @@ export interface CellMark {
 
 /** 图层**注记配置**补丁（包5 配置面）：只含装饰相关字段，写入走 LayerFieldsCommand 一条入栈 */
 export type LayerDecorPatch = Partial<
-  Pick<LayerDef, 'labelMode' | 'labelTier' | 'labelSize' | 'labelMinScale' | 'coreSymbol' | 'cellSymbol' | 'cellMarker'>
+  Pick<LayerDef, 'labelMode' | 'labelTier' | 'labelSize' | 'coreSymbol' | 'cellSymbol' | 'cellMarker'>
 >;
 
 /**
@@ -126,8 +126,6 @@ export interface LayerDef {
   cellMarker?: CellMarker;
   /** 注记档位（缺省按层深度推导，见 labelStyle.tierOf） */
   labelTier?: LabelTier;
-  /** 名称显示缩放门槛（缺省取档位默认；R14 缩放阶梯——缩小到此值以下不画名称） */
-  labelMinScale?: number;
   /** 名称字号覆盖（px；缺省取档位默认） */
   labelSize?: number;
   /** 纯网格底图层：不进语义叠画（如地块网格） */

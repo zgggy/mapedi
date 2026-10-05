@@ -189,13 +189,6 @@
           <span class="v">px</span>
         </label>
         <label class="r">
-          门槛
-          <input type="number" min="10" max="600" placeholder="档位默认"
-            value={decor?.labelMinScale ?? ''}
-            onchange={(e) => onDecor?.({ labelMinScale: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value) })} />
-          <span class="v">scale</span>
-        </label>
-        <label class="r">
           <span>符号</span>
           <span class="seg-group">
             {#each SYM_OPTS as [v, t, tip]}

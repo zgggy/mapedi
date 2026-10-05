@@ -46,22 +46,21 @@ export interface LabelTierSpec {
   upper: boolean;
   /** 灰阶 alpha：层级越高越实（深底浅字时代，对比度即层级） */
   alpha: number;
-  /** 名称缩放门槛：缩小到该 scale 以下本档不画（R14） */
-  minScale: number;
   /** 用图集衬线栈（国家名的「正经地图」感）；缺省=主题无衬线栈 */
   serif?: boolean;
 }
 
 /**
- * 四档表（包2 默认；每层可用 `labelSize`/`labelMinScale`/`labelTier` 覆盖）。
+ * 四档表（包2 默认；每层可用 `labelSize`/`labelTier` 覆盖）。
+ * **无缩放门槛**（2026-10-06 用户定「缩放小了也要总是显示」——原 minScale/R14 阶梯废除）。
  * 取值依据 LABEL_DESIGN §1.3：国家 14–15、省 12–13、语义层 12、次级 10–11；
  * 档差 ≥2px；国名/省名走大写+疏排（西文惯例），语义/次级不放大写避免抢戏。
  */
 export const LABEL_TIERS: Record<LabelTier, LabelTierSpec> = {
-  primary: { size: 15, weight: 600, spacing: 0.16, upper: true, alpha: 1, minScale: 55, serif: true },
-  secondary: { size: 13, weight: 500, spacing: 0.1, upper: true, alpha: 0.9, minScale: 75 },
-  tertiary: { size: 12, weight: 400, spacing: 0.05, upper: false, alpha: 0.8, minScale: 95 },
-  minor: { size: 10, weight: 400, spacing: 0.02, upper: false, alpha: 0.68, minScale: 125 },
+  primary: { size: 15, weight: 600, spacing: 0.16, upper: true, alpha: 1, serif: true },
+  secondary: { size: 13, weight: 500, spacing: 0.1, upper: true, alpha: 0.9 },
+  tertiary: { size: 12, weight: 400, spacing: 0.05, upper: false, alpha: 0.8 },
+  minor: { size: 10, weight: 400, spacing: 0.02, upper: false, alpha: 0.68 },
 };
 
 /** 注记的最终排版（档位 × 主题 × 层覆盖 合成） */
@@ -94,7 +93,7 @@ export function tierOf(
 }
 
 /**
- * 合成该层注记排版：档位表 × 主题（family/基准色/halo）× 层覆盖（labelSize/labelMinScale）。
+ * 合成该层注记排版：档位表 × 主题（family/基准色/halo）× 层覆盖（labelSize）。
  * `color`/`halo` 按档位 alpha 叠算——换主题时层级灰阶自动跟随（羊皮纸深字同理）。
  */
 export function labelSpecOf(
@@ -112,7 +111,6 @@ export function labelSpecOf(
     spacing: t.spacing,
     upper: t.upper,
     alpha: t.alpha,
-    minScale: layer.labelMinScale ?? t.minScale,
     family: t.serif ? MAP_SERIF_STACK : base.family,
     serif: t.serif,
     color: withAlpha(base.color, t.alpha),
