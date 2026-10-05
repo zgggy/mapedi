@@ -89,9 +89,10 @@ export function initialShell(): ShellState {
 }
 
 /** 顶栏视图模式两档（ModeCapsule items；2026-09-30 通用化） */
+// 档位顺序（2026-10-06 用户定）：平面编辑在前、球面展示在后（仅显示序，默认视图不变）
 export const VIEW_MODE_ITEMS = [
-  { id: 'view-globe', icon: '🌐', label: '球面展示' },
   { id: 'view-2d', icon: '✏️', label: '平面编辑' },
+  { id: 'view-globe', icon: '🌐', label: '球面展示' },
 ];
 
 /** 左栏工作区三模式三档（检查 / 生成 / 绘制；2026-09-30 E 系拍板） */

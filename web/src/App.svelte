@@ -377,11 +377,9 @@
         layerParams={focusStrategy === 'heightmap' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
         onGenerate={(s, n) => {
           bootError = '';
-          // 重新撒点 = 仅地块（2026-10-06 用户定：不生成高度图、清除其余图层）；完成后进球面展示
-          return editor.generate(s, n, { cellsOnly: true }).then((r) => {
-            switchView('view-globe');
-            return r;
-          });
+          // 重新撒点 = 仅地块（2026-10-06 用户定：不生成高度图、清除其余图层）；
+          // 生成后**不换展示模式**（同日用户定：保持在平面编辑的生成模式下）
+          return editor.generate(s, n, { cellsOnly: true });
         }}
       />
     {/if}
