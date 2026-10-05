@@ -255,9 +255,15 @@
           </div>
           <div class="row end">
             {#if cascadeAvail}
-              <label class="sm" title="勾选后先重生成最深子层，逐层向上到「{layerName}」（子先父后：父层聚合子层）">
-                <input type="checkbox" bind:checked={cascadeDown} />含子层
-              </label>
+              <span title="开 = 先重生成最深子层，逐层向上到「{layerName}」（子先父后：父层聚合子层）">
+                <StateCapsule
+                  icon="🧬"
+                  onText="含子层"
+                  offText="仅本层"
+                  on={cascadeDown}
+                  onchange={(v) => (cascadeDown = v)}
+                />
+              </span>
             {/if}
             <button
               type="button"
