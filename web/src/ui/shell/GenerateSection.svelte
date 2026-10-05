@@ -65,8 +65,10 @@
   /** 勾选后：从最深层子层逐层向上重新生成到本层（子先父后）；默认关 = 只生成本层 */
   let cascadeDown = $state(false);
   const isHeightmap = $derived(strategy === 'heightmap');
-  /** 基于已有高度图细化（2026-10-06 拍板 1b）：开 = 不重新生成，只细化用户绘制的粗图 */
+  /** 基于已有手绘骨架细化（v6）：开 = 档位为骨架 + 同源形态场细化 */
   let basedOn = $state(false);
+  /** 保护海岸开关（2026-10-06 用户定：默认关；开 = mask 逐格不动，关 = 海岸随形态场带内弯曲进出） */
+  let basedCoast = $state(false);
   /** 生成可用性：scatter/heightmap 恒可用；其他层需有 profile params */
   const canGen = $derived(
     isScatter || isHeightmap || (layerParams !== null && Object.keys(layerParams).length > 0),
@@ -135,7 +137,7 @@
     const sv = t === '' ? undefined : Number(t);
     if (isHeightmap && basedOn) {
       // 基于已有（2026-10-06 澄清）：按绘制海岸线走完整重新生成（地形旋钮全套有效）
-      editor.refineHeight(shape ?? DEFAULT_WORLD_SHAPE, sv);
+      editor.refineHeight(shape ?? DEFAULT_WORLD_SHAPE, sv, basedCoast);
       return;
     }
     editor.regenLayer(layerId, sv, cascadeDown);
@@ -188,6 +190,20 @@
               onchange={(v) => (basedOn = v)}
             />
           </span>
+          {#if basedOn}
+            <span
+              class="based"
+              title="保护海岸（2026-10-06 用户定，默认关）：开 = 海岸线逐格锁定不动；关 = 海岸随形态场在边界带内弯曲进出（大致保持）"
+            >护岸
+              <StateCapsule
+                icon="🌊"
+                onText="开"
+                offText="关"
+                on={basedCoast}
+                onchange={(v) => (basedCoast = v)}
+              />
+            </span>
+          {/if}
           <button
             type="button"
             class="primary"
@@ -198,7 +214,7 @@
             ? basedOn ? '⚠ 确认细化（清除其他图层）？' : '⚠ 确认（清除其他图层）？'
             : basedOn ? '⛰️ 基于已有细化' : '⛰️ 生成高度图'}</button>
         </div>
-        <div class="hint">{#if basedOn}以你的陆块为唯一依据做匹配扩散：各陆块最厚处自动定为扩散起点（峰）、参数由块几何匹配——不是随机重画；全谱 [顶峰→深海] 铺满、海岸线逐格不变（有效参数 = 山脉 / 细节 / 海床 / 平整 + 种子（侵蚀按旋钮增量生效：默认 2 = 关，调 4/6 逐级增强））；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
+        <div class="hint">{#if basedOn}手绘档位 = 骨架（平原保持平原、顶峰在哪哪起山），形态用与建地形同源的山川场（随机方向、弯曲、海沟有走向）；档界自动长出过渡层次；护岸默认关 = 海岸随形态场微调（开 = 逐格锁定）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -231,9 +247,11 @@
             {#if !basedOn}
             <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
             {/if}
+            {#if !basedOn}
             <label class="tcell"><span>侵蚀</span>
               <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
             </label>
+            {/if}
           </div>
         {/if}
       {:else}

@@ -164,19 +164,19 @@ export class GenerationService {
   }
 
   /**
-   * 基于已有高度图生成（2026-10-06 用户澄清）：**基于绘制的海岸线**走完整重新
-   * 生成管线（buildTerrain 同套）→ 分位重映射到 mask（陆 [1,64] 顶峰 / 海 [-63,0]
-   * 深海，gamma=flatness）——从顶峰到深海各档全有，海岸线逐格=绘制。
+   * 基于已有手绘骨架细化（v6，2026-10-06 用户四点定稿）：手绘档位=骨架（平原保持
+   * 平原、顶峰在哪哪起山），形态=heightFieldFor 同源山川场（随机方向弯曲、海沟有
+   * 走向）；档内分位+档界过渡带；protectCoast 默认关（关=海岸随形态场带内弯曲进出）。
    * 快照→变更→HeightCellsCommand 入栈（可撤销，保用户手稿）→ flushHeightRegions。
    */
-  refineHeightLayer(shape: WorldShape, seed?: number): void {
+  refineHeightLayer(shape: WorldShape, seed?: number, protectCoast = false): void {
     const world = this.ctx.world;
     if (!world) return;
     const s = Number.isFinite(seed) ? (seed as number) : world.meta.seed;
     const snap = world.cells.map((c) => c.height);
-    const changed = refineHeight(world, { seed: s, shape });
+    const changed = refineHeight(world, { seed: s, shape, protectCoast });
     if (!changed) {
-      this.ctx.setStatus('无可基于的海岸线（先绘制出陆地）');
+      this.ctx.setStatus('无可基于的手绘骨架（先绘制出陆地）');
       this.ctx.notify();
       return;
     }
@@ -187,7 +187,7 @@ export class GenerationService {
     history.run(world, new HeightCellsCommand(samples, '基于已有细化'), { alreadyApplied: true });
     this.ctx.flushHeightRegions?.(samples);
     this.ctx.touchWorld();
-    this.ctx.setStatus(`已按绘制海岸线重新生成地形 · 种子 ${s} · ${samples.length} 格`);
+    this.ctx.setStatus(`已按手绘骨架细化地形（形态=同源山川场）· 种子 ${s} · ${samples.length} 格${protectCoast ? ' · 护岸开' : ''}`);
     this.ctx.scheduleAutosave();
     this.ctx.notify();
   }

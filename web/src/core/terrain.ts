@@ -174,6 +174,20 @@ function quantile(arr: Float64Array, q: number): number {
   return copy[i];
 }
 
+/**
+ * 高度形态场（**与 buildTerrain 完全同源**：同一 heightField + 同 rng 派生，
+ * 但不写 world——供 refineHeight 借用「随机方向、弯曲的山川」结构：域扭曲 +
+ * 大陆度 FBM + ridged 山系 + 细节/海底，2026-10-06 用户定形态标准）。
+ */
+export function heightFieldFor(
+  cells: Cell[],
+  seed: number,
+  shape: WorldShape,
+): Float64Array {
+  const rng = createRng(hashSeed(seed, 17));
+  return heightField(cells, seed, shape, rng);
+}
+
 /** 建地形：写 cell.height / cell.isOcean。 */
 export function buildTerrain(
   world: World,

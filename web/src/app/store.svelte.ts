@@ -469,9 +469,9 @@ export class EditorStore {
     this.gen.regenLayer(layerId, seed, cascadeDown);
   }
 
-  /** 基于已有海岸线生成（2026-10-06：开关开 → 按 mask 走完整重新生成+分位重映射） */
-  refineHeight(shape: WorldShape, seed?: number) {
-    this.gen.refineHeightLayer(shape, seed);
+  /** 基于已有手绘骨架细化（v6：档位=骨架 + 同源形态场；protectCoast 默认关） */
+  refineHeight(shape: WorldShape, seed?: number, protectCoast = false) {
+    this.gen.refineHeightLayer(shape, seed, protectCoast);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean) {
