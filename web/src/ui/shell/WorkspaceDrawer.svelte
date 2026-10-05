@@ -15,6 +15,7 @@
   import { childLayerIdOf } from '../../core/hierarchy/derive';
   import ItemButton from './ItemButton.svelte';
   import StateCapsule from './StateCapsule.svelte';
+  import ModeCapsule from './ModeCapsule.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
@@ -221,6 +222,16 @@ import { isRowOrControlClick } from './shell';
   /** 每元素涂改值（初始 = 区间 min）——$state 保证滑块值回显。
    *  第十一轮：滑块从 button 移入展开内容（行已选中，不再 handleSelect 触发开合）。 */
   const paintValues = $state<Record<string, number>>({});
+  /** 高度笔刷模式/强度档（2026-10-06 拍板） */
+  const HMODE_ITEMS = [
+    { id: 'paint', icon: '🖌', label: '涂改' },
+    { id: 'smooth', icon: '〰', label: '平滑' },
+  ];
+  const HITER_ITEMS = [
+    { id: '1', icon: '1', label: '轻' },
+    { id: '3', icon: '3', label: '中' },
+    { id: '5', icon: '5', label: '强' },
+  ];
   function paintValueOf(id: string, attrs: { min: number }): number {
     return paintValues[id] ?? attrs.min;
   }
@@ -442,6 +453,44 @@ import { isRowOrControlClick } from './shell';
                     />
                     <span class="dim">{brushRadius.toFixed(1)}°</span>
                   </label>
+                  {#if ia}
+                    <!-- 高度笔刷模式（2026-10-06 拍板 2a/3）：涂改=写值；平滑=抹台阶 -->
+                    <span class="field inline">
+                      <span>模式</span>
+                      <ModeCapsule
+                        value={editor.draw.heightMode ?? 'paint'}
+                        onChange={(v) => (editor.draw = { ...editor.draw, heightMode: v as 'paint' | 'smooth' })}
+                        items={HMODE_ITEMS}
+                        ariaLabel="高度笔刷模式"
+                        segMinW={54}
+                      />
+                    </span>
+                    {#if (editor.draw.heightMode ?? 'paint') === 'smooth'}
+                      <span class="field inline">
+                        <span>强度</span>
+                        <ModeCapsule
+                          value={String(editor.draw.smoothIter ?? 3)}
+                          onChange={(v) => (editor.draw = { ...editor.draw, smoothIter: Number(v) as 1 | 3 | 5 })}
+                          items={HITER_ITEMS}
+                          ariaLabel="平滑强度"
+                          segMinW={40}
+                        />
+                      </span>
+                      <span
+                        class="field inline"
+                        title="开 = 海岸线保护（只在同侧扩散 + 陆≥1/海≤0，轮廓不动）；关 = 自由扩散（可抹平海岸）"
+                      >
+                        <span>护岸</span>
+                        <StateCapsule
+                          icon="🌊"
+                          onText="保护"
+                          offText="自由"
+                          on={editor.draw.smoothCoast ?? true}
+                          onchange={(v) => (editor.draw = { ...editor.draw, smoothCoast: v })}
+                        />
+                      </span>
+                    {/if}
+                  {/if}
                   <span
                     class="field inline"
                     title="开 = 抢占（replace：连同其他元素占着的格一起夺）；关 = 只填空白（emptyOnly，现状）。2026-10-04 用户拍板 6.2"

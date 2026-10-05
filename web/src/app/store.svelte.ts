@@ -314,6 +314,7 @@ export class EditorStore {
     scheduleAutosave: () => this.scheduleAutosave(),
     touchWorld: () => this.touchWorld(),
     saveGenDraftSoon: () => saveGenDraftSoon(),
+    flushHeightRegions: (samples) => this.flushHeightRegions(samples),
     clearSelection: () => {
       ui.selectedRegionId = null;
     },
@@ -466,6 +467,11 @@ export class EditorStore {
   /** 单层再生成（实现体在 GenerationService；height 连带删旧建新海陆） */
   regenLayer(layerId: string, seed?: number, cascadeDown = false) {
     this.gen.regenLayer(layerId, seed, cascadeDown);
+  }
+
+  /** 基于已有高度图细化（2026-10-06：开关开 → 不重新生成，只细化） */
+  refineHeight(detail: number, mountain: number, seed?: number) {
+    this.gen.refineHeightLayer(detail, mountain, seed);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean) {

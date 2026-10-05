@@ -16,6 +16,8 @@ import { cascadeEnabled, type GenerationProfile } from '../core/generate/profile
 import { defaultStarSystem } from '../core/astro';
 import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
 import { installProjCache } from '../render/projCache';
+import { refineHeight } from '../core/generate/refine';
+import { HeightCellsCommand, history } from '../core/history';
 
 export interface GenerationCtx {
   readonly world: World | null;
@@ -35,6 +37,8 @@ export interface GenerationCtx {
   scheduleAutosave(): void;
   touchWorld(): void;
   saveGenDraftSoon(): void;
+  /** 高度派生数据重算（flushHeightRegions：区间元素按新 cell.height 重物化） */
+  flushHeightRegions?(samples?: { id: number; h0: number; h1: number }[]): void;
   /** 清除工作区选中（生成清除规则会删掉选中元素所属内容，2026-10-06） */
   clearSelection?(): void;
 }
@@ -155,6 +159,35 @@ export class GenerationService {
     }
     const ms = Math.round(performance.now() - t0);
     if (!quiet) this.ctx.setStatus(`${world.cells.length} 地块 · ${ms}ms`);
+    this.ctx.scheduleAutosave();
+    this.ctx.notify();
+  }
+
+  /**
+   * 基于已有高度图细化（2026-10-06 用户拍板 1b）：不重新生成——用户绘制的粗高度图
+   * 走 refineHeight（同侧扩散梯度化 + fbm/ridged 细节 + 侧 clamp），**海陆 mask 不变**、
+   * 档间长出中间层；细节量/山脉强度 = 地形旋钮两个（shape.detail/shape.mountain）。
+   * 快照→变更→HeightCellsCommand 入栈（可撤销）→ flushHeightRegions 重物化区间元素。
+   */
+  refineHeightLayer(detail: number, mountain: number, seed?: number): void {
+    const world = this.ctx.world;
+    if (!world) return;
+    const s = Number.isFinite(seed) ? (seed as number) : world.meta.seed;
+    const snap = world.cells.map((c) => c.height);
+    const changed = refineHeight(world, { seed: s, detail, mountain });
+    if (!changed) {
+      this.ctx.setStatus('已有高度图无可细化内容（先绘制高度或调大细节量）');
+      this.ctx.notify();
+      return;
+    }
+    const samples: { id: number; h0: number; h1: number }[] = [];
+    for (const c of world.cells) {
+      if (c.height !== snap[c.id]) samples.push({ id: c.id, h0: snap[c.id], h1: c.height });
+    }
+    history.run(world, new HeightCellsCommand(samples, '基于已有细化'), { alreadyApplied: true });
+    this.ctx.flushHeightRegions?.(samples);
+    this.ctx.touchWorld();
+    this.ctx.setStatus(`已基于已有高度图细化 · 种子 ${s} · ${samples.length} 格`);
     this.ctx.scheduleAutosave();
     this.ctx.notify();
   }

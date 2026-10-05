@@ -29,7 +29,7 @@ import {
 } from '../core/draw/membershipDraw';
 import { defaultLayerConfig, placementAllows } from '../core/layer/config';
 import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
-import { setHeightStroke } from '../core/draw/heightDraw';
+import { setHeightStroke, smoothHeightBrush } from '../core/draw/heightDraw';
 import { buildRoadSegments, dragRoadEndpoint } from '../core/draw/roads';
 import {
   HeightCellsCommand,
@@ -316,9 +316,16 @@ export class DrawController {
         this.heightTouched!.add(id);
       }
     }
-    // 【v2 语义】笔刷只写「选定值」（擦除 → pointer right → 写 0）；拖动中零重算，只回传命中供色块高亮
-    const paintValue = this.heightPaintValue ?? intervalById(this.heightIntervalId)?.min ?? 0;
-    setHeightStroke(world, hits, paintValue, pointer === 'right');
+    // 【v2 语义】笔刷只写「选定值」（擦除 → pointer right → 写 0）；拖动中零重算，只回传命中供色块高亮。
+    // 平滑模式（2026-10-06 拍板 2a/3）：左键 = 同侧图拉普拉斯抹台阶（强度=迭代 1/3/5、护岸开关）；
+    // 右键仍=擦除写 0。快照已按首触收集 → commitStroke 的 samples 自动含平滑变更。
+    const draw = this.ctx.draw;
+    if ((draw.heightMode ?? 'paint') === 'smooth' && pointer === 'left') {
+      smoothHeightBrush(world, hits, draw.smoothIter ?? 3, draw.smoothCoast ?? true);
+    } else {
+      const paintValue = this.heightPaintValue ?? intervalById(this.heightIntervalId)?.min ?? 0;
+      setHeightStroke(world, hits, paintValue, pointer === 'right');
+    }
     return hits;
   }
 

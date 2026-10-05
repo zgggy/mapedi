@@ -64,6 +64,8 @@
   /** 勾选后：从最深层子层逐层向上重新生成到本层（子先父后）；默认关 = 只生成本层 */
   let cascadeDown = $state(false);
   const isHeightmap = $derived(strategy === 'heightmap');
+  /** 基于已有高度图细化（2026-10-06 拍板 1b）：开 = 不重新生成，只细化用户绘制的粗图 */
+  let basedOn = $state(false);
   /** 生成可用性：scatter/heightmap 恒可用；其他层需有 profile params */
   const canGen = $derived(
     isScatter || isHeightmap || (layerParams !== null && Object.keys(layerParams).length > 0),
@@ -129,7 +131,13 @@
     // 种子行（2026-10-04 用户报障：高度/布局重生成没有改种子的地方）——
     // 空/非法回退世界种子（regenLayer 内 isFinite 兜底）
     const t = seedInput.trim();
-    editor.regenLayer(layerId, t === '' ? undefined : Number(t), cascadeDown);
+    const sv = t === '' ? undefined : Number(t);
+    if (isHeightmap && basedOn) {
+      // 基于已有（拍板 1b）：细节量/山脉强度两钮即细化参数（shape 单源），其余旋钮已隐藏
+      editor.refineHeight(shape?.detail ?? 0.5, shape?.mountain ?? 0.5, sv);
+      return;
+    }
+    editor.regenLayer(layerId, sv, cascadeDown);
   }
 
   /** 种子行（撒点/高度/布局三分支同款；seedInput = App 草稿持久化字段） */
@@ -165,19 +173,35 @@
           <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
             <button type="button" class="dice" title="随机种子" onclick={rollSeed}>🎲</button>
           </label>
+          <!-- 基于已有（2026-10-06 拍板 1b：自定义开关放生成按钮左边） -->
+          <span
+            class="based"
+            style="margin-left:auto"
+            title="开 = 基于已绘制的高度图细化：大陆形状不变、档间长出中间层（参数 = 下方「细节量 / 山脉强度」两钮）；关 = 按旋钮重新生成"
+          >基于已有
+            <StateCapsule
+              icon="🧱"
+              onText="细化"
+              offText="重生成"
+              on={basedOn}
+              onchange={(v) => (basedOn = v)}
+            />
+          </span>
           <button
             type="button"
             class="primary"
             class:danger={armed === 'height'}
             disabled={generating}
             onclick={() => confirmFire('height')}
-            style="margin-left:auto"
-          >{armed === 'height' ? '⚠ 确认（清除其他图层）？' : '⛰️ 生成高度图'}</button>
+          >{armed === 'height'
+            ? basedOn ? '⚠ 确认细化（清除其他图层）？' : '⚠ 确认（清除其他图层）？'
+            : basedOn ? '⛰️ 基于已有细化' : '⛰️ 生成高度图'}</button>
         </div>
-        <div class="hint">按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认</div>
+        <div class="hint">{#if basedOn}保持已绘制的大陆形状不变，细化出更丰富的高度层次（参数 = 细节量 / 山脉强度）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
+            {#if !basedOn}
             <label class="tcell wide"><span>大陆占比</span>
               <ModeCapsule
                 value={tierId(shape.landRatio)}
@@ -187,19 +211,34 @@
                 segMinW={46}
               />
             </label>
+            {/if}
+            {#if !basedOn}
             <label class="tcell"><span>落差</span>
               <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => setShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
             </label>
+            {/if}
+            {#if !basedOn}
             <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => setShape('continentScale', v)} /></label>
+            {/if}
+            {#if !basedOn}
             <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => setShape('coastBreak', v)} /></label>
+            {/if}
             <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => setShape('mountain', v)} /></label>
             <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => setShape('detail', v)} /></label>
+            {#if !basedOn}
             <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => setShape('seaRugged', v)} /></label>
+            {/if}
+            {#if !basedOn}
             <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => setShape('flatness', v)} /></label>
+            {/if}
+            {#if !basedOn}
             <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
+            {/if}
+            {#if !basedOn}
             <label class="tcell"><span>侵蚀</span>
               <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
             </label>
+            {/if}
           </div>
         {/if}
       {:else}
@@ -402,6 +441,14 @@
     border-radius: 5px;
     cursor: pointer;
     font-size: var(--fs-md);
+  }
+  .based {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    white-space: nowrap;
   }
   .row button.primary {
     background: var(--accent, #c9a24a);

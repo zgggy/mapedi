@@ -29,6 +29,12 @@ export interface DrawSession {
   weightDir: 1 | -1;
   /** 正在拖动的道路端点 cell */
   draggingEndpointCell?: CellId | null;
+  /** 高度笔刷模式（2026-10-06：涂改=写值 / 平滑=图拉普拉斯抹台阶） */
+  heightMode?: 'paint' | 'smooth';
+  /** 平滑强度 = 迭代次数（拍板 2a：1/3/5） */
+  smoothIter?: 1 | 3 | 5;
+  /** 海岸保护开关（拍板 3：默认开） */
+  smoothCoast?: boolean;
 }
 
 export function emptyDrawSession(): DrawSession {
@@ -40,6 +46,9 @@ export function emptyDrawSession(): DrawSession {
     addMode: true,
     weightStep: 0.15,
     weightDir: 1,
+    heightMode: 'paint',
+    smoothIter: 3,
+    smoothCoast: true,
   };
 }
 
