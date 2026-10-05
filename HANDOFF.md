@@ -15,6 +15,13 @@
 
 ## 当前状态（第四十四轮完成；在案：`docs/OPTIMIZE_REVIEW_2026-10-04.md`）
 
+- **✓ 第五十三轮（2026-10-06 用户四件：显隐总控/图层栈序/羊皮纸色卡/生成三清除）**：
+  - **A 显隐总控**：`isLayerShown` 删「选中即显示」焦点强制（实测焦点+隐藏时 placed=3/symbols=7 全残留=按钮失效根因）→ 唯一真相 `visible`∧祖先链，**隐藏优先于焦点**；装饰层 baseMesh 分支同步。AGENTS§3/RENDER_LOGIC 契约已更。实测：焦点国家+隐藏 → placed 3→0、symbols 7→1 ✓。
+  - **B 图层栈序**：`builtinLayers()` 重排为 **地块→高度→国家→行省→生态→种族→文化→道路→航线→河流**；`layerStackComparator` rootIdx **降序→升序**（旧判=列表上层根画最上，与用户新契约相反）→ **列表自上而下 = 地图自下而上**；ensureBuiltinLayers 相对序自愈自动迁移旧档（实测载入即新序）。AGENTS§5 已更。
+  - **C 羊皮纸全色卡+删科幻**：parchment 全字段定义（ocean #a9c0b7 老海蓝绿、landBase #e4d5b0、**frameVoid 首次定义** rgba(52,40,26,.92) 装裱底、墨 #4a3728 系描边、标签衬线墨色）——色锚来自 web 检索古地图色库（wallfully/icolorpalette/123freevectors/historicpictoric）；`neon` 科幻预设删除（styles+ViewSettingsPopover 两处，persisted styleId 自动回落 dark）。
+  - **D 生成三清除+两击确认**：①撒点=**仅地块**：worker/主线程链加 `enabled` 白名单（cellsOnly=空集跳过全部生成器，不生成高度图），新世界=cells+空内置层（自定义层/路径随之清除），焦点回地块；②高度重生成 → 清除地块+高度以外全部图层内容；③子层重生成 → 清除父层链（父层聚合子层）。**清内容不清壳**（图层定义保留可再生成；路径按 layerId 一并清+clearSelection）。GenerateSection 三按钮**两击确认**（首击武装 ⚠ 红态、2.6s 自动解除，撒点分支地形旋钮整块移除）。
+  - 实测：composeOrder=高度→国家（新栈序）✓；撒点分支无旋钮+文案 ✓；武装/解除 ✓（世界分毫未动 seed188943080）；tsc 0 / svelte-check 0 errors。
+
 - **✓ 第五十二轮（2026-10-05 高度色暗斑双根因修复 + 左栏居中改相机偏置；底座透明被用户叫停）**：
   - **高度色暗斑（#85026/#5848 未填色）双根因**：① reconcile 双真相——`reconcilePieceMembership` 按 setKey 反查 `region.cells`（精确档）对账，把区间型高度件环**打回精确档**（显示=累积 h≥lo）→ 新单源 `displayCompose.displayCellsOfRegion`，reconcile 改吃 compose 件 `dp.cellIds`（Viewport 里移到 compose 之后传 pieces；无 pieces 不消耗门控）；② 链化断链——桶2 贪心缺 `outUsedG` 复查（succ 非单射→9 条 1-边链被丢）+ 近重复站点 A/B 定向退化（|in|≠|out|）→ 提环改 `walk`+`pickAdj` 邻接无向兜底（正向优先/回起点即闭合），`buildRingFrom` 签名 keyList→dirs（混合走向键重建+轮转同步 rotD）。像素验收：#5848/#35248/#82331=h3 色、#73335=h2 色、全图 base 色像素=0。
   - **左栏底座（用户报「组件下多了一个不透明底座，要完全透明」）**：round39 画布内缩机制改为**相机偏置** `centerBias`（App 派生 → Viewport `viewCam`=raw−bias/2/scale 渲染+输入同源、球面 `setViewOffset` 同位移；数学与内缩恒等，画布恢复全宽）。居中平面/球面均已验证 ✓。**未完成**：栏后仍是 frameLayer void 暗色（世界透镜左缘 313.5>栏右缘 307，周期副本窗口未扩展）——用户叫停迭代，现状=居中保留、透明未达成。

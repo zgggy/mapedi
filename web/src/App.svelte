@@ -69,7 +69,7 @@
       : (world.regions.find((r) => r.id === t)?.layerId ?? focusLayer);
     const l = world.layers.find((x) => x.id === layerId);
     if (!l) return '';
-    return isLayerShown(world, l.id, focusLayer)
+    return isLayerShown(world, l.id)
       ? ''
       : `⚠ 正在绘制「${l.name}」但该图层已隐藏 —— 笔画画了看不见`;
   });
@@ -377,8 +377,8 @@
         layerParams={focusStrategy === 'heightmap' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
         onGenerate={(s, n) => {
           bootError = '';
-          // 重新生成完成 → 进入球面展示（用户定）
-          return editor.generate(s, n).then((r) => {
+          // 重新撒点 = 仅地块（2026-10-06 用户定：不生成高度图、清除其余图层）；完成后进球面展示
+          return editor.generate(s, n, { cellsOnly: true }).then((r) => {
             switchView('view-globe');
             return r;
           });

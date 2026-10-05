@@ -241,7 +241,7 @@
     if (world.paths?.length) {
       for (const path of world.paths) {
         if (!path.points || path.points.length < 2) continue;
-        if (path.hidden || !isLayerShown(world, path.layerId, focusLayer)) continue;
+        if (path.hidden || !isLayerShown(world, path.layerId)) continue;
         const flat: { x: number; y: number; z: number }[] = [];
         for (const ll of path.points) {
           const v = lonLatToVec3(ll);

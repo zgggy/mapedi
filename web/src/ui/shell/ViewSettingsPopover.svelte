@@ -65,7 +65,6 @@
   const STYLE_ITEMS = [
     { id: 'dark', icon: '🌑', label: '暗色' },
     { id: 'parchment', icon: '📜', label: '羊皮纸' },
-    { id: 'neon', icon: '👾', label: '科幻' },
   ];
   const PROJ_ITEMS = [
     { id: 'mercator', icon: '▭', label: '墨卡托' },

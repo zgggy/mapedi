@@ -43,6 +43,34 @@ export function builtinLayers(): LayerDef[] {
       styleSetId: 'default',
     },
     {
+      id: 'country',
+      name: '国家',
+      kind: 'political',
+      modeDefault: 'view',
+      coreSymbol: 'star',
+      labelMode: 'name',
+      allowOverlap: false,
+      requireAdjacency: true,
+      requireCenter: true,
+      centerLabel: '首都',
+      styleSetId: 'default',
+    },
+    {
+      id: 'province',
+      name: '行省',
+      kind: 'political',
+      modeDefault: 'view',
+      // 空心星 ☆ = 其他首府（省会）——CIA 图例实测；实心星 ★ 留给国家首都
+      coreSymbol: 'hollowStar',
+      labelMode: 'name',
+      parentLayerId: 'country',
+      allowOverlap: false,
+      requireAdjacency: true,
+      requireCenter: true,
+      centerLabel: '省会',
+      styleSetId: 'default',
+    },
+    {
       id: 'ecosystem',
       // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
       labelTier: 'tertiary',
@@ -82,34 +110,6 @@ export function builtinLayers(): LayerDef[] {
       requireAdjacency: false,
       requireCenter: true,
       centerLabel: '文化中心',
-      styleSetId: 'default',
-    },
-    {
-      id: 'country',
-      name: '国家',
-      kind: 'political',
-      modeDefault: 'view',
-      coreSymbol: 'star',
-      labelMode: 'name',
-      allowOverlap: false,
-      requireAdjacency: true,
-      requireCenter: true,
-      centerLabel: '首都',
-      styleSetId: 'default',
-    },
-    {
-      id: 'province',
-      name: '行省',
-      kind: 'political',
-      modeDefault: 'view',
-      // 空心星 ☆ = 其他首府（省会）——CIA 图例实测；实心星 ★ 留给国家首都
-      coreSymbol: 'hollowStar',
-      labelMode: 'name',
-      parentLayerId: 'country',
-      allowOverlap: false,
-      requireAdjacency: true,
-      requireCenter: true,
-      centerLabel: '省会',
       styleSetId: 'default',
     },
     {
@@ -223,7 +223,8 @@ export function ensureBuiltinLayers(world: World): World {
     world.regions = cleaned;
     changed = true;
   }
-  // 内置层在数组中的目标序号（builtinLayers() 的声明序 = 叠放序：后画在上）
+  // 内置层在数组中的目标序号（builtinLayers() 的声明序 = 叠放序：数组靠前先画 = 底，
+  // 2026-10-06 用户定序：地块→高度→国家→行省→其他→非地块依赖；列表自上而下 = 低→高）
   const builtinIdx = new Map(builtins.map((b, i) => [b.id, i]));
   for (const b of builtins) {
     if (!have.has(b.id)) {

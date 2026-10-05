@@ -243,33 +243,26 @@ export function splitRegionForDisplay(
 }
 
 /**
- * 图层是否在地图上展示元素。两层语义（2026-10-02 用户原话「选中既显示，不影响
- * 显隐状态按钮」）：
- * - **存储显隐** = `layer.visible`，只有眼睛钮写它；
- * - **选中即显示** = 焦点层读时强制显示——不写 visible、不动眼睛状态与按钮，
- *   焦点走完自动回到存储态。（替代 2026-09-28「焦点不改显示」旧判——该判造成
- *   选中了却看不见；实现为读时派生，不是恢复当年的写入方案。）
+ * 图层是否在地图上展示元素。**显隐唯一真相 = `layer.visible`（眼睛钮）**（2026-10-06
+ * 用户定「显隐这个图层是对这个图层的所有内容进行控制的」——填充/描边/标签/核心符号/
+ * 装饰全走本谓词；**隐藏优先于焦点**：焦点层被眼睛隐藏后同样全隐，替代 2026-10-02
+ * 「焦点层读时强制显示」旧判——该判使焦点层的显隐按钮整体失效（实测焦点+隐藏时
+ * placed=3/symbols=7 全残留））。
+ * I6 有效显隐：自身 ∧ 祖先链——读时派生，旧档「父隐子显」自愈。
  */
-export function isLayerShown(
-  world: World,
-  layerId: string,
-  focusLayerId?: string | null,
-): boolean {
+export function isLayerShown(world: World, layerId: string): boolean {
   const l = world.layers.find((x) => x.id === layerId);
   if (!l) return false;
-  // baseMesh（地块网格）单独走 cells 门；自由层（路/航线）不再短路——
+  // baseMesh（地块网格）单独走 cells 门（不进元素合成；其装饰在 decorationsLayer 直判 visible）
   if (l.baseMesh) return false;
-  // 选中即显示：焦点层（且仅焦点层本身）读时强制显示
-  if (focusLayerId && layerId === focusLayerId) return true;
-  // I6 有效显隐（HIERARCHY 包2）：自身 ∧ 祖先链——读时派生，旧档「父隐子显」自愈
   return effectiveVisible(world, layerId);
 }
 
 /**
  * 所有「已展示」层的显示碎片（同一套：边界内填色 + 后续描边）。
  *
- * 叠放（后画 = 高），**与具体图层名无关**：
- * 1. **焦点图层** > 列表上层第一层级 > 列表下层第一层级
+ * 叠放（后画 = 高），**与具体图层名无关**（2026-10-06 用户定：列表自上而下 = 地图自下而上）：
+ * 1. **焦点图层** > 列表下层第一层级 > 列表上层第一层级
  * 2. 同一树内：**子图层 > 父图层 > 父父…**（先画祖先，后画后代）
  * 3. **工作区选中的元素** 最后画（跨层最顶）
  */
@@ -297,7 +290,7 @@ function composeShownPiecesUncached(
   const byId = new Map(world.layers.map((l) => [l.id, l]));
 
   const shown = world.layers
-    .filter((l) => isLayerShown(world, l.id, focus))
+    .filter((l) => isLayerShown(world, l.id))
     .map((l) => l.id);
 
   // 叠放键 = derive 层叠放比较器单源（HIERARCHY §6.1 包2：焦点整段最后画）

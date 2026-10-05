@@ -103,6 +103,23 @@
     editor.setProfileParam(layerId, k, v);
   }
 
+  /** 两击确认（2026-10-06 用户定：三类生成都会清除图层内容 → 首击武装、再击执行，
+   *  2.6s 无操作自动解除；不用原生 confirm——项目风格禁弹窗） */
+  let armed = $state<'' | 'scatter' | 'height' | 'elem'>('');
+  let armTimer: ReturnType<typeof setTimeout> | undefined;
+  function confirmFire(kind: 'scatter' | 'height' | 'elem') {
+    if (generating || !canGen) return;
+    if (armed === kind) {
+      clearTimeout(armTimer);
+      armed = '';
+      fire();
+      return;
+    }
+    armed = kind;
+    clearTimeout(armTimer);
+    armTimer = setTimeout(() => (armed = ''), 2600);
+  }
+
   function fire() {
     if (generating || !canGen) return;
     if (isScatter) {
@@ -132,36 +149,15 @@
             <button type="button" class="dice" title="随机种子" onclick={rollSeed}>🎲</button>
           </label>
           <label>地块 <input type="number" min="100" max={HARD_MAX_DENSITY} value={densityInput} onchange={(e) => (densityInput = Number(e.currentTarget.value) || densityInput)} /></label>
-          <button type="button" class="primary" disabled={generating} onclick={fire}>🎲 重新撒点</button>
+          <button
+            type="button"
+            class="primary"
+            class:danger={armed === 'scatter'}
+            disabled={generating}
+            onclick={() => confirmFire('scatter')}
+          >{armed === 'scatter' ? '⚠ 确认清除重建？' : '🎲 重新撒点'}</button>
         </div>
-        <div class="hint">撒点将重建整个世界（高度及所有图层元素）</div>
-        {#if shape}
-          <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
-          <div class="tgrid">
-            <label class="tcell wide"><span>大陆占比</span>
-              <ModeCapsule
-                value={tierId(shape.landRatio)}
-                onChange={(id) => setShape('landRatio', Number(id))}
-                items={LAND_TIERS}
-                ariaLabel="大陆占比"
-                segMinW={46}
-              />
-            </label>
-            <label class="tcell"><span>落差</span>
-              <input type="number" min="20" max="127" value={shape.relief} onchange={(e) => setShape('relief', Math.max(20, Math.min(127, Number(e.currentTarget.value) || 127)))} />
-            </label>
-            <label class="tcell"><span>大陆尺度</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.continentScale} label="大陆尺度" width={84} onInput={(v) => setShape('continentScale', v)} /></label>
-            <label class="tcell"><span>海岸破碎</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.coastBreak} label="海岸破碎" width={84} onInput={(v) => setShape('coastBreak', v)} /></label>
-            <label class="tcell"><span>山脉</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.mountain} label="山脉强度" width={84} onInput={(v) => setShape('mountain', v)} /></label>
-            <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => setShape('detail', v)} /></label>
-            <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => setShape('seaRugged', v)} /></label>
-            <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => setShape('flatness', v)} /></label>
-            <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
-            <label class="tcell"><span>侵蚀</span>
-              <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
-            </label>
-          </div>
-        {/if}
+        <div class="hint">仅重建地块网格（不生成高度图）；地块以外的全部图层（含自定义层与路径）将被清除——再次点击确认</div>
       {:else if isHeightmap}
         <!-- 高度层 = 生成高度图（种子+参数可调重跑） -->
         <div class="bhead"><span class="sb">⛰️ 地形</span><span class="bh-t">生成高度图「{layerName}」</span></div>
@@ -169,9 +165,16 @@
           <label>种子 <input value={seedInput} oninput={(e) => (seedInput = e.currentTarget.value)} />
             <button type="button" class="dice" title="随机种子" onclick={rollSeed}>🎲</button>
           </label>
-          <button type="button" class="primary" disabled={generating} onclick={fire} style="margin-left:auto">⛰️ 生成高度图</button>
+          <button
+            type="button"
+            class="primary"
+            class:danger={armed === 'height'}
+            disabled={generating}
+            onclick={() => confirmFire('height')}
+            style="margin-left:auto"
+          >{armed === 'height' ? '⚠ 确认（清除其他图层）？' : '⛰️ 生成高度图'}</button>
         </div>
-        <div class="hint">按下方地形参数重跑地形——同种子同参 = 同参同果，🎲 换种子即换地形</div>
+        <div class="hint">按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -256,10 +259,16 @@
                 <input type="checkbox" bind:checked={cascadeDown} />含子层
               </label>
             {/if}
-            <button type="button" class="primary" onclick={fire}>↻ 重新生成</button>
+            <button
+              type="button"
+              class="primary"
+              class:danger={armed === 'elem'}
+              onclick={() => confirmFire('elem')}
+            >{armed === 'elem' ? '⚠ 确认（连父层链清除）？' : '↻ 重新生成'}</button>
           </div>
           <div class="hint">
-            将替换「{layerName}」{cascadeDown && cascadeAvail ? '及其整条子层链（自底向上）' : ''}现有元素（需命令重构落地后方可撤销）
+            将替换「{layerName}」{cascadeDown && cascadeAvail ? '及其整条子层链（自底向上）' : ''}现有元素；
+            其父层链内容将一并清除（父层聚合子层，子层重生成后父层失效）——再次点击确认
           </div>
         {:else}
           <div class="hint">该层无生成配置——到「检查」模式给「{layerName}」设置参数后再回来生成</div>
@@ -393,6 +402,12 @@
     color: #1a1408;
     border-color: var(--accent, #c9a24a);
     font-weight: 600;
+  }
+  /* 两击确认的武装态：红底警示 */
+  .row button.primary.danger {
+    background: #a8402f;
+    color: #fff;
+    border-color: #a8402f;
   }
   .row button:disabled {
     opacity: 0.5;

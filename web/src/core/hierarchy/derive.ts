@@ -139,10 +139,14 @@ export function layerDepthOf(world: Pick<World, 'layers'>, layerId: string): num
 /**
  * 层叠放比较器（HIERARCHY §6.1，包2——替换 compose 内联比较器）：
  * 1. inFocusSubtree(L) ? 1 : 0 —— **焦点整段**（焦点+全部后代）最后画（修 P5）；
- * 2. rootIdx 降序（非焦点组：列表上层根 → 后画）；
+ * 2. rootIdx 升序（非焦点组：列表上层根 → 先画；列表序 = 地图自下而上，2026-10-06 用户定）；
  * 3. depth 升序（同树：父 → 子）；
  * 4. 数组序稳定（层内兄弟：数组后 = 画上）。
  * 焦点为深层子层时其祖先/旁支留非焦点组（契约=整段=子树，不是整棵树）。
+ *
+ * rootIdx **升序**（2026-10-06 用户定「图层的顺序和列表的顺序相反」：列表自上而下 =
+ * 低→高 = 地图自下而上——列表首行（地块）最底、末行最顶；旧判 rootIdx 降序 =
+ * 列表上层根画在最上，与本契约相反，已翻向）。
  */
 export function layerStackComparator(
   world: Pick<World, 'layers'>,
@@ -161,7 +165,7 @@ export function layerStackComparator(
     if (fa !== fb) return fa - fb;
     const ra = listIndex.get(rootOf(a)) ?? 0;
     const rb = listIndex.get(rootOf(b)) ?? 0;
-    if (ra !== rb) return rb - ra;
+    if (ra !== rb) return ra - rb;
     return depthOf(a) - depthOf(b);
   };
 }

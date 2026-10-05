@@ -8,7 +8,14 @@ type DonePayload = { type: 'done'; world: World; projCache: ProjCache };
 export type WorldWithCache = { world: World; projCache?: ProjCache };
 
 function runWorker(
-  req: { seed: number; count: number; profileParams?: Record<string, Record<string, number | string | boolean>>; loadJson?: string },
+  req: {
+    seed: number;
+    count: number;
+    profileParams?: Record<string, Record<string, number | string | boolean>>;
+    loadJson?: string;
+    /** 启用生成器白名单（撒点=仅地块传 []）；缺省 = 全部 */
+    enabled?: string[];
+  },
   onProgress?: (p: GenProgress) => void,
 ): Promise<WorldWithCache> {
   return new Promise((resolve, reject) => {
@@ -61,8 +68,9 @@ export function generateWorldAsync(
   count: number,
   onProgress?: (p: GenProgress) => void,
   profileParams?: Record<string, Record<string, number | string | boolean>>,
+  enabled?: string[],
 ): Promise<WorldWithCache> {
-  return runWorker({ seed, count, profileParams }, onProgress);
+  return runWorker({ seed, count, profileParams, enabled }, onProgress);
 }
 
 /** 恢复路径：JSON → Worker 反序列化 + 预建投影缓存（主线程免双卡顿） */

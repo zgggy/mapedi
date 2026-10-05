@@ -35,13 +35,16 @@ export interface GenerationCtx {
   scheduleAutosave(): void;
   touchWorld(): void;
   saveGenDraftSoon(): void;
+  /** 清除工作区选中（生成清除规则会删掉选中元素所属内容，2026-10-06） */
+  clearSelection?(): void;
 }
 
 export class GenerationService {
   constructor(private ctx: GenerationCtx) {}
 
-  async generate(seed: number, count: number): Promise<void> {
+  async generate(seed: number, count: number, opts?: { cellsOnly?: boolean }): Promise<void> {
     const seq = this.ctx.nextSeq();
+    const cellsOnly = opts?.cellsOnly ?? false;
     // 硬上限唯一钳制点（core/world.HARD_MAX_DENSITY）；软上限解锁是 UI 策略，不在生成链
     const n = Math.max(100, Math.min(count, HARD_MAX_DENSITY));
     this.ctx.setGenerating(true);
@@ -50,7 +53,7 @@ export class GenerationService {
     this.ctx.notify();
     try {
       // P1：整链 Worker（主线程不冻）；失败再退回主线程
-      await this.generateViaWorker(seed, n, seq);
+      await this.generateViaWorker(seed, n, seq, cellsOnly);
       if (seq !== this.ctx.seq) return;
       this.ctx.setGenerating(false);
       this.ctx.setGenProgress(100);
@@ -60,7 +63,7 @@ export class GenerationService {
       console.warn('[gen] Worker 失败，回退主线程', e);
       if (seq !== this.ctx.seq) return;
       try {
-        await this.generateOnMain(seed, n, false, seq);
+        await this.generateOnMain(seed, n, false, seq, cellsOnly);
         if (seq !== this.ctx.seq) return;
         this.ctx.setGenerating(false);
         this.ctx.setGenProgress(100);
@@ -73,7 +76,12 @@ export class GenerationService {
     }
   }
 
-  private async generateViaWorker(seed: number, count: number, seq: number): Promise<void> {
+  private async generateViaWorker(
+    seed: number,
+    count: number,
+    seq: number,
+    cellsOnly = false,
+  ): Promise<void> {
     this.ctx.setStatus(`生成中（Worker）… ${count} 地块`);
     this.ctx.notify();
     // profile 面板参数随 Worker 下发（否则面板旋钮只在主线程回退路径生效）。
@@ -91,17 +99,27 @@ export class GenerationService {
         this.ctx.notify();
       },
       params,
+      // 撒点=仅地块（2026-10-06 用户定）：白名单空 = 跳过全部生成器（不生成高度图）
+      cellsOnly ? [] : undefined,
     );
     if (seq !== this.ctx.seq) return;
     const world = got.world;
     if (got.projCache) installProjCache(got.projCache);
     world.astro = defaultStarSystem(seed, world.climate);
     this.ctx.replaceWorld(world);
-    // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
-    const fg = world.layers.find((l) => l.focusAfterGen)!;
-    fg.visible = true;
-    this.ctx.setFocusLayer(fg.id);
-    this.ctx.setStatus(`${world.cells.length} 地块 · Worker`);
+    if (cellsOnly) {
+      // 撒点=仅地块：新世界 = cells + 空内置层（其他图层/自定义层/路径已清除）→ 焦点回地块
+      const cl = world.layers.find((l) => l.baseMesh) ?? world.layers[0];
+      cl.visible = true;
+      this.ctx.setFocusLayer(cl.id);
+      this.ctx.setStatus(`${world.cells.length} 地块（仅撒点，其余图层已清除）`);
+    } else {
+      // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
+      const fg = world.layers.find((l) => l.focusAfterGen)!;
+      fg.visible = true;
+      this.ctx.setFocusLayer(fg.id);
+      this.ctx.setStatus(`${world.cells.length} 地块 · Worker`);
+    }
     this.ctx.scheduleAutosave();
     this.ctx.notify();
   }
@@ -111,6 +129,7 @@ export class GenerationService {
     count: number,
     quiet = false,
     seq = this.ctx.seq,
+    cellsOnly = false,
   ): Promise<void> {
     const t0 = performance.now();
     // 让浏览器先绘制一次 loading
@@ -119,15 +138,21 @@ export class GenerationService {
     const world = createWorld({ seed, count });
     const params: Record<string, Record<string, number | string | boolean>> = {};
     for (const p of this.ctx.profiles) params[p.layerId] = { ...p.params }; // 平面化（与 Worker 路径同规则）
-    const enabled = new Set(cascadeEnabled(this.ctx.profiles));
+    const enabled = cellsOnly ? new Set<string>() : new Set(cascadeEnabled(this.ctx.profiles));
     runCascade(world, seed, undefined, undefined, params, enabled);
     world.astro = defaultStarSystem(seed, world.climate);
     if (seq !== this.ctx.seq) return;
     this.ctx.replaceWorld(world);
-    // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
-    const fg = world.layers.find((l) => l.focusAfterGen)!;
-    fg.visible = true;
-    this.ctx.setFocusLayer(fg.id);
+    if (cellsOnly) {
+      const cl = world.layers.find((l) => l.baseMesh) ?? world.layers[0];
+      cl.visible = true;
+      this.ctx.setFocusLayer(cl.id);
+    } else {
+      // 产品默认（AGENTS §6）：生成 → focusAfterGen 层（height）显示并成为焦点
+      const fg = world.layers.find((l) => l.focusAfterGen)!;
+      fg.visible = true;
+      this.ctx.setFocusLayer(fg.id);
+    }
     const ms = Math.round(performance.now() - t0);
     if (!quiet) this.ctx.setStatus(`${world.cells.length} 地块 · ${ms}ms`);
     this.ctx.scheduleAutosave();
@@ -160,6 +185,32 @@ export class GenerationService {
       const params = this.ctx.profiles.find((p) => p.layerId === id)?.params;
       runCascade(world, s, [id], undefined, params ? { [id]: params } : undefined, new Set([id]));
     }
+    // 清除规则（2026-10-06 用户定）：
+    // - 高度重生成 → 清除**地块+高度以外**全部图层内容；
+    // - 子层重生成 → 清除**父层链**（父层聚合子层为单元源，子层重生成后父层内容全部失效）。
+    // 清内容**不清壳**：图层定义保留（列表不消失、可再次生成）；路径按 layerId 一并清。
+    const clearIds = new Set<string>();
+    if (heightmapLayerId(world.layers) === layerId) {
+      for (const l of world.layers) {
+        if (l.id !== 'cells' && l.id !== layerId) clearIds.add(l.id);
+      }
+    } else {
+      let pid = world.layers.find((l) => l.id === layerId)?.parentLayerId;
+      const seen = new Set<string>([layerId]);
+      while (pid && !seen.has(pid)) {
+        seen.add(pid);
+        clearIds.add(pid);
+        pid = world.layers.find((l) => l.id === pid)?.parentLayerId;
+      }
+    }
+    let clearedRegions = 0;
+    if (clearIds.size) {
+      const before = world.regions.length;
+      world.regions = world.regions.filter((r) => !clearIds.has(r.layerId));
+      world.paths = (world.paths ?? []).filter((pt) => !clearIds.has(pt.layerId));
+      clearedRegions = before - world.regions.length;
+      this.ctx.clearSelection?.();
+    }
     this.ctx.touchWorld();
     // focusAfterGen 层（height）重生成后默认显示并聚焦（与整世界生成同规则）
     const fg = world.layers.find((l) => l.id === layerId && l.focusAfterGen);
@@ -167,10 +218,13 @@ export class GenerationService {
       fg.visible = true;
       this.ctx.setFocusLayer(fg.id);
     }
+    const base = cascadeDown && chain.length > 1
+      ? `已级联重新生成 ${chain.length} 层（子先父后）：${chain.join(' → ')} · 种子 ${s}`
+      : `已重新生成：${layerId} · 种子 ${s}`;
     this.ctx.setStatus(
-      cascadeDown && chain.length > 1
-        ? `已级联重新生成 ${chain.length} 层（子先父后）：${chain.join(' → ')} · 种子 ${s}`
-        : `已重新生成：${layerId} · 种子 ${s}`,
+      clearIds.size
+        ? `${base} · 已清除 ${clearIds.size} 个图层内容（${clearedRegions} 元素）`
+        : base,
     );
   }
 

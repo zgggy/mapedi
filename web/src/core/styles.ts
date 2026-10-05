@@ -80,49 +80,31 @@ export const PRESET_STYLES: StyleSet[] = [
   {
     id: 'parchment',
     name: '羊皮纸',
-    ocean: '#c5d4e0',
-    landBase: '#e8dcc4',
+    // 色卡（2026-10-06 用户定「搜集地图色库定义羊皮纸全色卡」）——色锚来自古地图/
+    // 手绘 atlas 通用配色：纸面 #E8DCC4/#F2E8D5、陆 #E4D5B0/#B98B5E、墨 #4A3728/#3E3025、
+    // 旧纸赭 #723F15、老海蓝绿 #A9C0B7/#7A9EAE（web 检索 wallfully/icolorpalette/
+    // 123freevectors/historicpictoric 交叉）。
+    ocean: '#a9c0b7',
+    landBase: '#e4d5b0',
+    /** 框外 = 旧地图装裱底（深暖褐，区别于默认黑） */
+    frameVoid: 'rgba(52, 40, 26, 0.92)',
     symbols: { vegetation: true, capital: true, scale: 1 },
     hillshade: true,
-    cellStroke: { color: 'rgba(90,70,40,0.12)', width: 0.4 },
-    regionStroke: { color: 'rgba(80,50,20,0.35)', width: 1 },
-    continentStroke: { color: 'rgba(60,40,15,0.55)', width: 1.8 },
-    coast: { color: 'rgba(70,100,130,0.75)', width: 1.2 },
-    river: { color: '#6a9ec0', width: 1.1 },
-    road: { color: '#8b5a2b', width: 2 },
-    border: { color: 'rgba(70,40,15,0.65)', width: 1.4 },
-    stripe: { enabled: true, width: 2.5, contrast: 0.4 },
+    cellStroke: { color: 'rgba(114, 91, 60, 0.14)', width: 0.4 },
+    regionStroke: { color: 'rgba(110, 91, 75, 0.5)', width: 1 },
+    continentStroke: { color: 'rgba(74, 55, 40, 0.65)', width: 1.8 },
+    coast: { color: 'rgba(74, 55, 40, 0.8)', width: 1.2 },
+    river: { color: '#7a9eae', width: 1.1 },
+    road: { color: '#9c6b3f', width: 2 },
+    border: { color: 'rgba(62, 48, 37, 0.7)', width: 1.4 },
+    stripe: { enabled: true, width: 2.5, contrast: 0.35 },
     labels: {
       default: {
         family:
           'Georgia, "Times New Roman", "Songti SC", STSong, SimSun, "Noto Serif CJK SC", serif',
         size: 13,
-        color: '#3b2a14',
-        halo: 'rgba(255,250,230,0.75)',
-      },
-    },
-  },
-  {
-    id: 'neon',
-    name: '科幻',
-    ocean: '#0a1020',
-    landBase: '#1a2838',
-    symbols: { vegetation: true, capital: true, scale: 1 },
-    hillshade: false,
-    cellStroke: { color: 'rgba(80,200,255,0.08)', width: 0.4 },
-    regionStroke: { color: 'rgba(80,220,255,0.35)', width: 1 },
-    continentStroke: { color: 'rgba(120,240,255,0.55)', width: 1.6 },
-    coast: { color: 'rgba(180,250,255,0.85)', width: 1.5 },
-    river: { color: '#40e0ff', width: 1.3 },
-    road: { color: '#ffcc40', width: 2 },
-    border: { color: 'rgba(180,240,255,0.7)', width: 1.5 },
-    stripe: { enabled: true, width: 3.5, contrast: 0.55 },
-    labels: {
-      default: {
-        family: '"SF Mono", Menlo, Consolas, "PingFang SC", "Microsoft YaHei", monospace',
-        size: 12,
-        color: '#b8f0ff',
-        halo: 'rgba(0,20,40,0.8)',
+        color: '#4a3728',
+        halo: 'rgba(242, 232, 213, 0.8)',
       },
     },
   },

@@ -12,6 +12,8 @@ export interface GenRequest {
   profileParams?: Record<string, Record<string, number | string | boolean>>;
   /** 恢复路径：传已存 JSON，回 {world, projCache}（免主线程反序列化 + 首建） */
   loadJson?: string;
+  /** 启用生成器白名单（2026-10-06 撒点=仅地块：传 [] 跳过全部生成器，世界=cells+空内置层） */
+  enabled?: string[];
 }
 
 /** 世界按固定顺序重建 sharedEdges（与旧 JSON stripSharedEdges 同语义），projCache 走转移 */
@@ -27,7 +29,7 @@ function postDone(world: ReturnType<typeof createWorld>) {
 }
 
 self.onmessage = (ev: MessageEvent<GenRequest>) => {
-  const { seed, count, profileParams, loadJson } = ev.data;
+  const { seed, count, profileParams, loadJson, enabled } = ev.data;
   const post = (label: string, progress: number) => {
     self.postMessage({ type: 'progress', label, progress });
   };
@@ -52,7 +54,7 @@ self.onmessage = (ev: MessageEvent<GenRequest>) => {
     runCascade(world, seed, undefined, (id, i, n) => {
       const p = 45 + Math.round((i / n) * 45);
       post(CASCADE_LABELS[id] ?? id, p);
-    }, profileParams);
+    }, profileParams, enabled ? new Set(enabled) : undefined);
 
     // 90–100%：顺带建投影缓存（主线程零首建）
     post('预建投影缓存', 92);

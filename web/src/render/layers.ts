@@ -1147,10 +1147,10 @@ export const decorationsLayer: RenderLayer = {
       const cellSym = layer.cellSymbol ?? 'none';
       const cellMarker = layer.cellMarker ?? 'none';
       if (labelMode === 'none' && coreSym === 'none' && cellSym === 'none' && cellMarker === 'none') continue;
-      // baseMesh 层不进元素合成，但可以有装饰（cell 标记等）
+      // baseMesh 层不进元素合成，但可以有装饰（cell 标记等）；显隐唯一真相=眼睛（2026-10-06）
       const shown = layer.baseMesh
-        ? (focus === layer.id || layer.visible === true)
-        : isLayerShown(world, layer.id, focus);
+        ? layer.visible === true
+        : isLayerShown(world, layer.id);
       if (!shown) continue;
       const regions = decorRegionsOf(world, layer.id);
       // baseMesh 层的 cellMarker 遍历所有 cell，不依赖 Region

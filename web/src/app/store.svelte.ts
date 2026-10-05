@@ -310,6 +310,9 @@ export class EditorStore {
     scheduleAutosave: () => this.scheduleAutosave(),
     touchWorld: () => this.touchWorld(),
     saveGenDraftSoon: () => saveGenDraftSoon(),
+    clearSelection: () => {
+      ui.selectedRegionId = null;
+    },
   });
 
   /** 绘制会话与笔画状态机（还债 5-b4）——选中/状态/失效族经闭包注入 */
@@ -450,9 +453,9 @@ export class EditorStore {
     this.pipeline.touchPaint();
   }
 
-  /** 整链生成（实现体在 GenerationService：Worker 主路 + 主线程回退） */
-  async generate(seed: number, count: number) {
-    await this.gen.generate(seed, count);
+  /** 整链生成（实现体在 GenerationService：Worker 主路 + 主线程回退）；cellsOnly=仅撒点 */
+  async generate(seed: number, count: number, opts?: { cellsOnly?: boolean }) {
+    await this.gen.generate(seed, count, opts);
   }
 
   /** 单层再生成（实现体在 GenerationService；height 连带删旧建新海陆） */
