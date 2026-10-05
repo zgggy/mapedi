@@ -22,6 +22,7 @@ import type { World } from '../types';
 import { isOcean } from '../types';
 import { fbm, ridged, unitOf, smoothstep } from '../terrain';
 import type { WorldShape } from '../layer/genTypes';
+import { createRng, hashSeed } from '../rng';
 
 export interface RefineOpts {
   seed: number;
@@ -55,6 +56,82 @@ function multiBfs(
     }
   }
   return { dist, owner };
+}
+
+/**
+ * ③ 热侵蚀（粗削：陡坡传质——削尖峰、堆坡脚；同侧约束 → mask 不变；
+ * 峰格豁免扣减 → 顶峰只接收沉积、始终全局最高，保住「顶峰在最厚起点」断言）。
+ * 作用在归一前的 base 连续域（陆 [0,1] / 海 [-1,0] 各自动态）。
+ */
+function thermalPass(
+  world: World,
+  h: Float64Array,
+  side: Uint8Array,
+  isPeak: Set<number>,
+  iters: number,
+): void {
+  if (iters <= 0) return;
+  const n = world.cells.length;
+  const thr = 0.004;
+  for (let t = 0; t < iters; t++) {
+    const delta = new Float64Array(n);
+    for (const c of world.cells) {
+      const i = c.id;
+      if (isPeak.has(i)) continue;
+      const hv = h[i];
+      for (const j of c.neighbors) {
+        if (side[j] !== side[i]) continue;
+        const d = hv - h[j];
+        if (d > thr) {
+          const move = (d - thr) * 0.3;
+          delta[i] -= move;
+          delta[j] += move;
+        }
+      }
+    }
+    for (let i = 0; i < n; i++) h[i] += delta[i];
+  }
+}
+
+/**
+ * ③ 粒子水力侵蚀（细刻：水滴沿同侧最邻下冲、沿途渐沉积、停处落扇——
+ * 河谷下切 / 山脊细化 / 山脚冲积，行业共识的「自然感」来源；SimpleErosion 简化版）。
+ * 同侧移动 + 峰格零侵蚀 → mask 与顶峰断言不破；rng 由 seed 派生 → 确定性。
+ */
+function hydraulicErode(
+  world: World,
+  h: Float64Array,
+  side: Uint8Array,
+  isPeak: Set<number>,
+  drops: number,
+  rng: () => number,
+): void {
+  if (drops <= 0) return;
+  const cells = world.cells;
+  const n = cells.length;
+  for (let d = 0; d < drops; d++) {
+    let cur = Math.min(n - 1, Math.floor(rng() * n));
+    let carry = 0;
+    for (let step = 0; step < 32; step++) {
+      const c = cells[cur];
+      let next = -1;
+      let hmin = Infinity;
+      for (const j of c.neighbors) {
+        if (side[j] !== side[cur]) continue;
+        if (h[j] < hmin) { hmin = h[j]; next = j; }
+      }
+      if (next < 0) break; // 孤立格：外循环统一沉积
+      const slope = h[cur] - hmin;
+      if (slope <= 0) break; // 平地/上坡：外循环沉积停下
+      const e = Math.min(slope * 0.3, 0.5) * 0.18;
+      if (!isPeak.has(cur)) { h[cur] -= e; carry += e; }
+      const dep = carry * 0.3; // 沿途渐沉积（速度质量简化）
+      h[cur] += dep;
+      carry -= dep;
+      cur = next;
+    }
+    h[cur] += carry; // 32 步耗尽或提前停：余沙落扇
+  }
 }
 
 /**
@@ -177,24 +254,47 @@ export function refineHeight(world: World, opts: RefineOpts): number {
   const d0 = Math.max(0, Math.min(1, opts.shape.detail));
   const mu = Math.max(0, Math.min(1, opts.shape.mountain));
   const seaR = Math.max(0, Math.min(1, opts.shape.seaRugged));
-  let landMax = EPS0;
+  // 起点集合（峰格）：微扰与侵蚀共用
+  const peakSet = new Set<number>(peaks);
   for (const c of cells) {
     const i = c.id;
     if (!isLand(i)) continue;
-    // 峰顶保护（2026-10-06 验收抓的漂移）：扩散起点（g=0）不加噪 + 峰域上界
-    // base ≤ peakH → 最高 64 档严格落在最厚处起点（「最匹配的扩散起点」语义硬断言）
-    const isPeak = gArr[i] === 0;
+    // 峰顶保护：扩散起点（g=0）不加噪 + 峰域上界 cap → 顶峰唯一落最厚起点
+    const isP = peakSet.has(i);
     const cap = peakH.get(owner[i]) ?? 1;
     const p0 = unitOf(c.center.lon, c.center.lat);
-    const w = isPeak ? 0 : smoothstep(1, 4, dLand[i]);
+    const w = isP ? 0 : smoothstep(1, 4, dLand[i]);
     const n1 = fbm(p0.x * 11, p0.y * 11, p0.z * 11, opts.seed + 501, 4);
     const r1 = ridged(p0.x * 3.4, p0.y * 3.4, p0.z * 3.4, opts.seed + 301, 5) - 0.5;
-    let v = base[i] + w * (d0 * 0.10 * n1 + mu * 0.12 * r1);
-    // 非起点格上界再收 1%：防 min 压平后邻格 round 仍到 64 与峰顶并列（顶峰唯一归起点）
-    v = Math.max(0, Math.min(v, isPeak ? cap : cap * 0.99));
-    base[i] = v;
-    landMax = Math.max(landMax, v);
+    const v = base[i] + w * (d0 * 0.07 * n1 + mu * 0.12 * r1);
+    // 非起点格上界收 1%：防压平后邻格 round 仍到 64 并列（顶峰唯一归起点）
+    base[i] = Math.max(0, Math.min(v, isP ? cap : cap * 0.99));
   }
+
+  // ④ 两级侵蚀（2026-10-06 用户拍板 a）：热侵蚀粗削 + 粒子水力细刻——
+  //    河谷/山脊/冲积的「自然感」来源；erosion 旋钮 = 强度（0=关）
+  const eIters = Math.max(0, Math.min(6, Math.round(opts.shape.erosion)));
+  thermalPass(world, base, land, peakSet, eIters);
+  const drops = eIters > 0 ? Math.round(6000 * eIters) : 0;
+  if (drops > 0) {
+    const rng = createRng(hashSeed(opts.seed, 777));
+    hydraulicErode(world, base, land, peakSet, drops, rng);
+    // 热侵蚀收尾：把水力刻出的碎尖角/沟壁毛刺再圆一遍（粗削 → 水刻 → 热收尾）
+    thermalPass(world, base, land, peakSet, Math.max(2, eIters));
+  }
+  // 侵蚀后复 cap：峰 ≤cap（沉积可升但封顶）、非峰 ≤cap·0.99 → 唯一 64 断言不破
+  for (const c of cells) {
+    const i = c.id;
+    if (!isLand(i)) continue;
+    const cap = peakH.get(owner[i]) ?? 1;
+    base[i] = Math.max(0, Math.min(base[i], peakSet.has(i) ? cap : cap * 0.99));
+  }
+
+  // ⑤ 量程收口：陆 [1,64]（归一基准=峰 → 唯一 64）；海按侵蚀后实际最深线性铺满 [-63,0]
+  let landMax = EPS0;
+  for (const c of cells) if (isLand(c.id)) landMax = Math.max(landMax, base[c.id]);
+  let seaMin = -EPS0;
+  for (const c of cells) if (!isLand(c.id)) seaMin = Math.min(seaMin, base[c.id]);
   let changed = 0;
   for (const c of cells) {
     const i = c.id;
@@ -206,7 +306,9 @@ export function refineHeight(world: World, opts: RefineOpts): number {
       const p0 = unitOf(c.center.lon, c.center.lat);
       const w = smoothstep(1, 4, seaDist[i] >= 0 ? seaDist[i] : 0);
       const n1 = fbm(p0.x * 7, p0.y * 7, p0.z * 7, opts.seed + 611, 3);
-      const dv = base[i] * 63 + w * seaR * 4 * n1; // base∈[-1,0] → [-63,0] 附近
+      // base∈[-1,0]：按侵蚀后实际最深线性铺满 → 端点 -63 必达；seaRugged=海内微扰幅度
+      const norm = seaMin < 0 ? Math.pow(base[i] / seaMin, gammaS) : 0;
+      const dv = -63 * norm + w * seaR * 4 * n1;
       v = Math.max(-63, Math.min(0, Math.round(dv)));
     }
     if (c.height !== v) { c.height = v; changed++; }

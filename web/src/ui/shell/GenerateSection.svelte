@@ -198,7 +198,7 @@
             ? basedOn ? '⚠ 确认细化（清除其他图层）？' : '⚠ 确认（清除其他图层）？'
             : basedOn ? '⛰️ 基于已有细化' : '⛰️ 生成高度图'}</button>
         </div>
-        <div class="hint">{#if basedOn}以你的陆块为唯一依据做匹配扩散：各陆块最厚处自动定为扩散起点（峰）、参数由块几何匹配——不是随机重画；全谱 [顶峰→深海] 铺满、海岸线逐格不变（有效参数 = 山脉 / 细节 / 海床 / 平整 + 种子）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
+        <div class="hint">{#if basedOn}以你的陆块为唯一依据做匹配扩散：各陆块最厚处自动定为扩散起点（峰）、参数由块几何匹配——不是随机重画；全谱 [顶峰→深海] 铺满、海岸线逐格不变（有效参数 = 侵蚀（强度）/ 山脉 / 细节 / 海床 / 平整 + 种子）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -231,11 +231,9 @@
             {#if !basedOn}
             <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
             {/if}
-            {#if !basedOn}
             <label class="tcell"><span>侵蚀</span>
               <input type="number" min="0" max="6" value={shape.erosion} onchange={(e) => setShape('erosion', Math.max(0, Math.min(6, Number(e.currentTarget.value) || 0)))} />
             </label>
-            {/if}
           </div>
         {/if}
       {:else}
