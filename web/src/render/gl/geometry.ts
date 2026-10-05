@@ -130,7 +130,8 @@ export function ringGeo(
   let xorTris: Float32Array | null = null;
   if (mode === 'fill') {
     const tri = triangulateRings([{ ring, pts }]);
-    xorTris = tri?.areaOk && trianglesMatchRings(tri.tris, [pts]) ? tri.tris : buildFan(pts);
+    const ok = tri?.areaOk && trianglesMatchRings(tri.tris, [pts]);
+    xorTris = ok ? tri!.tris : buildFan(pts);
   }
   const geo: RingGeo = {
     fillPts: mode === 'fill' ? pts : null,

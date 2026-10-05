@@ -54,6 +54,7 @@
   let {
     world,
     focusLayer = 'cells',
+    centerBias = 0,
     drawActive = false,
     drawTool = 'brush' as DrawTool,
     brushRadiusDeg = 1.5,
@@ -71,6 +72,12 @@
   }: {
     world: World;
     focusLayer?: string;
+    /**
+     * 左栏让位偏移（像素，= 栏右缘；面板开合回传）。世界中心右移 centerBias/2：
+     * 渲染与输入同用派生 viewCam —— 与旧「画布内缩」数学恒等（inset+(W-inset)/2
+     * ≡ W/2+inset/2），但画布恢复全宽 → 地图透到左栏组件后面（2026-10-06 用户定）。
+     */
+    centerBias?: number;
     drawActive?: boolean;
     drawTool?: DrawTool;
     brushRadiusDeg?: number;
@@ -100,6 +107,14 @@
   let viewportRoot: HTMLDivElement;
   // 相机记忆（设计稿 §2.1-2）：两个视图互斥挂载，切走即卸载 → 视角存组件外的模块单例
   let cam: Camera = $state(viewMemory.plane?.cam ?? defaultCamera());
+  /**
+   * 显示相机（派生）：raw cam 只存/只写（平移增量、缩放锚点、viewMemory 均用 raw），
+   * 渲染与输入读 viewCam = raw − (centerBias/2)/scale —— 内容整体右移 centerBias/2 px，
+   * 与旧画布内缩逐点恒等（含屏幕↔内容反算），面板开合/栏宽变化自动跟随。
+   */
+  const viewCam = $derived.by(
+    (): Camera => (centerBias ? { ...cam, x: cam.x - centerBias / 2 / cam.scale } : cam),
+  );
   let hoverId: number | null = $state(null);
   let panning = false;
   let painting = false;
@@ -184,7 +199,7 @@
     return screenToContentLonLat(
       sx,
       sy,
-      cam,
+      viewCam,
       rect.width,
       rect.height,
       contentOffsetX,
@@ -198,8 +213,8 @@
   function toScreenXY(px: number, py: number, rect: DOMRect) {
     // 内容位移 y 依赖（罗宾森 scale(y)·Δλ）；圆柱族退化常数
     return {
-      sx: worldToScreenX(px + contentOffsetAt(projection, py, contentOffsetX), cam, rect.width, 0),
-      sy: worldToScreenY(py, cam, rect.height),
+      sx: worldToScreenX(px + contentOffsetAt(projection, py, contentOffsetX), viewCam, rect.width, 0),
+      sy: worldToScreenY(py, viewCam, rect.height),
     };
   }
 
@@ -277,15 +292,19 @@
 
   /** 【绘制模型】拖动中的 cell 色块高亮（零重算即时反馈）；松手后真实重算落地即清除。
    *  只存 cell id——投影在渲染时做，色块跟随相机（拖动中不预烘屏幕坐标） */
+  /** 点选模态（核心格 / 特殊地块标记）激活中：画布单击要交给 onpick，**不能**被笔画劫持 */
+  const pickModal = $derived(!!editor.centerPickId || !!editor.markerPick);
   let paintPreview = new Set<number>();
   let paintPreviewCommitted = false;
 
   function paintAt(e: PointerEvent) {
     const ll = llAt(e);
-    const hits = editor.paint(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
-    if (hits?.length) {
+    const res = editor.paint(ll.lon, ll.lat, e.shiftKey, e.ctrlKey || e.metaKey, e.altKey, e.button);
+    // 高亮集合 = **将要改变归属的格**（预告），不是半径内的全部格——
+    // 已属本元素的格没有归属变化，不参与高亮（用户 2026-10-04 语义）
+    if (res?.changed.length) {
       let grew = false;
-      for (const id of hits) {
+      for (const id of res.changed) {
         if (!paintPreview.has(id)) {
           paintPreview.add(id);
           grew = true;
@@ -471,9 +490,11 @@
     // —— 【绘制模型】cell 色块高亮：拖动中即时反馈，松手后真实重算落地即清 ——
     if (paintPreview.size) {
       const ppp = projParams ?? defaultProjParams();
-      ctx.fillStyle = 'rgba(240, 195, 106, 0.38)';
-      ctx.strokeStyle = 'rgba(255, 230, 140, 0.85)';
-      ctx.lineWidth = 1;
+      // 深底上 0.38 透明金几乎看不见（2026-10-04 用户报「没有显示」）→ 提对比：
+      // 填充 0.55 + 亮描边 1.2px；本层已是最上（viewport-root 内 z=2，gl=0 / 主画布=1）
+      ctx.fillStyle = 'rgba(255, 208, 118, 0.55)';
+      ctx.strokeStyle = 'rgba(255, 238, 168, 0.95)';
+      ctx.lineWidth = 1.2;
       for (const id of paintPreview) {
         const cell = world.cells[id];
         const poly = cell?.polygon;
@@ -667,7 +688,7 @@
       warmLayerGeometry(
         ctx,
         world,
-        cam,
+        viewCam,
         dpr,
         {
           focusLayer,
@@ -826,14 +847,20 @@
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
-    // 成员对账补丁（手感批 2026-10-04）：本次数据修订内一次——已缓存件与
-    // region.cells 的 Δ 就地补上（替代 touch* 的全清，全清=重建长帧闪屏）
-    reconcilePieceMembership(world, projection, (ll) => project(ll, projection, projParams ?? defaultProjParams()));
     // 统一接口：选中 ≡ 显示；无图层特殊性
     const displayPieces = pathEdit
       ? undefined
       : composeShownPieces(world, focusLayer, highlightRegionId);
-    drawWorld(ctx, world, cam, hoverId, dpr, {
+    // 成员对账补丁（手感批 2026-10-04）：本次数据修订内一次——已缓存件与**合成件
+    // cellIds**（唯一显示真相，含区间型累积/父切片）的 Δ 就地补上（替代 touch* 的
+    // 全清，全清=重建长帧闪屏）。必须在 compose 之后：期望集吃 dp.cellIds。
+    reconcilePieceMembership(
+      world,
+      projection,
+      (ll) => project(ll, projection, projParams ?? defaultProjParams()),
+      displayPieces,
+    );
+    drawWorld(ctx, world, viewCam, hoverId, dpr, {
       focusLayer,
       focusLayerId: focusLayer,
       highlightRegionId,
@@ -929,6 +956,7 @@
     void projParams;
     void styleId;
     void cam.scale;
+    void centerBias; /* 面板开合 → 偏置变 → 立即重绘（viewCam 随动） */
     onzoom?.(cam.scale / 180);
     requestRender();
     requestOverlay();
@@ -1016,12 +1044,18 @@
         return;
       }
       // 左键：绘制态下画；路/航/河层用控制点绘制
-      if (e.button === 0 && (drawActive || pathEdit) && !spaceDown) {
+      if (e.button === 0 && (drawActive || pathEdit) && !spaceDown && !pickModal) {
         if (pathEdit) {
           const rect = canvas.getBoundingClientRect();
           const sx = e.clientX - rect.left;
           const sy = e.clientY - rect.top;
           const kind = focusLayer as PathKind;
+          // world.paths 可选（无路径世界）：路径编辑分支必须有 paths 才能继续
+          const paths = world.paths;
+          if (!paths) {
+            editor.status = '请在右侧工作区 ➕ 新建，或选中一条路径再绘制';
+            return;
+          }
 
           /** 只编辑工作区当前选中的路径（1 元素 = 1 条曲线） */
           let path = activePathOfKind(kind);
@@ -1048,8 +1082,8 @@
 
           // 点中任意本层控件：优先切到那条路径再操作
           const hit = hitControlPoint(sx, sy, rect);
-          if (hit && world.paths[hit.pathIdx]?.layerId === kind) {
-            const hitPath = world.paths[hit.pathIdx];
+          if (hit && paths[hit.pathIdx]?.layerId === kind) {
+            const hitPath = paths[hit.pathIdx];
             if (e.shiftKey) {
               editor.withPaths('删除控制点', () => {
                 const hp = editor.world!.paths![hit.pathIdx];
@@ -1090,7 +1124,7 @@
                 path.points = [...pathDraft!];
               });
               pathDraft = null;
-              dragPathIdx = world.paths.indexOf(path);
+              dragPathIdx = paths.indexOf(path);
               dragPtIdx = 1;
               editor.beginPathsDrag();
               dragGhostPts = null;
@@ -1109,7 +1143,7 @@
             editor.withPaths('添加控制点', () => {
               path.points = nextPts;
             });
-            dragPathIdx = world.paths.indexOf(path);
+            dragPathIdx = paths.indexOf(path);
             dragPtIdx = index;
             editor.beginPathsDrag();
             capturePointer(canvas, e.pointerId);
@@ -1243,7 +1277,7 @@
       if (pickDown && e.button === 0) {
         const moved = Math.hypot(e.clientX - pickDown.x, e.clientY - pickDown.y);
         pickDown = null;
-        if (moved < 4 && !drawActive && !pathEdit && !painting) {
+        if (moved < 4 && (!drawActive || pickModal) && !pathEdit && !painting) {
           const ll = llAt(e);
           onpick?.(pickCell(world, ll.lon, ll.lat)?.id ?? null);
         }
@@ -1290,8 +1324,10 @@
         requestRender();
       }, 150);
       const factor = e.deltaY > 0 ? 0.9 : 1.1;
-      // 锚点缩放数学在 planeCamera.zoomCamAt（光标下世界点不动）
-      cam = zoomCamAt(cam, factor, sx, sy, rect.width, rect.height);
+      // 锚点缩放数学在 planeCamera.zoomCamAt（光标下世界点不动）：
+      // 在 viewCam（偏置）空间解锚点 → 写回 raw cam（+centerBias/2/scale 还原）
+      const zc = zoomCamAt(viewCam, factor, sx, sy, rect.width, rect.height);
+      cam = centerBias ? { ...zc, x: zc.x + centerBias / 2 / zc.scale } : zc;
       requestRender();
     }}
   ></canvas>

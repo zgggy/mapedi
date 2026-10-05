@@ -11,15 +11,11 @@ export const LAYER_META: Record<string, LayerMeta> = {
   // —— 依赖地块 ——
   cells: { name: '地块', emoji: '🔲', kind: 'custom', category: 'cell' },
   height: { name: '高度', emoji: '⛰️', kind: 'height', category: 'cell' },
-  environment: { name: '环境', emoji: '🌍', kind: 'environment', category: 'cell' },
-  vegetation: { name: '植物', emoji: '🌿', kind: 'vegetation', category: 'cell' },
-  fauna: { name: '动物', emoji: '🐾', kind: 'fauna', category: 'cell' },
+  ecosystem: { name: '生态', emoji: '🌿', kind: 'ecosystem', category: 'cell' },
   race: { name: '种族', emoji: '🧬', kind: 'race', category: 'cell' },
   culture: { name: '文化', emoji: '🎭', kind: 'cultural', category: 'cell' },
-  religion: { name: '宗教', emoji: '✨', kind: 'religious', category: 'cell' },
   country: { name: '国家', emoji: '👑', kind: 'political', category: 'cell' },
   province: { name: '行省', emoji: '🏛️', kind: 'political', category: 'cell' },
-  military: { name: '军队', emoji: '⚔️', kind: 'military', category: 'cell', pending: true },
   // —— 不依赖地块 ——
   road: { name: '道路', emoji: '🛣️', kind: 'road', category: 'free' },
   route: { name: '航线', emoji: '⛵', kind: 'route', category: 'free' },

@@ -251,10 +251,9 @@ export function chainEdgesToMidpointRings(
 
   const buildRingFrom = (
     edgeIdx: number[],
-    keyList: string[],
+    dirs: number[],
     closed: boolean,
   ): MidRing | null => {
-    void keyList;
     const nE = edgeIdx.length;
     if (nE < 2) return null;
     // 行走序 pts（原逻辑）
@@ -306,13 +305,15 @@ export function chainEdgesToMidpointRings(
           }
           for (let i = 0; i < pts.length; i++) { pts[i].x = rotPts[i].x; pts[i].y = rotPts[i].y; }
           const rotE = edgeIdx.slice(cut).concat(edgeIdx.slice(0, cut));
-          for (let i = 0; i < nE; i++) edgeIdx[i] = rotE[i];
+          const rotD = dirs.slice(cut).concat(dirs.slice(0, cut));
+          for (let i = 0; i < nE; i++) { edgeIdx[i] = rotE[i]; dirs[i] = rotD[i]; }
         }
       }
     }
-    // 键序列由轮转后的边序重建（closed: 末键=末边 k1=首边 k0=首键，回绕一致）
-    const keys: string[] = [edges[edgeIdx[0]].k0];
-    for (let i = 0; i < nE; i++) keys.push(edges[edgeIdx[i]].k1);
+    // 键序列由轮转后的边序重建（closed: 末键=末边出口=首边入口=首键，回绕一致）。
+    // 混合走向（退化无向兜底的反向边）：入口/出口按 dirs 取 k0/k1。
+    const keys: string[] = [dirs[0] > 0 ? edges[edgeIdx[0]].k0 : edges[edgeIdx[0]].k1];
+    for (let i = 0; i < nE; i++) keys.push(dirs[i] > 0 ? edges[edgeIdx[i]].k1 : edges[edgeIdx[i]].k0);
     const nV = closed ? nE : nE - 1;
     const rawVerts: Pt[] = [];
     for (let i = 0; i < nV; i++) {
@@ -336,6 +337,9 @@ export function chainEdgesToMidpointRings(
    * 旧实现（行走史角序 + 无向兜底 + 栈式拆环）在同一图结构下随边枚举序产出不同拆环，
    * 还会拆出内部重叠的环 → even-odd 相消出缝隙（实证：strip 与中心两点在两种顺序下各坏一个）。
    * 退化回退：同成员桶空（度2 跨成员接续 A|C→C|B）→ 出弧唯一则取；多出弧 → 角序最近（保底）。
+   * 2026-10-05 补：桶2 贪心必须复查 outUsedG（否则 succ 非单射 → 断链丢边）；
+   * succ 断点（|in|≠|out| 退化顶点，近重复站点区定向不可判定）→ 提环阶段用**邻接
+   * 无向兜底**续链闭合（正常路径仍走 succ，拆环确定性不受影响；兜底只吃退化残段）。
    */
   // ---- 逐顶点双射配对（in → out，每条出弧恰用一次）----
   // 桶1 同成员（1:1 时直接配）；桶2 剩余入弧按角序对剩余出弧贪心——顶点内 |in|=|out|
@@ -401,6 +405,9 @@ export function chainEdgesToMidpointRings(
     for (const { ei, inAng } of pendAng) {
       let best = -1, bestOff = Infinity;
       for (const j of outs) {
+        // 复查：同一出弧可能已被本轮更早的入弧取走（不复查 → succ 非单射 →
+        // 提环时两条链抢同一条边 → 9 条 1-边断链，边被丢弃 = 填色洞）
+        if (outUsedG.has(j)) continue;
         const w = rep.get(edges[j].k1) ?? edges[j].p1;
         const outAng = angleOf(k, w);
         let off = inAng - outAng;
@@ -412,33 +419,72 @@ export function chainEdgesToMidpointRings(
     }
   }
 
-  // 提环：succ 覆盖所有入弧（双射）→ 每条边恰属一环；万一断链按开链输出（不丢边，与旧行为一致）
-  for (let i = 0; i < edges.length; i++) {
-    if (usedE[i] || succ[i] < 0) continue;
-    const chain: number[] = [];
-    const keys: string[] = [];
-    let cur = i;
-    let closed = false;
-    for (let guard = 0; guard < edges.length + 2; guard++) {
-      usedE[cur] = true;
-      chain.push(cur);
-      keys.push(edges[cur].k0);
-      const nx = succ[cur];
-      if (nx === i) { closed = true; break; }
-      if (nx < 0 || usedE[nx]) break;
+  // 提环：优先走 succ（定向双射 = 确定性拆环）；succ 断点（|in|≠|out| 的退化顶点——
+  // 近重复站点区 snap 噪声使定向不可判定）→ 邻接**无向兜底**续链：连通区域的割集无向
+  // 图必为闭环，按出口键找下一条未用边（正向优先、邻居序取首 = 确定性）→ 不丢边、
+  // 不开洞。旧实现断链只输出开链（1-边链还被 nE<2 丢弃）→ pieceGeo 跳过开环填充 →
+  // even-odd 奇偶缺一块 = 高度色块暗洞（2026-10-05 用户报 #85026/#5848）。
+  const entryKey = (idx: number, dir: number) => (dir > 0 ? edges[idx].k0 : edges[idx].k1);
+  const exitKey = (idx: number, dir: number) => (dir > 0 ? edges[idx].k1 : edges[idx].k0);
+  /** 出口键处的下一条未用边；回到起点入口 → 返回起点边（收口闭合）。正向优先、邻居序取首。 */
+  const pickAdj = (x: string, startIdx: number, startDir: number): { idx: number; dir: number } | null => {
+    if (entryKey(startIdx, startDir) === x) return { idx: startIdx, dir: startDir };
+    const nbrs = adj.get(x);
+    if (!nbrs) return null;
+    let rev = -1;
+    for (const y of nbrs) {
+      const idxs = edgeBetween.get(ekey(x, y));
+      if (!idxs) continue;
+      for (const j of idxs) {
+        if (usedE[j]) continue;
+        if (edges[j].k0 === x) return { idx: j, dir: 1 };
+        if (rev < 0) rev = j;
+      }
+    }
+    return rev >= 0 ? { idx: rev, dir: -1 } : null;
+  };
+  const walk = (startIdx: number, startDir: number): void => {
+    usedE[startIdx] = true;
+    const chain = [startIdx];
+    const dirs = [startDir];
+    let cur = startIdx;
+    let dir = startDir;
+    for (let guard = 0; guard <= edges.length; guard++) {
+      const exit = exitKey(cur, dir);
+      // 回到起点入口 = 闭合（起点边不再入链，与旧 succ 收口语义一致）
+      if (entryKey(startIdx, startDir) === exit) {
+        const r = buildRingFrom(chain, dirs, true);
+        if (r && r.pts.length >= 2) rings.push(r);
+        return;
+      }
+      let nx = -1;
+      let nd = 1;
+      if (dir > 0) {
+        const s = succ[cur];
+        if (s >= 0 && !usedE[s] && edges[s].k0 === exit) { nx = s; nd = 1; }
+      }
+      if (nx < 0) {
+        const cand = pickAdj(exit, startIdx, startDir);
+        if (!cand) break; // 几何割断（真死端）→ 开链兜底
+        if (cand.idx === startIdx) {
+          const r = buildRingFrom(chain, dirs, true);
+          if (r && r.pts.length >= 2) rings.push(r);
+          return;
+        }
+        nx = cand.idx;
+        nd = cand.dir;
+      }
+      usedE[nx] = true;
+      chain.push(nx);
+      dirs.push(nd);
       cur = nx;
+      dir = nd;
     }
-    keys.push(edges[i].k0);
-    const r = buildRingFrom(chain, keys, closed);
+    const r = buildRingFrom(chain, dirs, false);
     if (r && r.pts.length >= 2) rings.push(r);
-  }
-  // succ 未覆盖的入弧（|in|≠|out| 退化）兜底：角序补链成开环
+  };
   for (let i = 0; i < edges.length; i++) {
-    if (!usedE[i]) {
-      usedE[i] = true;
-      const r = buildRingFrom([i], [edges[i].k0, edges[i].k1], false);
-      if (r && r.pts.length >= 2) rings.push(r);
-    }
+    if (!usedE[i]) walk(i, 1);
   }
   return rings;
 }

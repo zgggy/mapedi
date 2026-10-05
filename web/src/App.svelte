@@ -5,7 +5,7 @@
   import { DEFAULT_DENSITY } from './core/world';
   import type { HoverInfo } from './render/map2d';
   import { editor } from './app/store.svelte';
-  import { initialShell, type ShellState, type ViewMode, persistWsMode } from './ui/shell/shell';
+  import { initialShell, type ShellState, type ViewMode, persistWsMode, type WsMode } from './ui/shell/shell';
   import TopBar from './ui/shell/TopBar.svelte';
   import GenerateSection from './ui/shell/GenerateSection.svelte';
   import InspectSection from './ui/shell/InspectSection.svelte';
@@ -36,11 +36,14 @@
   /** 左栏两面板开合（LeftRail 回传）：驱动高度标注显示条件（workspaceOpen）；width 为回传遥测 */
   let railState = $state({ layersOpen: true, wsOpen: true, right: 307 });
   /**
-   * 地图居中偏移（2026-10-04 用户定）：图层/元素**任一**面板展开 → 视图画布
-   * 内缩到栏右缘，自动对准剩余空间中心；双收起 → 内缩归零回屏幕中心。
-   * 平面/球面共用 .view 的 CSS 变量（canvas rect 相对坐标全链自适应）。
+   * 地图居中偏移（2026-10-04 用户定；2026-10-06 用户定「左栏组件下不要不透明
+   * 底座、这里要完全透明」→ 机制由**画布几何内缩**（--map-inset-l，会在左栏后留
+   * 一条主背景底条=底座）改为**相机水平偏置**：图层/元素任一展开 → 世界中心对准
+   * 剩余空间中心（= 栏右缘/2 像素，数学上与内缩恒等：inset+(1280-inset)/2 ≡
+   * 640+inset/2），双收起归零回屏幕中心；画布恢复全宽 → 地图透到左栏组件后面。
+   * 平面=Viewport 派生 viewCam（渲染/输入同源），球面=three setViewOffset 同位移。
    */
-  const mapInset = $derived(railState.layersOpen || railState.wsOpen ? railState.right : 0);
+  const centerBias = $derived(railState.layersOpen || railState.wsOpen ? railState.right : 0);
 
   let exportCanvas: HTMLCanvasElement | null = null;
   const globeRev = $derived(editor.rev);
@@ -77,7 +80,19 @@
    */
   /** C1 画布反选：cell → 焦点层包含归属 → 与列表单击同语义 */
   function pickElement(cellId: number | null) {
-    if (cellId === null || !world) return;
+    if (!world) return;
+    // 特殊地块标记模态（包5）：单击格子循环 ★→●→◆→无，**模态保持**（可连打多格），Esc 退出
+    if (editor.markerPick) {
+      if (cellId !== null) editor.toggleMarkFromPick(cellId);
+      return;
+    }
+    // 核心格点选模态（绘制模式「核心」联排，2026-10-04）：单击 = 设核心并退出；
+    // 点空处（cellId=null）保持模态待点，Esc 取消——不与 C1「单击=选中」抢语义。
+    if (editor.centerPickId) {
+      if (cellId !== null) editor.setCoreFromPick(cellId);
+      return;
+    }
+    if (cellId === null) return;
     let hit: string | null = null;
     for (const id of editor.regionIdsOfCell(cellId)) {
       const r = world.regions.find((x) => x.id === id);
@@ -90,7 +105,7 @@
    * 工作区三模式（2026-09-30 拍板）：检查 / 生成 / 绘制。
    * 切换即持久化；球面视图锁定检查（纯展示契约）。
    */
-  function setWsMode(m: 'check' | 'gen' | 'draw') {
+  function setWsMode(m: WsMode) {
     if (shell.wsMode === m) return;
     shell.wsMode = m;
     persistWsMode(m);
@@ -183,6 +198,15 @@
         editor.redo();
       }
       if (e.key === 'Escape') {
+        // 点选模态优先退出（不连带清选中，再按一次才清）
+        if (editor.markerPick) {
+          editor.cancelMarkerPick();
+          return;
+        }
+        if (editor.centerPickId) {
+          editor.cancelCenterPick();
+          return;
+        }
         // Esc = 收起选中（单开规则：展开的元素收起 → 绘制由推导退出）；搜索框/菜单内 Esc 已各自 stopPropagation
         if (editor.selectedRegionId) {
           editor.selectedRegionId = null;
@@ -237,11 +261,12 @@
   {/if}
 
   {#if world}
-    <div class="view" style="opacity:{viewFade}; --map-inset-l: {mapInset}px">
+    <div class="view" style="opacity:{viewFade}">
       {#if shell.viewMode === 'view-2d'}
         <Viewport
           {world}
           {focusLayer}
+          centerBias={centerBias}
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}
@@ -278,6 +303,7 @@
           <Globe
             {world}
             {focusLayer}
+            centerBias={centerBias}
             rev={globeRev}
             climate={editor.climateDraft}
             astro={editor.astro ?? undefined}
@@ -434,8 +460,7 @@
   .view {
     position: absolute;
     inset: 0;
-    /* 地图居中偏移：左缘让开左栏（面板展开=剩余空间中心，双收起=0 回屏幕中心） */
-    left: var(--map-inset-l, 0px);
+    /* 居中偏移改走相机（2026-10-06）：画布恢复全宽，左栏组件后不再留底条 */
     transition: opacity 0.2s ease;
   }
   .loading,

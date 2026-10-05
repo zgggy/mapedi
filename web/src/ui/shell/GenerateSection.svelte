@@ -12,6 +12,7 @@
    */
   import { editor } from '../../app/store.svelte';
   import { heightmapLayerId } from '../../core/layer/flags';
+  import { childLayerIdOf } from '../../core/hierarchy/derive';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ModeCapsule from './ModeCapsule.svelte';
   import StateCapsule from './StateCapsule.svelte';
@@ -58,6 +59,10 @@
   } = $props();
 
   const isScatter = $derived(strategy === 'scatter');
+  /** 焦点层有子层（链：每层≤1子）→ 显示「含子层」级联开关（用户 2026-10-04） */
+  const cascadeAvail = $derived(!!editor.world && !!childLayerIdOf(editor.world, layerId));
+  /** 勾选后：从最深层子层逐层向上重新生成到本层（子先父后）；默认关 = 只生成本层 */
+  let cascadeDown = $state(false);
   const isHeightmap = $derived(strategy === 'heightmap');
   /** 生成可用性：scatter/heightmap 恒可用；其他层需有 profile params */
   const canGen = $derived(
@@ -107,7 +112,7 @@
     // 种子行（2026-10-04 用户报障：高度/布局重生成没有改种子的地方）——
     // 空/非法回退世界种子（regenLayer 内 isFinite 兜底）
     const t = seedInput.trim();
-    editor.regenLayer(layerId, t === '' ? undefined : Number(t));
+    editor.regenLayer(layerId, t === '' ? undefined : Number(t), cascadeDown);
   }
 
   /** 种子行（撒点/高度/布局三分支同款；seedInput = App 草稿持久化字段） */
@@ -246,9 +251,16 @@
             {/each}
           </div>
           <div class="row end">
+            {#if cascadeAvail}
+              <label class="sm" title="勾选后先重生成最深子层，逐层向上到「{layerName}」（子先父后：父层聚合子层）">
+                <input type="checkbox" bind:checked={cascadeDown} />含子层
+              </label>
+            {/if}
             <button type="button" class="primary" onclick={fire}>↻ 重新生成</button>
           </div>
-          <div class="hint">将替换「{layerName}」现有元素（需命令重构落地后方可撤销）</div>
+          <div class="hint">
+            将替换「{layerName}」{cascadeDown && cascadeAvail ? '及其整条子层链（自底向上）' : ''}现有元素（需命令重构落地后方可撤销）
+          </div>
         {:else}
           <div class="hint">该层无生成配置——到「检查」模式给「{layerName}」设置参数后再回来生成</div>
         {/if}

@@ -42,37 +42,25 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
       return {
         ...base,
         method: 'randomConnected', scope: 'noCrossLandSea', pattern: 'partitionLand',
-        coreSelector: 'random', count: 15,
+        // 省会默认 = 视觉中心（P7：面内最宽阔处；用户可在检查区改「设中心」）
+        coreSelector: 'visualCenter', count: 15,
         names: ['甲郡', '乙道', '丙州', '丁都', '戊府', '己县', '庚乡', '辛里', '壬亭', '癸邑'],
       };
     case 'country':
       return {
         ...base,
         method: 'fromLayer', scope: 'landOnly', pattern: 'partitionLand',
-        coreSelector: 'centermost', count: 8,
+        // 首都默认 = 视觉中心（P7：凹形/狭长时质心会偏，最大内接处不会）
+        coreSelector: 'visualCenter', count: 8,
         fromLayerCount: 3, // 源层从层树派生（D1），原 province 常量退役
         names: ['华夏', '罗马', '波斯', '埃及', '印度', '希腊', '腓尼基', '阿拉伯'],
       };
-    case 'environment':
-      return {
-        ...base,
-        method: 'randomConnected', scope: 'unlimited', pattern: 'scattered',
-        coreSelector: 'random', count: 8,
-        names: ['雨林', '草原', '沙漠', '冻原', '湿地', '山地', '海岸', '丛林'],
-      };
-    case 'vegetation':
+    case 'ecosystem':
       return {
         ...base,
         method: 'randomConnected', scope: 'landOnly', pattern: 'cluster',
-        coreSelector: 'random', count: 8,
-        names: ['阔叶林', '针叶林', '草原', '灌丛', '竹林', '苔原', '红树林', '高山草甸'],
-      };
-    case 'fauna':
-      return {
-        ...base,
-        method: 'randomConnected', scope: 'unlimited', pattern: 'scattered',
-        coreSelector: 'random', count: 6,
-        names: ['鹿群', '狼群', '狮群', '象群', '鹰群', '鱼群'],
+        coreSelector: 'random', count: 12,
+        names: ['阔叶林', '针叶林', '草原', '灌丛', '竹林', '苔原', '红树林', '高山草甸', '鹿群', '狼群', '狮群', '象群', '鹰群', '鱼群', '雨林', '沙漠', '冻原', '湿地'],
       };
     case 'race':
       return {
@@ -88,21 +76,8 @@ export function defaultGenConfig(layerId: LayerId, seed: number): GenConfig {
         coreSelector: 'highElevation', count: 8,
         names: ['阿尔泰', '瓦兰', '赛里斯', '努米底亚', '维京', '高棉', '玛雅', '波斯'],
       };
-    case 'religion':
-      return {
-        ...base,
-        method: 'randomConnected', scope: 'landOnly', pattern: 'scattered',
-        coreSelector: 'lowElevation', count: 5,
-        names: ['日曜教', '月影宗', '大地母神', '海神殿', '星象会'],
-      };
-    case 'military':
-      return {
-        ...base,
-        method: 'randomConnected', scope: 'landOnly', pattern: 'longStrip',
-        coreSelector: 'nearBoundary', count: 6,
-        names: ['北境军团', '南洋舰队', '东海卫', '西陆骑', '苍岭营', '赤原哨'],
-      };
     default:
+      // 自定义层：走 base（散布 · 随机核心 · count6）
       return base;
   }
 }

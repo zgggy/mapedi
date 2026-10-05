@@ -9,17 +9,13 @@ export type LayerId = string;
 
 export type LayerKind =
   | 'height'
-  | 'environment'
-  | 'vegetation'
-  | 'fauna'
+  | 'ecosystem'
   | 'race'
   | 'cultural'
-  | 'religious'
   | 'political'
   | 'road'
   | 'route'
   | 'river'
-  | 'military'
   | 'custom';
 
 export type LayerMode = 'view' | 'edit';
@@ -60,14 +56,43 @@ export interface RiverEdge {
   order: number;
 }
 
-/** 核心地块标记形状（渲染层读取，数据层只存 coreCellId） */
-export type CoreSymbol = 'star' | 'square' | 'circle' | 'none';
+/**
+ * 核心地块标记形状（渲染层读取，数据层只存 centerCellId）。
+ * 语义（CIA World Factbook 图例实测，LABEL_DESIGN §1.7）：
+ * `star` 实心星 = 国家首都 · `hollowStar` 空心星 = 其他首府（省会）·
+ * `ring` 同心圆 ⊙ = 中心/圣城（OSM 首都样式）· `square`/`circle` = 一般中心。
+ */
+export type CoreSymbol = 'star' | 'hollowStar' | 'ring' | 'square' | 'circle' | 'diamond' | 'none';
 /** 逐 cell 装饰（植物树点等） */
 export type CellSymbol = 'tree' | 'none';
 /** 元素名称显示模式 */
 export type LabelMode = 'none' | 'name' | 'coreLabel';
 /** cell 级标记 */
 export type CellMarker = 'none' | 'id' | 'height';
+
+/**
+ * **用户自定义地块标记**（包5 · 特殊地块）：世界级点标记，画在指定 cell 上——
+ * 与行政符号（核心格）分开的数据，随存档走、一条命令可撤销。
+ * 交互：绘制模式「点标记」模态 → 单击格子循环 ★ → ● → ◆ → 无（toggle）。
+ */
+export interface CellMark {
+  cellId: CellId;
+  symbol: 'star' | 'circle' | 'diamond';
+  /** 可选颜色（首版渲染统一用主题亮色族，字段留给后续自定义） */
+  color?: string;
+}
+
+/** 图层**注记配置**补丁（包5 配置面）：只含装饰相关字段，写入走 LayerFieldsCommand 一条入栈 */
+export type LayerDecorPatch = Partial<
+  Pick<LayerDef, 'labelMode' | 'labelTier' | 'labelSize' | 'labelMinScale' | 'coreSymbol' | 'cellSymbol' | 'cellMarker'>
+>;
+
+/**
+ * 注记档位（LABEL_DESIGN_2026-10-04 包2 · R6/P3）：全局四档字号/字重/字距/灰阶表，
+ * 相邻档差 ≥2px（制图惯例：档差 <15% 不可辨）。缺省**按层深度推导**（父层=primary，
+ * 与叠放/注记优先级同一棵树），可显式覆盖。排版真源见 `core/layer/labelStyle.ts`。
+ */
+export type LabelTier = 'primary' | 'secondary' | 'tertiary' | 'minor';
 
 /**
  * 生成策略（层身份的显式声明，替代散落的 `'cells'/'height'` id 特判）：
@@ -91,7 +116,7 @@ export interface LayerDef {
   visible?: boolean;
   /** 叠加透明度 0–1；缺省 0.88（见 displayCompose） */
   opacity?: number;
-  /** 核心地块符号（本层元素的 coreCellId 处画什么） */
+  /** 核心地块符号（本层元素的 centerCellId 处画什么） */
   coreSymbol?: CoreSymbol;
   /** 逐 cell 装饰（本层元素的每个 cell 处画什么） */
   cellSymbol?: CellSymbol;
@@ -99,6 +124,12 @@ export interface LayerDef {
   labelMode?: LabelMode;
   /** cell 级标记（id/高度等） */
   cellMarker?: CellMarker;
+  /** 注记档位（缺省按层深度推导，见 labelStyle.tierOf） */
+  labelTier?: LabelTier;
+  /** 名称显示缩放门槛（缺省取档位默认；R14 缩放阶梯——缩小到此值以下不画名称） */
+  labelMinScale?: number;
+  /** 名称字号覆盖（px；缺省取档位默认） */
+  labelSize?: number;
   /** 纯网格底图层：不进语义叠画（如地块网格） */
   baseMesh?: boolean;
   /** 生成策略；缺省 'elements'（见 GenStrategy） */
@@ -137,10 +168,21 @@ export interface Region {
   cells: CellId[];
   /** 显示开关（仅显示层过滤，不改归属/几何） */
   hidden?: boolean;
-  /** 核心地块：首都 / 省会 / 文化中心 */
+  /**
+   * 核心地块：首都 / 省会 / 文化中心（**唯一真相**）。
+   * 曾有 `coreCellId` 别名与它双写并存（生成双写、其余只写 centerCellId、
+   * 渲染却优先读 coreCellId）——**旧命令写不到渲染读的字段 = 设中心不生效**（已随收敛删除）。
+   * 2026-10-04 包3 收敛：删 coreCellId（旧档里多余的同名属性无害，值相同）。
+   */
   centerCellId?: CellId;
-  /** 别名：与 centerCellId 同义，语义更明确 */
-  coreCellId?: CellId;
+  /**
+   * 核心的**第二形态**（2026-10-04 用户拍板「选项1」）：核心 = 下级子元素。
+   * 与 centerCellId **互斥**（设其一必须清其二，单源取值见 core/regionCenter.coreCellOf）：
+   *  - centerCellId：核心 = 本层的一个地块
+   *  - coreRegionId：核心 = 某个子元素（符号画在该子元素的核心格上）
+   * 渲染/路网/校验一律经 `coreCellOf()`，禁止直接二选一读。
+   */
+  coreRegionId?: RegionId;
   /** 核心地块标签：「首都」「省会」… */
   coreLabel?: string;
   /** 兼容旧字段 */
@@ -281,6 +323,8 @@ export interface World {
   regions: Region[];
   /** 道路·航线·河流：过点曲线，与 cell 无关 */
   paths?: PathFeature[];
+  /** 用户自定义地块标记（包5：★/●/◆ 点标记；见 CellMark） */
+  cellMarks?: CellMark[];
   climate: ClimateParams;
   /** cellId → 气候派生（**运行时真缓存，不落盘**；读方 ensureClimate，heightRev 失效） */
   cellClimate?: Map<CellId, CellClimate>;

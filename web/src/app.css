@@ -165,3 +165,44 @@ button:not(:disabled):active,
   display: block;
   cursor: crosshair;
 }
+
+/* ── 联排分段按钮（胶囊，2026-10-04 用户指定样式）──────────────────────
+   多个按钮组成一个胶囊：最左键左端圆角/右端直角、中间键全直角、
+   最右键左直角/右端圆角；相邻键共享一条边框（border-left 分隔）。
+   用法：`.seg-group` 容器 + 直接子 `button`（active 加 `on` 类）。 */
+.seg-group {
+  display: inline-flex;
+  max-width: 100%;
+  border: 1px solid var(--border, #3a4354);
+  border-radius: var(--r-pill);
+}
+.seg-group > button {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 0;
+  border-left: 1px solid var(--border, #3a4354);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg-group > button:first-child {
+  border-left: 0;
+  border-top-left-radius: var(--r-pill);
+  border-bottom-left-radius: var(--r-pill);
+}
+.seg-group > button:last-child {
+  border-top-right-radius: var(--r-pill);
+  border-bottom-right-radius: var(--r-pill);
+}
+.seg-group > button.on {
+  background: var(--accent, #4a7ab0);
+  color: #fff;
+}
+.seg-group > button:hover:not(.on) {
+  background: rgba(255, 255, 255, 0.07);
+}

@@ -4,7 +4,7 @@
  * method:     diffusion / randomConnected / fromLayer
  * scope:      oceanOnly / landOnly / noCrossLandSea / unlimited / fromLayer
  * pattern:    partitionLand / partitionOcean / partitionAll / scattered / longStrip / cluster
- * coreSelector: centermost / nearBoundary / highElevation / lowElevation / random
+ * coreSelector: visualCenter / centermost / nearBoundary / highElevation / lowElevation / random（单源 core/regionCenter）
  *
  * 产物是 Region（= LayerElement），含 adjacentElementIds / overlaps。
  */
@@ -21,11 +21,24 @@ import { generateDemoContinents } from '../height';
 import { genStrategyOf } from '../layer/flags';
 import { rebuildHeightIntervalElements } from '../layer/heightElements';
 import { computeRelationships } from '../layer/relationships';
+import { selectCoreCell } from '../regionCenter';
 import { materializeParentCells } from '../displayCompose';
 
 export { computeRelationships };
 
 // ── 作用域 ──
+
+/**
+ * 元素名（同层唯一）：names 池按序取，**超出池长加序号**——
+ * 原实现 `names[i % len]` 会循环重复（count > 池长时地图上出现两个「丙州」，2026-10-04 用户报障）。
+ * 跨层同名（如国家「波斯」与文化「波斯」）是语义合理、保留不动；只保证**同层不重名**。
+ */
+export function indexedName(names: string[], i: number, fallback: string): string {
+  if (!names.length) return fallback;
+  const base = names[i % names.length];
+  const round = Math.floor(i / names.length);
+  return round === 0 ? base : `${base}${round + 1}`;
+}
 
 function heightAt(world: World, id: CellId): number {
   return world.cells[id]?.height ?? 0;
@@ -88,66 +101,6 @@ function canExpand(
     case 'unlimited':
     default:
       return true;
-  }
-}
-
-// ── 核心 cell 选择 ──
-
-function selectCoreCell(
-  world: World,
-  cells: CellId[],
-  selector: GenConfig['coreSelector'],
-  rng: () => number,
-): CellId {
-  if (!cells.length) return 0;
-  switch (selector) {
-    case 'centermost': {
-      const pts = cells.map((id) => projectMercator(world.cells[id].center));
-      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-      let best = cells[0], bestD = Infinity;
-      for (let i = 0; i < cells.length; i++) {
-        const d = (pts[i].x - cx) ** 2 + (pts[i].y - cy) ** 2;
-        if (d < bestD) { bestD = d; best = cells[i]; }
-      }
-      return best;
-    }
-    case 'highElevation': {
-      let best = cells[0], bestH = -Infinity;
-      for (const id of cells) {
-        const h = heightAt(world, id);
-        if (h > bestH) { bestH = h; best = id; }
-      }
-      return best;
-    }
-    case 'lowElevation': {
-      let best = cells[0], bestH = Infinity;
-      for (const id of cells) {
-        const h = heightAt(world, id);
-        if (h < bestH) { bestH = h; best = id; }
-      }
-      return best;
-    }
-    case 'nearBoundary': {
-      const set = new Set(cells);
-      const border: CellId[] = [];
-      for (const id of cells) {
-        if (world.cells[id].neighbors.some((n) => !set.has(n))) border.push(id);
-      }
-      if (border.length) return border[Math.floor(rng() * border.length)];
-      const pts = cells.map((id) => projectMercator(world.cells[id].center));
-      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-      let best = cells[0], bestD = -1;
-      for (let i = 0; i < cells.length; i++) {
-        const d = (pts[i].x - cx) ** 2 + (pts[i].y - cy) ** 2;
-        if (d > bestD) { bestD = d; best = cells[i]; }
-      }
-      return best;
-    }
-    case 'random':
-    default:
-      return cells[Math.floor(rng() * cells.length)];
   }
 }
 
@@ -365,14 +318,13 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
     if (filtered.length < 4) continue;
 
     const coreCellId = selectCoreCell(world, filtered, config.coreSelector, rng);
-    const name = names.length ? names[ci % names.length] : `${layerId}-${ci}`;
+    const name = indexedName(names, ci, `${layerId}-${ci}`);
     const color = colorAt(colors, ci);
     const el: Region = {
       id: `${layerId}-${ci}`,
       layerId,
       name,
       cells: filtered,
-      coreCellId,
       centerCellId: coreCellId,
       color,
       attributes: { kind: layerId },
@@ -496,9 +448,8 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
       els.push({
         id: `${layerId}-${i}`,
         layerId,
-        name: names.length ? names[i % names.length] : `${layerId}-${i}`,
+        name: indexedName(names, i, `${layerId}-${i}`),
         cells,
-        coreCellId,
         centerCellId: coreCellId,
         color: colorAt(colors, i),
         attributes: { kind: layerId },
@@ -555,9 +506,8 @@ export function unifiedGenerate(world: World, layerId: LayerId, config: GenConfi
     els.push({
       id: `${layerId}-${els.length}`,
       layerId,
-      name: names.length ? names[i % names.length] : `${layerId}-${i}`,
+      name: indexedName(names, i, `${layerId}-${i}`),
       cells: comp,
-      coreCellId,
       centerCellId: coreCellId,
       color: colorAt(colors, i),
       attributes: { kind: layerId },

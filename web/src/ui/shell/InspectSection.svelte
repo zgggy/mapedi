@@ -15,7 +15,7 @@
   import { defaultLayerVisible } from '../../core/displayCompose';
   import { childLayerIdOf } from '../../core/hierarchy/derive';
   import { bestParentFor } from '../../core/hierarchy/ops';
-
+  
   let {
     world,
     kind,
@@ -90,6 +90,8 @@
             .map((x) => ({ id: x.id, name: x.name }))
         : [];
     const attach = r && world ? bestParentFor(world, r.id) : null;
+    // 核心格入口（LABEL_DESIGN 包3 R16）：只有「要求核心」的层才显示（首府/省会/中心）
+
     return {
       regionId: r?.id ?? null,
       layerId: l?.id ?? null,
@@ -196,7 +198,7 @@
         offIcon="🚫"
         onText="显示中"
         offText="已隐藏"
-        on={view.layerVisible}
+        on={!!view.layerVisible}
         title={view.layerVisible ? '点击隐藏' : '点击显示'}
         onchange={() => editor.toggleLayerVisible(view.layerId!)}
       />
@@ -266,6 +268,7 @@
         {world}
         cfg={view.styleCfg}
         onChange={(patch) => editor.setLayerStyle(view.styleId, patch)}
+        onDecor={(patch) => editor.setLayerDecor(view.styleId, patch)}
       />
     </div>
   {/if}

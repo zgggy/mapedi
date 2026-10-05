@@ -274,7 +274,8 @@ export class MapGlRenderer {
   /** 环数组 → 合并几何（同一环集跨帧复用，副本变化不影响它） */
   private geoCache = new WeakMap<DisplayRing[], Map<string, PieceGeo>>();
   private meshCache = new WeakMap<ProjCache, { buf: GpuBuf | null; geo: CellMeshGeo }>();
-  private failed = false;
+  /** 致命失败（创建/渲染异常）；Viewport 丢失处理置位后整实例重建（与 dead 同公开面） */
+  failed = false;
   /** 上下文丢失等待恢复（区别于致命 failed：上下文回来即可整实例重建） */
   dead = false;
 

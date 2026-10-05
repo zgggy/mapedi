@@ -43,13 +43,9 @@ const provinceGen: LayerGenerator = makeUnifiedGen('province', ['height']);
 // country 的单元源（province）由**层树**表达（unit 边，cascadeOrder 内派生）——
 // dependsOn 只留真数据依赖（HIERARCHY §6.3 包3，原 ['province'] 移除）
 const countryGen: LayerGenerator = makeUnifiedGen('country', []);
-const environmentGen: LayerGenerator = makeUnifiedGen('environment', ['height']);
-const vegetationGen: LayerGenerator = makeUnifiedGen('vegetation', ['height']);
-const faunaGen: LayerGenerator = makeUnifiedGen('fauna', ['height']);
+const ecosystemGen: LayerGenerator = makeUnifiedGen('ecosystem', ['height']);
 const raceGen: LayerGenerator = makeUnifiedGen('race', ['height']);
 const cultureGen: LayerGenerator = makeUnifiedGen('culture', ['height']);
-const religionGen: LayerGenerator = makeUnifiedGen('religion', ['height']);
-const militaryGen: LayerGenerator = makeUnifiedGen('military', ['height']);
 
 function num(p: GenContext['params'], k: string, d: number): number {
   const v = p[k];
@@ -101,13 +97,9 @@ export const LAYER_GENERATORS: LayerGenerator[] = [
   heightGen,
   provinceGen,
   countryGen,
-  environmentGen,
-  vegetationGen,
-  faunaGen,
+  ecosystemGen,
   raceGen,
   cultureGen,
-  religionGen,
-  militaryGen,
   riversGen,
   roadGen,
   routeGen,
@@ -200,13 +192,9 @@ export const CASCADE_LABELS: Record<string, string> = {
   country: '国家',
   rivers: '河网',
   river: '河网',
-  environment: '气候与群系',
-  vegetation: '植物',
-  fauna: '动物',
+  ecosystem: '生态',
   race: '种族',
   culture: '文化',
-  religion: '宗教',
-  military: '军队',
   road: '道路',
   route: '航线',
 };

@@ -238,7 +238,7 @@ import { isRowOrControlClick } from './shell';
             ? taskMode === 'organize'
               ? rowOrg
               : expandPanel
-            : null}
+            : undefined}
           onClick={() => handleSelect(row.id)}
           onMenu={(e) => openMenu(e, row.id)}
         />

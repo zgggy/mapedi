@@ -41,19 +41,9 @@ export function defaultProfiles(): GenerationProfile[] {
       params: { count: 8, fromLayerCount: 3, allowOcean: false },
     },
     {
-      layerId: 'environment',
+      layerId: 'ecosystem',
       enabled: true,
-      params: { count: 8 },
-    },
-    {
-      layerId: 'vegetation',
-      enabled: true,
-      params: { count: 8 },
-    },
-    {
-      layerId: 'fauna',
-      enabled: true,
-      params: { count: 6 },
+      params: { count: 12 },
     },
     {
       layerId: 'race',
@@ -64,16 +54,6 @@ export function defaultProfiles(): GenerationProfile[] {
       layerId: 'culture',
       enabled: true,
       params: { count: 8, allowOcean: true },
-    },
-    {
-      layerId: 'religion',
-      enabled: true,
-      params: { count: 5 },
-    },
-    {
-      layerId: 'military',
-      enabled: true,
-      params: { count: 6 },
     },
     {
       layerId: 'river',

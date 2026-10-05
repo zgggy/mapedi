@@ -66,6 +66,12 @@ import { isRowOrControlClick } from './shell';
   const filter = $derived(text);
 
   const isHeight = $derived(editsHeightAt(world, focusLayer));
+
+  /** 点选核心（两种形态统一「地图点格」，选项1）：再点同一键 = 取消模态 */
+  function corePickT(regionId: string, mode: 'cell' | 'child') {
+    if (editor.centerPickId === regionId && editor.centerPickMode === mode) editor.cancelCenterPick();
+    else editor.beginCenterPick(regionId, mode);
+  }
   const isFreeLayer = $derived(isFreeLayerId(world, focusLayer));
 
   /** 自由路径层：列出 paths（与 cell 无关）；名称过滤（C4） */
@@ -321,7 +327,7 @@ import { isRowOrControlClick } from './shell';
           {hidden}
           {badge}
           {open}
-          content={body}
+          content={body ?? undefined}
           onClick={() => {
             handleSelect(id);
             if (ia && taskMode === 'draw') editor.setHeightPaint(id, paintValueOf(id, ia));
@@ -388,6 +394,66 @@ import { isRowOrControlClick } from './shell';
                     />
                     <span class="dim">{brushRadius.toFixed(1)}°</span>
                   </label>
+                  <label
+                    class="field inline"
+                    title="开 = 抢占（replace：连同其他元素占着的格一起夺）；关 = 只填空白（emptyOnly，现状）。2026-10-04 用户拍板 6.2"
+                  >
+                    <span>抢占</span>
+                    <input
+                      type="checkbox"
+                      checked={!editor.draw.addMode}
+                      onchange={(e) => (editor.draw = { ...editor.draw, addMode: !e.currentTarget.checked })}
+                    />
+                  </label>
+                  <!-- 核心选取（2026-10-04 用户：在**绘制模式**下选核心，联排胶囊按钮） -->
+                  <div class="field inline">
+                    <span>核心</span>
+                    <div class="seg-group" role="group" aria-label="核心选取方式">
+                      <button
+                        type="button"
+                        class:on={editor.centerPickId === id && editor.centerPickMode === 'cell'}
+                        title="核心 = 地块：地图上单击本元素的一格（Esc 取消）"
+                        onclick={() => corePickT(id, 'cell')}
+                      >
+                        {editor.centerPickId === id && editor.centerPickMode === 'cell' ? '点格中…' : '地块'}
+                      </button>
+                      <button
+                        type="button"
+                        class:on={editor.centerPickId === id && editor.centerPickMode === 'child'}
+                        title="核心 = 子元素：地图上单击该子元素的任意一格（Esc 取消）"
+                        onclick={() => corePickT(id, 'child')}
+                      >
+                        {editor.centerPickId === id && editor.centerPickMode === 'child' ? '点子元素…' : '子元素'}
+                      </button>
+                      <button
+                        type="button"
+                        title="核心 = 面内最宽阔处（一键设置，Ctrl+Z 可撤销）"
+                        onclick={() => editor.setCoreVisualCenter(id)}
+                      >
+                        视觉中心
+                      </button>
+                    </div>
+                  </div>
+                  {#if n.region.coreRegionId}
+                    <div class="dim">核心「{world?.regions.find((x) => x.id === n.region.coreRegionId)?.name ?? '?'}」</div>
+                  {:else if n.region.centerCellId !== undefined}
+                    <div class="dim">核心 #{n.region.centerCellId}</div>
+                  {/if}
+                  <!-- 特殊地块标记（包5）：单击格子循环 ★→●→◆→无，模态保持 -->
+                  <div class="field inline">
+                    <span>标记</span>
+                    <div class="seg-group" role="group" aria-label="特殊地块标记">
+                      <button
+                        type="button"
+                        class:on={editor.markerPick}
+                        title="点格添加/切换特殊地块标记：★ → ● → ◆ → 无（Esc 取消）"
+                        onclick={() => editor.toggleMarkerPick()}
+                      >
+                        {editor.markerPick ? '点格中…' : '点标记'}
+                      </button>
+                    </div>
+                    <span class="dim">{(world?.cellMarks?.length ?? 0) || '—'}</span>
+                  </div>
                 </div>
               {:else if elementPanel}
                 {@render elementPanel()}

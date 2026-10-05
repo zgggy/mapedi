@@ -22,6 +22,7 @@
   let {
     world,
     focusLayer = 'cells',
+    centerBias = 0,
     rev = 0,
     climate,
     astro,
@@ -32,6 +33,8 @@
   }: {
     world: World;
     focusLayer?: string;
+    /** 左栏让位偏移（px）：球体中心右移 centerBias/2（与平面 viewCam 同位移，setViewOffset 实现） */
+    centerBias?: number;
     rev?: number;
     climate?: ClimateParams;
     astro?: StarSystem;
@@ -57,6 +60,25 @@
   let anim = 0;
   let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   let spinT = 0;
+
+  /**
+   * 居中偏移（2026-10-06 用户定「左栏组件下不要底座、完全透明」，替代旧画布内缩）：
+   * 球体中心右移 centerBias/2 px，与平面 viewCam 位移恒等。setViewOffset 的 x 为负
+   * = 虚像视窗左移 → 画面内容右移。容器宽变化（fullWidth 随之变化）与偏置变化都要重下。
+   */
+  const applyBias = () => {
+    if (!camera || !container) return;
+    const ww = container.clientWidth;
+    const hh = container.clientHeight;
+    if (!ww || !hh) return;
+    if (centerBias > 0) camera.setViewOffset(ww, hh, -centerBias / 2, 0, ww, hh);
+    else camera.clearViewOffset();
+  };
+
+  $effect(() => {
+    void centerBias;
+    applyBias();
+  });
 
   // —— 相机固定（四修）：只存目标点；拖动全部作用在物体上 ——
   const camTarget = new THREE.Vector3(0, 0, 0);
@@ -363,6 +385,7 @@
       camTarget.set(g.target[0], g.target[1], g.target[2]);
     }
     camera.lookAt(camTarget);
+    applyBias(); // 面板开合状态首帧即对准剩余空间中心
     // 屏幕水平轴 = lookAt 后的相机右轴（up=Y）；相机此后只缩放不改方向 → 一次定死
     tipAxis.crossVectors(camera.up, wheelOff.copy(camera.position).sub(camTarget)).normalize();
     // 光照塑形：让高度凸起可读（平行光 + 弱补光）
@@ -464,6 +487,7 @@
           camera.aspect = ww / hh;
           camera.updateProjectionMatrix();
           renderer.setSize(ww, hh);
+          applyBias(); // 宽度变了 fullWidth 随之变 → 重下偏置
         }
       }
       if (spinPreview && meshHolder) {
@@ -506,6 +530,7 @@
       camera.aspect = ww / hh;
       camera.updateProjectionMatrix();
       renderer.setSize(ww, hh);
+      applyBias();
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(container);

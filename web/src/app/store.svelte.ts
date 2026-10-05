@@ -1,4 +1,4 @@
-import type { Region } from '../core/types';
+import type { LayerDecorPatch, Region } from '../core/types';
 import { deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { repairHierarchy } from '../core/hierarchy/gate';
 import { installProjCache, type ProjCache } from '../render/projCache';
@@ -8,13 +8,15 @@ import { history } from '../core/history';
 import { ChangePipeline } from './changePipeline';
 import { AutosaveService } from './autosaveService';
 import { GenerationService } from './generationService';
-import { DrawController } from './drawController';
+import { DrawController, type PaintResult } from './drawController';
 import { CommandService } from './commandService';
 import { createRng } from '../core/rng';
 import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
 import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID, editsHeightAt } from '../core/layer/flags';
 import { childLayerIdOf } from '../core/hierarchy/derive';
+import { visualCoreCell } from '../core/regionCenter';
+import { getRegionIndex } from '../core/index/regionIndex';
 import { regionsRev } from '../core/rev';
 import { DEFAULT_DENSITY } from '../core/world';
 import { loadWorldAsync } from '../core/generate/runGenerate';
@@ -47,6 +49,14 @@ const ui = $state({
   selectedRegionId: null as string | null,
   newName: '',
   annexPick: false,
+  /** 点选核心格模态（检查区「📍 点选」进入；目标元素 id，设完/Esc 退出） */
+  centerPickId: null as string | null,
+  /** 点选要设置的**核心形态**（2026-10-04 选项1：两种形态统一「地图点格」交互）：
+   *  'cell' = 点哪格设为核心地块（centerCellId）
+   *  'child' = 点到的格属于哪个子元素，核心就设为那个子元素（coreRegionId） */
+  centerPickMode: 'cell' as 'cell' | 'child',
+  /** 点选特殊地块标记模态（包5 · 单击格子循环 ★→●→◆→无；Esc 退出） */
+  markerPick: false,
   draw: emptyDrawSession() as DrawSession,
   climateDraft: defaultClimate() as ClimateParams,
   profiles: defaultProfiles() as GenerationProfile[],
@@ -162,6 +172,10 @@ export class EditorStore {
   set newName(v: string) { ui.newName = v; }
   get annexPick() { return ui.annexPick; }
   set annexPick(v: boolean) { ui.annexPick = v; }
+  get centerPickId() { return ui.centerPickId; }
+  set centerPickId(v: string | null) { ui.centerPickId = v; }
+  get centerPickMode() { return ui.centerPickMode; }
+  get markerPick() { return ui.markerPick; }
   get draw() { return ui.draw; }
   set draw(v: DrawSession) { ui.draw = v; }
   get climateDraft() { return ui.climateDraft; }
@@ -442,8 +456,8 @@ export class EditorStore {
   }
 
   /** 单层再生成（实现体在 GenerationService；height 连带删旧建新海陆） */
-  regenLayer(layerId: string, seed?: number) {
-    this.gen.regenLayer(layerId, seed);
+  regenLayer(layerId: string, seed?: number, cascadeDown = false) {
+    this.gen.regenLayer(layerId, seed, cascadeDown);
   }
 
   setProfileParam(layerId: string, key: string, value: number | string | boolean) {
@@ -549,6 +563,11 @@ export class EditorStore {
     return this.cmds.layerStyleConfig(id);
   }
 
+  /** 图层注记配置（包5 配置面：名称/档位/字号/门槛/符号）——一条命令入栈可撤销 */
+  setLayerDecor(id: string, patch: LayerDecorPatch) {
+    this.cmds.setLayerDecor(id, patch);
+  }
+
   setLayerStyle(id: string, patch: ElementStylePatch) {
     this.cmds.setLayerStyle(id, patch);
   }
@@ -560,6 +579,94 @@ export class EditorStore {
   /** 手动挂靠（HIERARCHY D4，包4）：孤儿元素挂到共享邻接最多的父层元素 */
   attachElement(id: string) {
     this.cmds.attachElement(id);
+  }
+
+  // —— 核心格（首府/省会/中心）选取，LABEL_DESIGN 包3 · R16/P7 ——
+
+  /** 进入点选模态：画布单击一格 = 设核心并退出（Esc 取消）；mode 决定两形态之一 */
+  beginCenterPick(regionId: string, mode: 'cell' | 'child' = 'cell') {
+    this.centerPickId = regionId;
+    ui.centerPickMode = mode;
+    this.status =
+      mode === 'child'
+        ? '点选核心子元素：在地图上单击该子元素的任意一格（Esc 取消）'
+        : '点选核心地块：在地图上单击该元素的一格（Esc 取消）';
+    this.notify();
+  }
+
+  cancelCenterPick() {
+    if (!this.centerPickId) return;
+    this.centerPickId = null;
+    this.status = '已取消点选核心';
+    this.notify();
+  }
+
+  /** 画布单击分发（App.pickElement 在点选态调用）：按当前形态设核心并自动退出模态 */
+  setCoreFromPick(cellId: number) {
+    const rid = this.centerPickId;
+    const mode = ui.centerPickMode;
+    this.centerPickId = null;
+    if (!rid) return;
+    if (mode === 'cell') {
+      this.cmds.setCoreCell(rid, cellId);
+      return;
+    }
+    // child 形态：该格所属的、且是本元素直接子元素的那个子元素
+    const w = this.world;
+    const parent = w?.regions.find((x) => x.id === rid);
+    if (!w || !parent) return;
+    const childLid = childLayerIdOf(w, parent.layerId);
+    if (!childLid) {
+      this.status = '本层没有子层，无法按子元素设置核心';
+      this.notify();
+      return;
+    }
+    const owners = getRegionIndex(w).owners(w, childLid, cellId);
+    const child = owners
+      .map((oid) => w.regions.find((x) => x.id === oid))
+      .find((x) => x && x.parentId === rid);
+    if (!child) {
+      this.status = '该格不属于任何子元素，未设置核心（Esc 取消点选）';
+      this.centerPickId = rid; // 没选中 → 保持模态继续点
+      this.notify();
+      return;
+    }
+    this.cmds.setCoreRegion(rid, child.id);
+  }
+
+  /** 进入/退出点选标记（与核心点选互斥）；模态保持到 Esc —— 可连续给多格打标 */
+  toggleMarkerPick() {
+    if (ui.markerPick) {
+      ui.markerPick = false;
+      this.status = '已退出标记点选';
+      this.notify();
+      return;
+    }
+    if (ui.centerPickId) ui.centerPickId = null; // 两模态互斥
+    ui.markerPick = true;
+    this.status = '点选地块标记：单击格子循环 ★ → ● → ◆ → 无（Esc 退出）';
+    this.notify();
+  }
+
+  cancelMarkerPick() {
+    if (!ui.markerPick) return;
+    ui.markerPick = false;
+    this.status = '已退出标记点选';
+    this.notify();
+  }
+
+  /** 画布单击分发（App.pickElement 在标记模态调用）：切换该格标记，模态保持 */
+  toggleMarkFromPick(cellId: number) {
+    if (!ui.markerPick) return;
+    this.cmds.cycleCellMark(cellId);
+  }
+
+  /** 一键：核心格 = 视觉中心（面内最宽阔处；单源 core/regionCenter.visualCoreCell） */
+  setCoreVisualCenter(regionId: string) {
+    const w = this.world;
+    const r = w?.regions.find((x) => x.id === regionId);
+    if (!w || !r || !r.cells.length) return;
+    this.cmds.setCoreCell(regionId, visualCoreCell(w, r.cells));
   }
 
   setLayerOpacity(id: string, opacity: number) {
@@ -680,7 +787,7 @@ export class EditorStore {
     this.drawCtl.endDraw();
   }
 
-  paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): number[] | null {
+  paint(lon: number, lat: number, shift: boolean, ctrl = false, alt = false, button = 0): PaintResult | null {
     return this.drawCtl.paint(lon, lat, shift, ctrl, alt, button);
   }
 
@@ -695,10 +802,6 @@ export class EditorStore {
 
   flood(cellId: number) {
     this.drawCtl.flood(cellId);
-  }
-
-  setCenterAt(cellId: number) {
-    this.drawCtl.setCenterAt(cellId);
   }
 
   endpoint(cellId: number, lon: number, lat: number, phase: 'start' | 'move' | 'end') {

@@ -11,6 +11,15 @@ import { effectiveVisible, layerRootOf, layerStackComparator } from './hierarchy
 
 export const VIRTUAL_PARENT = '—';
 
+/**
+ * 显示归属单源（compose 与件环对账补丁 borderCache.reconcilePieceMembership
+ * 同一谓词）：区间型（高度档）= 累积 h ≥ lo（2026-09-30 用户定），其余 = region.cells。
+ * 数据仍是精确档——两套真相各司其职，禁止任何一侧私自改用另一侧。
+ */
+export function displayCellsOfRegion(world: World, reg: Region): CellId[] {
+  return reg.attributes?.kind === 'interval' ? displayCellsOfInterval(world, reg) : reg.cells;
+}
+
 export interface DisplayPiece {
   key: string;
   layerId: string;
@@ -313,9 +322,8 @@ function composeShownPiecesUncached(
 
     for (const reg of regions) {
       // 区间型元素（高度档）：显示归属 = 累积（直接 ∪ 更高，h ≥ lo，2026-09-30 用户定）。
-      // 数据仍是精确档；单源派生 = displayCellsOfInterval（件环 Δ 补丁同一谓词）。
-      const ownCells =
-        reg.attributes?.kind === 'interval' ? displayCellsOfInterval(world, reg) : reg.cells;
+      // 数据仍是精确档；单源 = displayCellsOfRegion（件环对账补丁吃合成件 cellIds，同源）。
+      const ownCells = displayCellsOfRegion(world, reg);
       if (!ownCells.length) continue;
       const slices = splitRegionForDisplay(
         ownCells === reg.cells ? reg : { ...reg, cells: ownCells },

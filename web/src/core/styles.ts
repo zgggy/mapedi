@@ -5,6 +5,7 @@ export interface StrokeStyle {
 }
 
 export interface FontSpec {
+  /** 字体族 = **中英混合栈**（西文在前命中拉丁字形、汉字回退 PingFang/雅黑/宋体） */
   family: string;
   size: number;
   color: string;
@@ -39,12 +40,12 @@ export interface StyleSet {
     contrast: number;
   };
   labels: {
-    /** 元素名称默认字体（装饰层统一使用） */
+    /**
+     * 元素名称的**主题**部分（family/基准色/halo）。
+     * 字号/字重/字距/大写/灰阶/缩放门槛在档位表 `core/layer/labelStyle.ts`（全局单源）；
+     * 原 country/city/continent/biome 四个 FontSpec 全库零消费（2026-10-04 包2 收编删除）。
+     */
     default: FontSpec;
-    country: FontSpec;
-    city: FontSpec;
-    continent: FontSpec;
-    biome: FontSpec;
   };
 }
 
@@ -65,11 +66,15 @@ export const PRESET_STYLES: StyleSet[] = [
     border: { color: 'rgba(0,0,0,0.55)', width: 1.6 },
     stripe: { enabled: true, width: 3, contrast: 0.45 },
     labels: {
-      default: { family: 'sans-serif', size: 13, color: '#f5f0e6', halo: 'rgba(0,0,0,0.65)' },
-      country: { family: 'sans-serif', size: 13, color: '#f5f0e6', halo: 'rgba(0,0,0,0.65)' },
-      city: { family: 'sans-serif', size: 11, color: '#ffe6a8', halo: 'rgba(0,0,0,0.7)' },
-      continent: { family: 'sans-serif', size: 16, color: 'rgba(255,255,255,0.55)', halo: 'rgba(0,0,0,0.4)' },
-      biome: { family: 'sans-serif', size: 10, color: 'rgba(220,230,220,0.75)', halo: 'rgba(0,0,0,0.5)' },
+      // 中英混合栈：拉丁命中新西文（地图感的几何无衬线），汉字回退中文字体
+      default: {
+        // 西文在前（Segoe UI/Roboto/Open Sans = 各平台地图感 grotesque）→ 中文回退（苹方/雅黑/思源）
+        family:
+          '"Helvetica Neue", Helvetica, Arial, "Segoe UI", Roboto, "Open Sans", "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif',
+        size: 13,
+        color: '#f5f0e6',
+        halo: 'rgba(0,0,0,0.65)',
+      },
     },
   },
   {
@@ -88,11 +93,13 @@ export const PRESET_STYLES: StyleSet[] = [
     border: { color: 'rgba(70,40,15,0.65)', width: 1.4 },
     stripe: { enabled: true, width: 2.5, contrast: 0.4 },
     labels: {
-      default: { family: 'serif', size: 13, color: '#3b2a14', halo: 'rgba(255,250,230,0.75)' },
-      country: { family: 'serif', size: 13, color: '#3b2a14', halo: 'rgba(255,250,230,0.75)' },
-      city: { family: 'serif', size: 11, color: '#5a3010', halo: 'rgba(255,250,230,0.8)' },
-      continent: { family: 'serif', size: 17, color: 'rgba(70,45,20,0.55)', halo: 'rgba(255,248,220,0.5)' },
-      biome: { family: 'serif', size: 10, color: 'rgba(60,45,25,0.7)', halo: 'rgba(255,248,220,0.6)' },
+      default: {
+        family:
+          'Georgia, "Times New Roman", "Songti SC", STSong, SimSun, "Noto Serif CJK SC", serif',
+        size: 13,
+        color: '#3b2a14',
+        halo: 'rgba(255,250,230,0.75)',
+      },
     },
   },
   {
@@ -111,11 +118,12 @@ export const PRESET_STYLES: StyleSet[] = [
     border: { color: 'rgba(180,240,255,0.7)', width: 1.5 },
     stripe: { enabled: true, width: 3.5, contrast: 0.55 },
     labels: {
-      default: { family: 'monospace', size: 12, color: '#b8f0ff', halo: 'rgba(0,20,40,0.8)' },
-      country: { family: 'monospace', size: 12, color: '#b8f0ff', halo: 'rgba(0,20,40,0.8)' },
-      city: { family: 'monospace', size: 10, color: '#ffe080', halo: 'rgba(0,20,40,0.8)' },
-      continent: { family: 'monospace', size: 15, color: 'rgba(120,220,255,0.5)', halo: 'rgba(0,10,30,0.6)' },
-      biome: { family: 'monospace', size: 9, color: 'rgba(140,230,255,0.7)', halo: 'rgba(0,10,30,0.7)' },
+      default: {
+        family: '"SF Mono", Menlo, Consolas, "PingFang SC", "Microsoft YaHei", monospace',
+        size: 12,
+        color: '#b8f0ff',
+        halo: 'rgba(0,20,40,0.8)',
+      },
     },
   },
 ];

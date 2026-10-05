@@ -1,4 +1,5 @@
 import type { CellId, World } from './types';
+import { coreCellOf } from './regionCenter';
 import { isLand } from './types';
 import { roadComponentCount } from './draw/roads';
 
@@ -36,14 +37,23 @@ export function validateWorld(world: World): ValidateIssue[] {
     }
 
     if (layer?.requireCenter && r.cells.length > 0) {
-      if (r.centerCellId === undefined) {
+      const core = coreCellOf(world, r);
+      if (core === undefined) {
         issues.push({
           kind: 'center_missing',
           severity: 'warn',
           message: `「${r.name}」缺少${layer.centerLabel ?? '中心'}`,
           regionId: r.id,
         });
-      } else if (!r.cells.includes(r.centerCellId)) {
+      } else if (r.coreRegionId && (world.regions.find((x) => x.id === r.coreRegionId)?.parentId ?? null) !== r.id) {
+        // 核心第二形态（选项1）：指向的必须是**本元素的子元素**（悬空/跨层 → 视同缺核心）
+        issues.push({
+          kind: 'center_missing',
+          severity: 'warn',
+          message: `「${r.name}」的核心子元素无效`,
+          regionId: r.id,
+        });
+      } else if (!r.coreRegionId && !r.cells.includes(core)) {
         issues.push({
           kind: 'center_outside',
           severity: 'error',

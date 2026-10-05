@@ -15,6 +15,7 @@ export function builtinLayers(): LayerDef[] {
   return [
     {
       id: 'cells',
+      labelTier: 'minor',
       name: '地块',
       kind: 'custom',
       modeDefault: 'view',
@@ -28,6 +29,8 @@ export function builtinLayers(): LayerDef[] {
     },
     {
       id: 'height',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'tertiary',
       name: '高度',
       kind: 'height',
       modeDefault: 'edit',
@@ -40,20 +43,13 @@ export function builtinLayers(): LayerDef[] {
       styleSetId: 'default',
     },
     {
-      id: 'environment',
-      name: '环境',
-      kind: 'environment',
+      id: 'ecosystem',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'tertiary',
+      name: '生态',
+      kind: 'ecosystem',
       modeDefault: 'view',
-      allowOverlap: true,
-      requireAdjacency: false,
-      requireCenter: false,
-      styleSetId: 'default',
-    },
-    {
-      id: 'vegetation',
-      name: '植物',
-      kind: 'vegetation',
-      modeDefault: 'view',
+      // 树点装饰从原「植物」层平移过来（生态=植被+动物+环境的合并层）
       cellSymbol: 'tree',
       allowOverlap: true,
       requireAdjacency: false,
@@ -61,17 +57,9 @@ export function builtinLayers(): LayerDef[] {
       styleSetId: 'default',
     },
     {
-      id: 'fauna',
-      name: '动物',
-      kind: 'fauna',
-      modeDefault: 'view',
-      allowOverlap: true,
-      requireAdjacency: false,
-      requireCenter: false,
-      styleSetId: 'default',
-    },
-    {
       id: 'race',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'minor',
       name: '种族',
       kind: 'race',
       modeDefault: 'view',
@@ -82,28 +70,18 @@ export function builtinLayers(): LayerDef[] {
     },
     {
       id: 'culture',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'tertiary',
       name: '文化',
       kind: 'cultural',
       modeDefault: 'view',
-      coreSymbol: 'circle',
+      // ⊙ 同心圆 = 中心/圣城（OSM 首都样式；原 circle 与一般城市撞形，2026-10-04 包3 改）
+      coreSymbol: 'ring',
       labelMode: 'name',
       allowOverlap: true,
       requireAdjacency: false,
       requireCenter: true,
       centerLabel: '文化中心',
-      styleSetId: 'default',
-    },
-    {
-      id: 'religion',
-      name: '宗教',
-      kind: 'religious',
-      modeDefault: 'view',
-      coreSymbol: 'circle',
-      labelMode: 'name',
-      allowOverlap: true,
-      requireAdjacency: false,
-      requireCenter: true,
-      centerLabel: '圣城',
       styleSetId: 'default',
     },
     {
@@ -124,7 +102,8 @@ export function builtinLayers(): LayerDef[] {
       name: '行省',
       kind: 'political',
       modeDefault: 'view',
-      coreSymbol: 'square',
+      // 空心星 ☆ = 其他首府（省会）——CIA 图例实测；实心星 ★ 留给国家首都
+      coreSymbol: 'hollowStar',
       labelMode: 'name',
       parentLayerId: 'country',
       allowOverlap: false,
@@ -135,6 +114,8 @@ export function builtinLayers(): LayerDef[] {
     },
     {
       id: 'road',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'minor',
       name: '道路',
       kind: 'road',
       modeDefault: 'view',
@@ -145,6 +126,8 @@ export function builtinLayers(): LayerDef[] {
     },
     {
       id: 'route',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'minor',
       name: '航线',
       kind: 'route',
       modeDefault: 'view',
@@ -155,20 +138,12 @@ export function builtinLayers(): LayerDef[] {
     },
     {
       id: 'river',
+      // 注记档位显式指定（R6：顶层≠一律国家级；深度推导只作自定义层兜底）
+      labelTier: 'minor',
       name: '河流',
       kind: 'river',
       modeDefault: 'view',
       allowOverlap: false,
-      requireAdjacency: false,
-      requireCenter: false,
-      styleSetId: 'default',
-    },
-    {
-      id: 'military',
-      name: '军队',
-      kind: 'military',
-      modeDefault: 'view',
-      allowOverlap: true,
       requireAdjacency: false,
       requireCenter: false,
       styleSetId: 'default',
@@ -233,6 +208,14 @@ export function ensureBuiltinLayers(world: World): World {
     world.layers = world.layers.filter((l) => l.id !== 'landsea');
     changed = true;
   }
+  // 2026-10-04 图层重构（用户授权重生成）：环境/植物/动物 → 合并为「生态」；宗教/军队删除。
+  // 与海陆案 A 同一入口策略：**唯一读入口清层 + 清其元素**（旧档里这5层的 regions 一并移除）。
+  const RETIRED_LAYERS = ['environment', 'vegetation', 'fauna', 'religion', 'military'];
+  if (world.layers.some((l) => RETIRED_LAYERS.includes(l.id))) {
+    world.layers = world.layers.filter((l) => !RETIRED_LAYERS.includes(l.id));
+    world.regions = world.regions.filter((r) => !RETIRED_LAYERS.includes(r.layerId));
+    changed = true;
+  }
   const cleaned = world.regions.filter(
     (r) => r.layerId !== 'landsea' && !(r.layerId === 'height' && landSeaAttr(r)),
   );
@@ -240,9 +223,21 @@ export function ensureBuiltinLayers(world: World): World {
     world.regions = cleaned;
     changed = true;
   }
+  // 内置层在数组中的目标序号（builtinLayers() 的声明序 = 叠放序：后画在上）
+  const builtinIdx = new Map(builtins.map((b, i) => [b.id, i]));
   for (const b of builtins) {
     if (!have.has(b.id)) {
-      world.layers.push({ ...b });
+      // **按内置序插入而非 push**：push 到末尾会把新层叠到政区之上（生态盖住国家名/边界）
+      const want = builtinIdx.get(b.id) ?? 0;
+      let at = world.layers.length;
+      for (let i = world.layers.length - 1; i >= 0; i--) {
+        const p = builtinIdx.get(world.layers[i].id);
+        if (p !== undefined && p < want) {
+          at = i + 1;
+          break;
+        }
+      }
+      world.layers.splice(at, 0, { ...b });
       changed = true;
     } else {
       const cur = have.get(b.id)!;
@@ -256,12 +251,36 @@ export function ensureBuiltinLayers(world: World): World {
         cur.cellMarker = 'none';
         changed = true;
       }
+      // coreSymbol 同样无 UI 入口（配置面归包5）→ 符号族升级（包3：☆省会 / ⊙中心）同步到旧档
+      if (cur.coreSymbol !== b.coreSymbol && !cur.id.startsWith('custom-')) {
+        cur.coreSymbol = b.coreSymbol;
+        changed = true;
+      }
+      // labelTier 无 UI 入口（包2 新增）→ 旧档 undefined 回填内置档位
+      if (b.labelTier !== undefined && cur.labelTier !== b.labelTier && !cur.id.startsWith('custom-')) {
+        cur.labelTier = b.labelTier;
+        changed = true;
+      }
       // 层身份标志位（genStrategy/focusAfterGen/editsHeight/baseMesh）：旧档缺字段 → 回填内置声明。
       // 无 UI 入口可改，强制与内置一致（与 kind 同策略）。
       if (b.baseMesh !== undefined && cur.baseMesh !== b.baseMesh) { cur.baseMesh = b.baseMesh; changed = true; }
       if (b.genStrategy !== undefined && cur.genStrategy !== b.genStrategy) { cur.genStrategy = b.genStrategy; changed = true; }
       if (b.focusAfterGen !== undefined && cur.focusAfterGen !== b.focusAfterGen) { cur.focusAfterGen = b.focusAfterGen; changed = true; }
       if (b.editsHeight !== undefined && cur.editsHeight !== b.editsHeight) { cur.editsHeight = b.editsHeight; changed = true; }
+    }
+  }
+  // 内置层**相对顺序**自愈（叠放契约：数组序 = 后画在上 = builtinLayers() 声明序）：
+  // 旧档曾因「缺层 push 到末尾」把生态层存到政区之上 → 重排内置槽位（custom 层原位不动，
+  // 不破坏用户组织过的自定义层兄弟序）。
+  {
+    const built = world.layers.filter((l) => builtinIdx.has(l.id));
+    const sorted = [...built].sort(
+      (a, b) => (builtinIdx.get(a.id) ?? 0) - (builtinIdx.get(b.id) ?? 0),
+    );
+    if (built.some((l, i) => l !== sorted[i])) {
+      let k = 0;
+      world.layers = world.layers.map((l) => (builtinIdx.has(l.id) ? sorted[k++] : l));
+      changed = true;
     }
   }
   if (!world.paths) world.paths = [];
@@ -361,6 +380,8 @@ export function serializeWorld(
         : undefined,
     })),
     paths: world.paths ?? [],
+    // 用户自定义地块标记（包5）：显式白名单字段（serializeWorld 是逐字段白名单，不是展开）
+    cellMarks: world.cellMarks?.length ? world.cellMarks : undefined,
     climate: world.climate,
     // cellClimate / biome 不落盘（还债步骤 4）：真缓存=读方 ensureClimate/ensureBiome 按当前地形重算
     astro: world.astro,
@@ -382,6 +403,7 @@ export function deserializeWorld(json: string): World {
       adjacentElementIds?: string[];
     })[];
     paths?: unknown[];
+    cellMarks?: { cellId: number; symbol: 'star' | 'circle' | 'diamond'; color?: string }[];
     climate?: ClimateParams;
     astro?: World['astro'];
     layerRenderConfig?: [string, unknown][];
@@ -440,6 +462,10 @@ export function deserializeWorld(json: string): World {
         : undefined,
     })),
     paths,
+    // 悬空过滤（坏数据不进渲染）：撒点重生后 cellId 全变 → 标记失效即丢
+    cellMarks: raw.cellMarks?.filter(
+      (m) => m && Number.isInteger(m.cellId) && m.cellId >= 0 && m.cellId < raw.cells.length,
+    ),
     climate: raw.climate ?? defaultClimate(),
     astro: raw.astro,
     layerRenderConfig: (() => {

@@ -8,8 +8,8 @@ import { getRegionIndex, invalidateRegionIndex } from '../index/regionIndex';
  * 工具集（C3 清算 2026-09-30：按「与实际功能相关」裁定）：
  * - `brush` 通用水笔刷（B）；`road` 道路/航线层专用（由 startDraw 按层自动选中）。
  * - `fill` / `center`：**从未接入任何绘制分支**（死值）→ 删；`weight`：用户定
- *   「设置权重的笔刷不再被需要」→ 删。辅助函数（floodFill/setCenter/adjustWeights）
- *   有测试覆盖，作为几何工具保留。
+ *   「设置权重的笔刷不再被需要」→ 删。辅助函数（floodFill/adjustWeights）有测试覆盖，
+ *   作为几何工具保留；原 setCenter（核心格直写）已随「设中心」收敛到 commandService.setCoreCell（RegionFieldsCommand）删除。
  */
 export type DrawTool = 'brush' | 'road';
 
@@ -172,10 +172,6 @@ export function floodFillCells(
     }
   }
   return out;
-}
-
-export function setCenter(region: Region, cellId: CellId): void {
-  region.centerCellId = cellId;
 }
 
 /** 射线法：点是否在多边形内（lonlat 平面近似） */

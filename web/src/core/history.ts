@@ -1,4 +1,4 @@
-import type { CellId, Region, RegionId, World } from './types';
+import type { CellId, CellMark, Region, RegionId, World } from './types';
 import { childrenOnRegionDelete, childrenOnAnnex, planLayerDelete } from './hierarchy/policy';
 
 export interface EditCommand {
@@ -98,6 +98,8 @@ export class MultiRegionCommand implements EditCommand {
       patches: { id: string; added: number[]; removed: number[] }[];
       /** 笔画中新建的元素（split/自动建），region = 提交时刻终态 */
       created: { id: string; region: Region }[];
+      /** 笔画中的换父（父笔刷收编命中子元素，2026-10-04）——随笔画一条命令撤销 */
+      parentFlips?: { id: string; before: string | undefined; after: string | undefined }[];
     },
     public label = '绘制',
   ) {}
@@ -125,6 +127,10 @@ export class MultiRegionCommand implements EditCommand {
       if (world.regions.some((x) => x.id === c.id)) continue;
       world.regions.push({ ...c.region, cells: [...c.region.cells] });
     }
+    for (const f of this.spec.parentFlips ?? []) {
+      const r = world.regions.find((x) => x.id === f.id);
+      if (r) r.parentId = f.after;
+    }
   }
 
   revert(world: World): void {
@@ -132,28 +138,27 @@ export class MultiRegionCommand implements EditCommand {
       world.regions = world.regions.filter((x) => x.id !== c.id);
     }
     MultiRegionCommand.applyPatches(world, this.spec, -1);
+    for (const f of this.spec.parentFlips ?? []) {
+      const r = world.regions.find((x) => x.id === f.id);
+      if (r) r.parentId = f.before;
+    }
   }
 }
 
-export class SetCenterCommand implements EditCommand {
-  private prev: CellId | undefined;
+/** 地块标记整表补丁（包5 · CellMark 很小 → before/after 全表快照最稳，不逐条 diff） */
+export class CellMarksCommand implements EditCommand {
   constructor(
-    private regionId: RegionId,
-    private next: CellId | undefined,
-    public label = '设中心',
+    public before: CellMark[],
+    public after: CellMark[],
+    public label = '地块标记',
   ) {}
 
   apply(world: World): void {
-    const r = findRegion(world, this.regionId);
-    if (!r) return;
-    this.prev = r.centerCellId;
-    r.centerCellId = this.next;
+    world.cellMarks = this.after.map((m) => ({ ...m }));
   }
 
   revert(world: World): void {
-    const r = findRegion(world, this.regionId);
-    if (!r) return;
-    r.centerCellId = this.prev;
+    world.cellMarks = this.before.length ? this.before.map((m) => ({ ...m })) : undefined;
   }
 }
 

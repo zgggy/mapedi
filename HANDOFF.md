@@ -1,6 +1,6 @@
 # Mapedi 交接（给下一轮 AI）
 
-工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**工作区干净；git log 头 = 优化盘点文档（`docs/OPTIMIZE_REVIEW_2026-10-04.md`）。**
+工作目录 `/Users/zgy/mapedi`，应用 `web/`（Svelte 5 + TS + GL 直绘，100k cell）。**全库已提交：第五十二轮基线（含四十五~五十一轮未落盘工作：注记包/组织/生态/cellMarks/联排胶囊 + 高度色暗斑双根因 + 居中 centerBias + svelte-check 13 errors 清零）。**
 
 ## 先读
 
@@ -13,13 +13,33 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第四十三轮完成；在案：`docs/OPTIMIZE_REVIEW_2026-10-04.md`）
+## 当前状态（第四十四轮完成；在案：`docs/OPTIMIZE_REVIEW_2026-10-04.md`）
 
-- **✓ 第四十三轮（2026-10-04 全面优化盘点 → 用户使用阶段转向）**：
-  - 交付 `docs/OPTIMIZE_REVIEW_2026-10-04.md`（快照冻结）：§1 手感残余（autosave clone 抖动居首）、§2 性能（p50 1.1ms 基线+微分配行号）、§3 死码三档（甲=可立即删双零清单；乙=tests-only 迁移；丙=保留）、§4 存档（无字段白名单/无版本迁移/空 catch）、§5 测试覆盖（68/107 src 零覆盖+固化顺序）、§6 **半成品入口清单**（搜索/测距/吞并/洪水/设中心=引擎全有只缺按钮）、§7 用户阶段三梯队排序建议。
-  - 用户定调：**下一阶段重心 = 用户使用**；§7 为顺序建议（点名即做，不催拍板）。
+- **✓ 第五十二轮（2026-10-05 高度色暗斑双根因修复 + 左栏居中改相机偏置；底座透明被用户叫停）**：
+  - **高度色暗斑（#85026/#5848 未填色）双根因**：① reconcile 双真相——`reconcilePieceMembership` 按 setKey 反查 `region.cells`（精确档）对账，把区间型高度件环**打回精确档**（显示=累积 h≥lo）→ 新单源 `displayCompose.displayCellsOfRegion`，reconcile 改吃 compose 件 `dp.cellIds`（Viewport 里移到 compose 之后传 pieces；无 pieces 不消耗门控）；② 链化断链——桶2 贪心缺 `outUsedG` 复查（succ 非单射→9 条 1-边链被丢）+ 近重复站点 A/B 定向退化（|in|≠|out|）→ 提环改 `walk`+`pickAdj` 邻接无向兜底（正向优先/回起点即闭合），`buildRingFrom` 签名 keyList→dirs（混合走向键重建+轮转同步 rotD）。像素验收：#5848/#35248/#82331=h3 色、#73335=h2 色、全图 base 色像素=0。
+  - **左栏底座（用户报「组件下多了一个不透明底座，要完全透明」）**：round39 画布内缩机制改为**相机偏置** `centerBias`（App 派生 → Viewport `viewCam`=raw−bias/2/scale 渲染+输入同源、球面 `setViewOffset` 同位移；数学与内缩恒等，画布恢复全宽）。居中平面/球面均已验证 ✓。**未完成**：栏后仍是 frameLayer void 暗色（世界透镜左缘 313.5>栏右缘 307，周期副本窗口未扩展）——用户叫停迭代，现状=居中保留、透明未达成。
+  - **真读数更正**：`svelte-check --tsconfig tsconfig.app.json` = **13 errors**（ViewSettingsPopover:54 Node.closest、LayersPanel:237 rowOrg、App:430 WsMode 为 10-03 前存量；Viewport:739/783 `.failed` 私有、:1079-1140 `world.paths` 可选化未守卫、GenerateSection:63/InspectSection:201/WorkspaceDrawer:330 为注记/组织批工作区缺口）——历轮「0 errors」是假绿读数，待专门批清。
+  - 基线：tsc(app) 0 / svelte-check 13 errors（全部在非本环改动行）/ 浏览器实验相机已复位。
 
-（第四十二轮金钮记录见下）；在案链：
+- **✓ 第五十一轮（2026-10-04 用户修正：核心选择移绘制模式+联排胶囊；做 5=cellMarks）**：
+  - **联排胶囊按钮**（用户指定样式）：新增全局 `.seg-group`（首键左端圆角/中间全直角/末键右端圆角、相邻共享 border-left、容器 999px 胶囊），`DisplayStylePanel` 四组注记按钮与绘制面板新按钮全部改用；**测量证据**：computed radius 首 `999/0/999/0`、中 `0/0/0/0`、末 `0/999/0/999` ✓。
+  - **核心选择迁到绘制模式**：绘制面板新增「核心」联排三键（地块 / 子元素 / 视觉中心）+ 当前核心显示（`核心 #54627` / `核心「甲郡」`）；**检查区三个核心按钮删除**（保留隶属/子元素跳转/挂靠——用户原话「父子元素的跳转保留在检查模式」）。
+  - **真 bug 修复（点选模态被笔画劫持）**：绘制会话 active 时画布 pointerdown 走绘制分支、pointerup 的 `!drawActive` 又挡住 onpick → **模态收不到点击**（实测 cycle 全 'none'）。修：Viewport 加 `pickModal` 派生（`centerPickId || markerPick`），down 条件加 `&& !pickModal`、up 放行 `(!drawActive || pickModal)` → 修后同会话内 cycle = `star→circle→diamond→none` ✓。
+  - **cellMarks（包5 后半）全链**：`World.cellMarks?` + **serializeWorld 显式白名单**（该函数是逐字段白名单，不是展开——漏了就不落盘）+ deserialize **悬空过滤**（越界 cellId 不进渲染）+ `CellMarksCommand` 整表快照入栈 + `commandService.cycleCellMark`（无→★→●→◆→无，touchLayerView）+ store `markerPick` 模态 + App 分发 + 绘制面板「点标记」单键胶囊 + 渲染复用 symPlan（占位/绘制同链）+ `CoreSymbol` 加 `diamond`（配置面符号组同步 ◆）。**验收**：cycle 四步 ✓、双格 ✓、Esc 退 ✓、**撤销全部清空** ✓、`serialize cellMarks='1 items star'` ✓ 反序列化回环 ✓ **越界 cellId 被过滤** ✓。
+  - **坑（重踩）**：`touchLayerView→swapIdentity` 换 world 身份后，**测试里缓存的旧 world 引用读不到新值**（cycle 读成全 star 假象）→ 每步必须 `e.world.xxx` 重取（memory 既有教训）。
+  - 基线：tsc 0 / svelte-check 0 errors；累计 29 文件 +1749/−543 **全部未提交**。
+
+- **✓ 第五十轮（2026-10-04 包5 前半：图层注记配置面）**：`DisplayStylePanel`（嵌检查区）新增「注记」分组——**名称**（不显示/元素名/核心）、**档位**（自动/国家级/行省级/语义/次级）、**符号**（无/★/☆/⊙/■/●）、**格标**（无/ID/高度）四组**分段按钮**（原 `<select>` 改按钮组：分段控件是项目风格，**且合成 change 事件不触发 Svelte handler**——实测 click 可靠/change 失灵）+ **字号/门槛** number（占位「档位默认」=undefined 回档位值）+ 摘要行回显「名称开·符号 ★」。写入链路 = 新 `commandService.setLayerDecor`（`LayerFieldsCommand` 一条入栈可撤销、alreadyApplied **先手动写世界**、失效域 `touchLayerView`——注记配置不碰几何）+ store 门面 + `LayerDecorPatch` 类型。**踩坑**：`onDecor` 只加进类型注解**没加进 props 解构** → prop 为 undefined → `onDecor?.()` 静默空操作（探针 `[decor-click] onDecor=undefined` 抓到；症状=点击无反应但命令也没入栈）。**验收**：按钮组4组渲染+当前值高亮 ✓ 名称→不显示（UI点击）→ labelMode=none 且 **渲染 placed 3→0** →undo 恢复 ✓ 符号→☆、档位→次级、门槛1000→placed0、字号40写入、`syms 4→0`（符号关）各自 undo 还原 ✓。**包5 后半未做**：`cellMarkers` 自定义地块标记（数据结构+绘制+点选入口）→ 下一轮。tsc 0 / svelte-check 0 errors。
+
+- **◐ 第四十九轮（2026-10-04 用户七条，1/3/4/5 已交付；2 待现象、6 当时定稿待实施）**【6 与包5 已在第五十/五十一轮完成，勿按本条误判】：
+  - **1 多名字两层根因**：①同层重名（count>池 → `names[i%len]` 循环）→ `unified.indexedName` 超池加序号（需重新生成见效）；②**跨世界副本 pass 重复**（contentOffset≠0 时两个 k 各画一个）→ 装饰层**帧级防重**（模块级 placedIds 按 `__drawCount` 令牌；注意局部变量防不住 pass 重入）+ 出屏判定改**盒中心**（贴边截断的不画，让后 pass 画完整那条）。
+  - **1b 拉伸字距替代重复注记**（用户拍板）：`pickLabelLayout` 狭长面 → **一个名字沿轴**（spine 最宽节点优先）+ 字距拉伸（上限中文 1×字大/西文 0.5em，**阶梯回落** wStretch→中点→自然宽，否则锚点局部不够宽会全失败退回无拉伸）；`LabelItemAt.ls` + 渲染时切 letterSpacing + 尾距半格补偿；**字体重新调研后改**：primary（国家）= 图集衬线 `MAP_SERIF_STACK`（Georgia+宋体+思源宋），其余=主题无衬线栈（西文在前 CJK 在后，dark 补 Segoe/Roboto/Open Sans/Noto Sans）。验收：屏内同 id 唯一 ✓、罗马 stretch ls0.5 单条 ✓、country serif=true ✓。
+  - **3 绘制高亮语义升级**：`paint()` 返回 `{hits, changed}`——changed=**将要改变归属的格**（移除=属本元素的；emptyOnly=本层无主的；replace=非本元素的；父笔刷换父=该子元素全部格），高亮只画 changed ✓ 实测 ownCell changed=0 / freeCell changed=18 ✓；填充 0.38→0.55+亮描边；**DOM 证据 viewport-root 内 gl z=0 / 主画布 z=1 / ovl z=2 = 已最上**。
+  - **4 图层重构完成**：删 environment/vegetation/fauna/religion/military → 新增 `ecosystem`（生态，kind=ecosystem、labelTier tertiary、cellSymbol tree、count12、去重名字池18个）；全库7文件同步（world/config/layer/registry/profile/layerMeta/types kind）+ `ensureBuiltinLayers` **退役清理**（删层+删其 regions，海陆案A同策略）+ **内置层相对顺序自愈**（旧档曾把生态 push 到末尾=政区之上；重排内置槽位、custom 原位）。验收：layers 顺序 cells/height/**ecosystem**/race/country/province…、leftoverRegions=0、UI 只剩「🌿 生态」✓。
+  - **5 级联重生成开关**：GenerateSection 在焦点层有子层时于「重新生成」左侧显示「含子层」（默认关）→ `regenLayer(layerId, seed, cascadeDown)`：沿 childLayerId 链收集 `[最深子…直接子, 自身]` **逐层 runCascade（子先父后）**（父层聚合子层，顺序反了会用上一代子元素）；状态文案带链。验收：country 显示开关 ✓ province（链尾）不显示 ✓ 可勾选 ✓。
+  - **2 待现象**：#35248/#5848/#73335 的**数据归属/合成 pieces/叠放序/件环奇偶四层全部验证为对**（含61/61抽样 inside、半透明叠加差4/255 定量排除）→ 需用户补「错成什么色 / 涂改后才错还是本来就错」；GL readPixels 受 preserveDrawingBuffer=false 限制没取到像素（同帧读也失败）。
+  - **6 已完成（用户拍板 6.1 选项1 + 6.2）**：`Region.coreRegionId` 第二形态（与 centerCellId **互斥，设其一清其二**；单源 `core/regionCenter.coreCellOf`——渲染/路网/校验全走它，旧 `SetCenterCommand` 因写不到渲染读的字段已删、改 `RegionFieldsCommand`+alreadyApplied 手写世界）；**两种形态统一「地图点格」**：检查区「📍 点格」（设 centerCellId）/「📍 点子元素」（点到的格属哪个子元素就设谁，`getRegionIndex.owners` 反查 + `parentId===regionId` 闸）+ 按钮旁显示当前核心（子元素名 / `#格`）；**读档修复**：`repairHierarchy` 清悬空/跨层 coreRegionId；**validate** 的 requireCenter 接受两形态（核心子元素无效 → center_missing）。6.2 抢占开关在绘制面板（笔刷旁）：开=**replace**（`addMode=false`）、关=emptyOnly。**验收**：点子元素→`coreRegionId=province-0/centerCellId=undefined/coreCellOf=子元素核心格/状态栏报子元素名`、撤销还原 `77553`；点格→互斥清 coreRegionId；视觉中心→54627；抢占对照 emptyOnly `changed=0` vs replace `changed=561`（=换父整省560格+命中的1格）、undo 后 cells/parentId 逐位还原 ✓。
+  - 基线：tsc 0 / svelte-check 0 errors；**全部未提交**。
 
 - **✓ 第四十二轮（2026-10-04 用户驳回「保持瞬移」——修根因不撤功能）**：
   - 金钮（ModeCapsule 填色滑钮）**滑动过渡加回**（0.18s）+ **卡死看门狗**：档位变化后320ms核对滑钮矩形与激活档，未到位=时间线冻结（2026-10-01 旧 bug 根因：后台页 CSS 过渡冻结、style 已终值 computed 停旧档）→ 关过渡+强制重排瞬时落终档、随后恢复过渡；回前台/visibilitychange/focus 立即再核对。**动画与位置正确兼得**——四十一轮候选ⓒ「保留瞬移」作废（用户原则：发现 bug 修根因，别撤功能）。
@@ -70,35 +90,6 @@
   - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
 
 
-- **✓ 第三十六轮（2026-10-03 用户报障修复 + HIERARCHY O2）**：
-  - **地形网格挤压（包3 引入的真 bug）**：山脉/细节/海床三格滑块被压成 2px 横线——根因=`.tcell` 列向 flex 格里 `.cap` 是 `flex:1 1 0%`（**basis 0 不计容器固有高度**），中间行三格全滑块 → 行高只剩标签 16px；有数字输入格的行被抬到 40px 才掩盖。修=`.cap` 改 `flex:1 1 auto`（行向仍靠 grow 填满=视觉不变，列向恢复固有高），组件级一处修全。**全库扫描**（生成三分支/检查四态/绘制/组织/⚙弹层）压扁+裁切控件 = 0（`56574f9`）。
-  - **O2 树遍历单源（`7622abe`）**：`core/layer/tree.ts` = `layerTreeOf`（前序 DFS 一次产 parentId/depth/**chain 面包屑**）+ `childLayerIdOf`（首子层）；收编 layerDisplayList / LayersPanel.rows / chainOf（删）/ regionOps.childLayerIdOf（删定义，WD+内部 5 处+store+brush 换源）。**验收**：旧算法内联逐位对照（15 层顺序 equal、chain 零失配）、组织缩进 0→14px→撤销回 0（parent=null、已撤销）、lastError 空；tsc/svelte-check 0。
-  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
-
-- **✓ 第三十五轮（2026-10-03 EXPAND 包3+包5 收口）**：
-  - **包3 生成与绘制整理（`2333f9f`）**：分支头 `.bhead`（🎲撒点/⛰️地形/🧩布局+动作名）、`.tgrid` 地形 3 列网格（大陆占比 wide 通栏 ModeCapsule+9 格）、**活空态**（去 `canGen` 渲染闸→面板恒开、fire 仍守门；无配置 hint=「到检查模式给『X』设置参数后再回来」）、R7 freeform 虚线徽章（App 传 `freeform`/`strategy`）；四分支头/徽章/指引全部实测命中。
-  - **包5 视觉 tokens（`d3c0953`）**：:root `--fs-xs/sm/md`、`--sp-1..5`、`--r-1..4/--r-pill` 一张表；**20 文件等值替换**（值不变=零视觉变化策略；双值 shorthand 按轴保留原值、3/4/5/11/13 异形角不入表）；tsc/svelte-check 0；布局指标逐位（insH=222、fs=11px）；stash A/B 匹配协议对拍 **rail/topbar 像素 0.0%**。
-  - **验证教训（新坑，重要）**：首轮回对拍出「map-center 89%」假警报→根因=**渐现暖机的负载相关进度差**：同码同协议 4s×2=0% 但 8s×2=50%、同码 4s vs 8s=50%——**stash A/B 抓帧必须 ①vite 平静（stash/pop 后 sleep）②同沉降时长 ③先做同码对拍取噪声底**；顶栏/状态栏的「差异」=半透明面板透画布，跟着画布差走，不是 CSS 差。
-  - 进度：**EXPAND 包1✓ 2✓ 3✓ 4◐（👁已落 `d452d62`，余配置态/子层点）5✓**；还债 1✓ 2✓ 3✓ 4✓ 5◐（剩 5-c shell ~35 转发）6◐ 7✓。
-
-- **✓ 第三十四轮（2026-10-03 步骤7 转包③：as-unknown 收敛，三小包全清）**：
-  - src 域 **25→0（grep 归零）**，六模式：①缓存键定型（WeakMap<object>→MidRing[]/DisplayRing/ProjCache，layers·triangulate·geometry·mapRenderer）②`DisplayRing extends MidRing` 协变→triangulate 桥接强转直删 ③RegionIndex 增 `reset()` 替代外部戳私有四连转 ④性能钩子集中声明 `render/perfHooks.ts`（**declare global 只给类型、裸名赋值 ReferenceError 已踩**→消费点一律 `globalThis.__x`）⑤paths 迁移显式构造（...raw 保未知字段）⑥worker 双文件 reference-lib 化（`self.postMessage(msg, transfer)` 直用）；另修 WD `onSelect(null)`、commandService Snap 直索引。
-  - 验收：tsc/svelte-check 0；平面实测钩子 drawCount/gpuRan 跳动、gpuErr 空、lastError 空；tests 域余 2 处（造 mock 夹具保留，域外）。
-  - **总进度：1✓ 2✓ 3✓ 4✓ 5◐（剩 5-c shell 协调）6◐ 7✓**。
-
-
-- **◐ 第二十八轮（2026-10-01，还债 5-c 首批：App 转发器瘦身）**：
-  - **审计**：双向比对 39 个 on* 赋值**零死转发**（前轮已清 canPaint/onMoveLayer 类）。
-  - **首批三件（不碰 shell prop 面）**：① Viewport 四纯转发下沉（paint/radius/endpoint/strokeend → 直调 editor，路径编辑同先例）——真指针笔画验收：61→撤销精确回 10、栈 1；alt+滚轮 1.5→1.65；② `organize` 下沉 CommandService+门面（indent 翻转+回弹 ✓）；③ 死 CSS `.gen-pending` 删。App 532→509、Viewport 1437→1423、tsc/svelte-check 0。
-  - **☐ 剩余 ~35 个 shell 转发待 UI 重构线协调**：TopBar 12（rename/export/import/style/projection/globe×5/switchView…）、WorkspaceDrawer 11、LayersPanel 7、GenerateSection 4、LeftRail 4——**勿单方面删改**；届时按「组件直连 editor 或收进 UI 状态模块」两路处理。
-  - 子包进度：5-a ✓ 5-b1~5-b5 ✓ **5-c ◐（首批）** / 步骤 7 ☐。
-
-- **✓ 第二十七轮（2026-10-01，还债 5-b5：CommandService 命令 CRUD 出库）**：
-  - `app/commandService.ts`（814 行）：undo/redo+类型分发/删·复制·吞并/图层树缩进·提升·移序/样式·显隐·透明度/路径快照执行器+拖动会话/字段快照执行器/新建·重命名·换色全量出库——**方法体原样搬运**（`this.*` 经类内代理映射 Ctx，零改写，diff 安全）；选中类留 store（App 直连）。store **2045→888**。
-  - **验收（八组门面回归）**：建层/元素复制/删除层/缩进提升/显隐/样式/withPaths/patchRegions 全经 facade 生效+撤销回滚；样式真值 border.width 0.8→4.2→0.8；栈归零、IDB 15 层清净（测试层无残留）、零 console 错；tsc/svelte-check 0、孤儿 import 29 项清。
-  - **验证教训（入 quirks）**：undo 换 world 身份后**数组长度断言读旧引用=假阴**（曾把八组里六组误判失败）——对象字段级断言 + `history.depth` 栈计数 + IDB 实读三口径才可信。
-  - 子包进度：5-a ✓ 5-b1 ✓ 5-b2 ✓ 5-b3 ✓ 反馈四件 ✓ 5-b4 ✓ **5-b5 ✓** / 5-c App 回调瘦身 ☐ / 步骤 7 ☐。
-
 ## 遗留清单（按优先级）
 
 1. ~~1-b~~ **已收口（第十八轮）**：路径✓（`43ff5d1`）/顺序✓/复制·删除·死码✓；判定残余=climate/astro（孤儿归步骤 7）、道路端点 `endpointOverrides`（region 域归 1-c 后核对→已随 1-c 收口记录）。
@@ -142,5 +133,6 @@
 
 ## 下一轮候选
 
+- **新议题（2026-10-04，未开工）：元素名称注记与核心符号**——调研+需求细化已落 `docs/LABEL_DESIGN_2026-10-04.md`（现状盘点带 file:line / 外部调研带来源 / R1–R21 / **待拍板 P1–P12** / 分期五包），等用户拍板 P1–P12 再动代码。
 - **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓、手感批+金钮 ✓）**；**下一阶段重心 = 用户使用**——选题与排序见 `docs/OPTIMIZE_REVIEW_2026-10-04.md` §7（第一梯队=搜索/测距/吞并/校验 toast 四个半成品入口），点名即做；并行技术线=存档镜像离线程/死码甲档/存档字段清洗/测试固化（同文档 §3-§5）。路径生成 R7 用户已定先不做；路网 paths=0 待点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

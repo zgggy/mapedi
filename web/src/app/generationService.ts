@@ -134,7 +134,7 @@ export class GenerationService {
     this.ctx.notify();
   }
 
-  regenLayer(layerId: string, seed?: number): void {
+  regenLayer(layerId: string, seed?: number, cascadeDown = false): void {
     const world = this.ctx.world;
     if (!world) return;
     // 种子（2026-10-04 用户报障）：UI 种子行/🎲 直传；不传或非法 = 世界种子（旧行为）。
@@ -142,16 +142,24 @@ export class GenerationService {
     // R2 递归（HIERARCHY §6.3 包3）：先确保单元源（子层）可用——
     // 无元素 → 递归生成（孙层优先），再生成本层；有元素则不重算（非破坏）。
     this.ensureUnitsReady(layerId, s);
-    const params = this.ctx.profiles.find((p) => p.layerId === layerId)?.params;
-    const enabled = new Set([layerId]);
-    runCascade(
-      world,
-      s,
-      [layerId],
-      undefined,
-      params ? { [layerId]: params } : undefined,
-      enabled,
-    );
+    // **级联重生成**（用户 2026-10-04「同时生成子元素」开关）：勾选后把
+    // 「最深子层 → … → 直接子层 → 本层」整条链逐层重生成（**子先父后**：父层聚合子层
+    // 为单元源，顺序反了会用上一代子元素聚合）。层树是链（每层≤1子），沿 childLayerId 走到叶。
+    const chain: string[] = [];
+    if (cascadeDown) {
+      let cur = childLayerIdOf(world, layerId);
+      const seen = new Set<string>([layerId]);
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        chain.unshift(cur);
+        cur = childLayerIdOf(world, cur);
+      }
+    }
+    chain.push(layerId);
+    for (const id of chain) {
+      const params = this.ctx.profiles.find((p) => p.layerId === id)?.params;
+      runCascade(world, s, [id], undefined, params ? { [id]: params } : undefined, new Set([id]));
+    }
     this.ctx.touchWorld();
     // focusAfterGen 层（height）重生成后默认显示并聚焦（与整世界生成同规则）
     const fg = world.layers.find((l) => l.id === layerId && l.focusAfterGen);
@@ -159,7 +167,11 @@ export class GenerationService {
       fg.visible = true;
       this.ctx.setFocusLayer(fg.id);
     }
-    this.ctx.setStatus(`已重新生成：${layerId} · 种子 ${s}`);
+    this.ctx.setStatus(
+      cascadeDown && chain.length > 1
+        ? `已级联重新生成 ${chain.length} 层（子先父后）：${chain.join(' → ')} · 种子 ${s}`
+        : `已重新生成：${layerId} · 种子 ${s}`,
+    );
   }
 
   /** 单元源兜底（R2）：childLayer 无元素 → 先递归生成子层链（自底向上） */

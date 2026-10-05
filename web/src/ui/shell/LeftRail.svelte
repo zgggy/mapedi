@@ -10,7 +10,7 @@
   import type { Snippet } from 'svelte';
   import ModeCapsule from './ModeCapsule.svelte';
   import ExpandPanel from './ExpandPanel.svelte';
-  import { WS_MODE_ITEMS, persistPanelOpen, readPanelOpen } from './shell';
+  import { WS_MODE_ITEMS, persistPanelOpen, readPanelOpen, type WsMode } from './shell';
 
   let {
     layers,
@@ -24,9 +24,9 @@
     layers: Snippet<[]>;
     /** 元素面板内容（创建/搜索 + 列表 + 选中行展开区） */
     workspace: Snippet<[]>;
-    taskMode?: 'check' | 'gen' | 'draw';
+    taskMode?: WsMode;
     globeLocked?: boolean;
-    onTaskMode?: (m: 'check' | 'gen' | 'draw') => void;
+    onTaskMode?: (m: WsMode) => void;
     /** 面板开合 + 实测宽度回传（App 用于 C7 遮挡宽与高度标注条件） */
     onState?: (s: { layersOpen: boolean; wsOpen: boolean; right: number }) => void;
   } = $props();

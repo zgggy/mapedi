@@ -34,10 +34,18 @@ import { buildRoadSegments, dragRoadEndpoint } from '../core/draw/roads';
 import {
   HeightCellsCommand,
   MultiRegionCommand,
-  SetCenterCommand,
   history,
 } from '../core/history';
 import { queuePieceInvalidation } from '../render/patchQueues';
+import { getRegionIndex } from '../core/index/regionIndex';
+import { childLayerIdOf } from '../core/hierarchy/derive';
+import { reparentElement } from '../core/hierarchy/ops';
+
+/** 笔刷一次落点的结果：hits=半径内全部格；changed=**将要改变归属**的格（高亮预告用） */
+export interface PaintResult {
+  hits: number[];
+  changed: number[];
+}
 
 export interface DrawCtx {
   readonly world: World | null;
@@ -60,6 +68,8 @@ export class DrawController {
   private strokeRegionId: string | null = null;
   /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即得副作用集） */
   private strokeSnap: Map<string, number[]> | null = null;
+  /** 笔画内的换父翻转（父笔刷收编）：id → {before, after}，随笔画一条命令撤销 */
+  private strokeParentFlips: Map<string, { before: string | undefined; after: string | undefined }> | null = null;
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
   heightIntervalId = 'h6';
@@ -80,7 +90,16 @@ export class DrawController {
     const layer = this.ctx.world?.layers.find((l) => l.id === region?.layerId);
     let tool: DrawTool = 'brush';
     if (layer?.kind === 'road' || layer?.kind === 'route') tool = 'road';
-    this.ctx.draw = { ...emptyDrawSession(), active: true, targetRegionId: regionId, tool, addMode: true };
+    // 笔刷半径 = 用户偏好，**跨会话保留**（emptyDrawSession 的 1.5 只是出厂默认）：
+    // 曾每次 startDraw 都重置 → 换目标/重进会话后半径跳回 1.5（用户反馈「重绘过后变默认」）
+    this.ctx.draw = {
+      ...emptyDrawSession(),
+      active: true,
+      targetRegionId: regionId,
+      tool,
+      addMode: true,
+      radiusDeg: this.ctx.draw.radiusDeg,
+    };
     this.ctx.setStatus(
       tool === 'road'
         ? '道路绘制：左键加地块；拖端点 · Esc 退出'
@@ -99,6 +118,7 @@ export class DrawController {
       targetRegionId: `__height__:${this.heightIntervalId}`,
       tool: 'brush',
       addMode: true,
+      radiusDeg: this.ctx.draw.radiusDeg,
     };
     const iv = intervalById(this.heightIntervalId);
     this.ctx.setStatus(
@@ -142,7 +162,10 @@ export class DrawController {
     if (this.ctx.draw.active) {
       this.ctx.draw = { ...this.ctx.draw, active: false };
       this.ctx.setStatus('已退出绘制会话');
-      this.ctx.touchWorld();
+      // 退出会话是**纯 UI 态**：不改任何几何/归属 → 只换身份触发重绘。
+      // 曾调 touchWorld（bumpAllRev → geomRev++ → 全部件环缓存换键 = 数百毫秒重建闪屏），
+      // 即「结束绘制整个界面重绘一下」的根因（2026-10-04 实测 endDraw → 件环重建 4 件/67ms）。
+      this.ctx.notify();
     }
   }
 
@@ -153,7 +176,7 @@ export class DrawController {
     ctrl = false,
     alt = false,
     button = 0,
-  ): number[] | null {
+  ): PaintResult | null {
     const world = this.ctx.world;
     if (!world || !this.ctx.draw.active) return null;
     // 笔画开始：在 resolveDrawTarget **之前**拍快照——resolve 可能自动新建元素（行省），
@@ -163,7 +186,9 @@ export class DrawController {
     if (!resolved) return null;
     if (resolved === 'height') {
       // 擦除 = 右键或 Shift+左键（A′契约画布右键=纯位移，Shift 是可达的擦除手势）
-      return this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 || shift ? 'right' : 'left');
+      const hits = this.paintHeight(lon, lat, shift, ctrl, alt, button === 2 || shift ? 'right' : 'left');
+      // 高度涂改没有「换归属」，但笔刷命中的格都会变值 → 一并作为高亮预告
+      return hits ? { hits, changed: hits } : null;
     }
     const pointer = button === 2 || shift ? 'right' : 'left';
     const hits = cellsInBrush(world, lon, lat, this.ctx.draw.radiusDeg);
@@ -171,28 +196,94 @@ export class DrawController {
     if (!this.paintDirty) {
       this.paintDirty = true;
     }
-    const lcfg = defaultLayerConfig(resolved.region.layerId);
+    // ── 父笔刷命中子元素（2026-10-04 用户需求）：加笔时——
+    // ① 命中的子元素若不在本父之下（孤儿/他国）→ **纳入**本父（闸复核；flip 随笔画一条命令撤销）；
+    //    闸拒绝的不纳入、也不作目标（不画到别人家的元素里）。
+    // ② 笔画目标切到命中最多的那个子元素（**已纳入或本就是本父之子**）→
+    //    `draw.parentRegionId` 指向它 = 地图金框高亮，且后续笔画直接画进它
+    //    （resolve 下一拍经 parentRegionId 稳定命中）。
+    // **不改 selectedRegionId**：C1 不变量 = 会话目标恒等于选中元素（纯推导），
+    // 绘制中改选中会让 App 推导 effect 判定「换目标」→ endDraw+startDraw 会话重启
+    // （重绘 + 笔刷半径被打回默认，2026-10-04 用户反馈的根因之一）；高亮归 parentRegionId。
+    let target: { region: Region; parent?: Region } = resolved;
+    // 「将要改变归属的格」预判（用户 2026-10-04：绘制时按下即高亮**即将归属新元素**的格）：
+    //  - 移除（右键/Shift）：高亮将被摘除的（属本元素的）格
+    //  - 加·只填空白（addMode）：高亮本层**无主**、将被纳入的格（已属本元素的不动 = 无变化不高亮）
+    //  - 加·抢占（!addMode = replace）：高亮所有不属于本元素、将被抢/纳入的格
+    const targetSet = new Set(resolved.region.cells);
+    const preChanged: number[] = [];
+    if (pointer === 'right') {
+      for (const id of hits) if (targetSet.has(id)) preChanged.push(id);
+    } else if (this.ctx.draw.addMode) {
+      const idx = getRegionIndex(world);
+      const lid = resolved.region.layerId;
+      for (const id of hits) if (!idx.owners(world, lid, id).length) preChanged.push(id);
+    } else {
+      for (const id of hits) if (!targetSet.has(id)) preChanged.push(id);
+    }
+    const changed = new Set(preChanged);
+    if (pointer === 'left' && target.parent) {
+      const parent = target.parent;
+      const childLayerId = childLayerIdOf(world, parent.layerId);
+      if (childLayerId) {
+        const idx = getRegionIndex(world);
+        const hitCount = new Map<string, number>();
+        for (const c of hits) {
+          for (const oid of idx.owners(world, childLayerId, c)) {
+            if (oid === target.region.id) continue;
+            hitCount.set(oid, (hitCount.get(oid) ?? 0) + 1);
+          }
+        }
+        if (hitCount.size) {
+          const byId = new Map(world.regions.map((r) => [r.id, r]));
+          const order = [...hitCount.entries()].sort((a, b) => b[1] - a[1]);
+          let primary: Region | undefined;
+          for (const [oid] of order) {
+            const o = byId.get(oid);
+            if (!o) continue;
+            if ((o.parentId ?? null) !== parent.id) {
+              const before = o.parentId;
+              if (reparentElement(world, oid, parent.id)) continue; // 闸拒绝
+              (this.strokeParentFlips ??= new Map()).set(oid, { before, after: parent.id });
+              // 换父 = 该子元素的全部地块「即将归属新元素」→ 全部纳入高亮预告
+              const child = byId.get(oid);
+              if (child) for (const c of child.cells) changed.add(c);
+            }
+            primary ??= o;
+          }
+          if (primary) {
+            target = { region: primary, parent };
+            this.ctx.draw = { ...this.ctx.draw, parentRegionId: primary.id };
+          }
+        }
+      }
+    }
+    // 父会话里高亮恒指向**正在被画的那个子元素**（resolve 选中的若非已登记，登记之）——
+    // 否则「刷到没子元素覆盖的格子」时金框停在父元素上，与实际被画对象不一致。
+    if (target.parent && this.ctx.draw.parentRegionId !== target.region.id) {
+      this.ctx.draw = { ...this.ctx.draw, parentRegionId: target.region.id };
+    }
+    const lcfg = defaultLayerConfig(target.region.layerId);
     const actor: DrawActor = {
-      layerId: resolved.region.layerId,
-      elementId: resolved.region.id,
+      layerId: target.region.layerId,
+      elementId: target.region.id,
       overwrite: (this.ctx.draw.addMode ? 'emptyOnly' : 'replace') as OverwriteMode,
       placement: lcfg.placement,
       splitPolicy: lcfg.splitPolicy,
     };
     // placement 闸 + overwrite + splitPolicy
-    const result = membershipDrawStroke(world, actor, {
+    // **不因笔画改选中**（C1 不变量：会话目标 ≡ 选中元素）：父会话里被画的是**子**元素，
+    // 曾把 selectedRegionId 改成子 → 推导 effect 判「换目标」→ endDraw+startDraw 会话重启
+    // （闪屏 + 笔刷半径回默认）。副作用采集在 commit 走快照-diff（含 replace/split/steal）。
+    membershipDrawStroke(world, actor, {
       cellIds: hits,
       pointer: pointer as 'left' | 'right',
       shift,
       alt,
     });
-    if (result.membershipChanges.length) {
-      this.ctx.selectedRegionId = resolved.region.id;
-      // 每元素增减不再单独采集：commit 走快照-diff（捕获全部副作用，含 replace/split/steal）
-    }
     void placementAllows;
     void ctrl;
-    return hits;
+    return { hits, changed: [...changed] };
   }
 
   /** 高度笔刷：HeightDraw 整数语义 */
@@ -280,6 +371,7 @@ export class DrawController {
   private beginStrokeSnap(): void {
     const w = this.ctx.world;
     this.strokeSnap = w ? new Map(w.regions.map((r) => [r.id, r.cells])) : null;
+    this.strokeParentFlips = new Map();
   }
 
   /**
@@ -311,8 +403,14 @@ export class DrawController {
         modified.push(r.id);
       }
     }
-    if (patches.length || created.length) {
-      history.run(world, new MultiRegionCommand({ patches, created }, label), {
+    const parentFlips = [...(this.strokeParentFlips ?? [])].map(([id, v]) => ({
+      id,
+      before: v.before,
+      after: v.after,
+    }));
+    this.strokeParentFlips = null;
+    if (patches.length || created.length || parentFlips.length) {
+      history.run(world, new MultiRegionCommand({ patches, created, parentFlips }, label), {
         alreadyApplied: true,
       });
     }
@@ -327,6 +425,7 @@ export class DrawController {
     const resolved = resolveDrawTarget(world, this.ctx.draw);
     if (!resolved || resolved === 'height') {
       this.strokeSnap = null;
+      this.strokeParentFlips = null;
       return;
     }
     const hits = floodFillCells(world, cellId, true);
@@ -335,14 +434,6 @@ export class DrawController {
     this.commitStrokeDiff('填充');
     this.ctx.touchWorld();
     this.ctx.setStatus(`洪水填充 ${hits.length} 地块`);
-  }
-
-  setCenterAt(cellId: number): void {
-    const world = this.ctx.world;
-    if (!world || !this.ctx.selectedRegionId) return;
-    history.run(world, new SetCenterCommand(this.ctx.selectedRegionId, cellId));
-    this.ctx.touchWorld();
-    this.ctx.setStatus(`已设中心 → cell #${cellId}`);
   }
 
   endpoint(cellId: number, lon: number, lat: number, phase: 'start' | 'move' | 'end'): void {

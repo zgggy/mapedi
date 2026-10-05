@@ -3,6 +3,7 @@
  * 键 = cellIds 指纹 + 投影 + **dataRev()**（O(1) 失效，不扫全图）。
  */
 import type { World, CellId } from '../core/types';
+import type { DisplayPiece } from '../core/displayCompose';
 import {
   cellSetBoundaryEdges,
   cellSetBoundaryRings,
@@ -117,21 +118,32 @@ export function patchPieceEntry(
 
 /**
  * 成员对账补丁（2026-10-04 手感批·修「全量重绘闪」）：编辑/物化后**渲染前**一次性
- * 对账——已缓存件按 setKey 反查 region，cells 与 book.set 的 Δ 就地打补丁。
+ * 对账——已缓存件的 book.set 与**合成件 cellIds**（唯一显示真相）逐件比对，Δ 就地打补丁。
  * 取代 touchWorld/touchRegions 里的 invalidateBorderCache 全清：全清会让下一帧
  * 投影+环全量重建 = 数百毫秒长帧 = 用户报的「整个界面闪一下」。
- * 门控 = dataRev|projKey（同修订同投影只对账一次，~1-3ms；换投影/改数据自动再来）；
+ *
+ * 期望集必须吃 compose 产物而不是 setKey→region.cells（2026-10-05 修）：
+ * 区间型高度档的件 cellIds = 累积（h ≥ lo），region.cells = 精确档——按 region 对账
+ * 会把所有高度件环**打回精确档**（双真相：环缓存 ≠ 合成件），高度色块出现未绘制暗洞；
+ * 父切片件（splitRegionForDisplay）同理。单一真相 = composeShownPieces 的 dp.cellIds。
+ *
+ * 门控 = dataRev|projKey（同修订同投影只对账一次；换投影/改数据自动再来）；
  * geomRev 仍写在键里——重生/导入自动换代，首启渐现不受影响。
+ * pieces 缺席（路径编辑态不合成件）→ 本帧跳过且**不消耗门控**，下帧补对账。
  */
 let memberReconcileGate = '';
 export function reconcilePieceMembership(
   world: World,
   projKey: ProjectionId,
   project: (ll: LonLat) => Pt,
+  pieces?: readonly DisplayPiece[],
 ): number {
   const gate = `${dataRev()}|${projKey}`;
   if (gate === memberReconcileGate) return 0;
+  if (!pieces) return 0;
   memberReconcileGate = gate;
+  const expected = new Map<string, readonly CellId[]>();
+  for (const dp of pieces) expected.set(`piece:${dp.key}`, dp.cellIds);
   let patched = 0;
   for (const [key, entry] of ringsCache) {
     if (!entry.book) continue;
@@ -139,12 +151,9 @@ export function reconcilePieceMembership(
     if (segs.length < 2 || segs[1] !== projKey) continue;
     const setKey = segs[0];
     if (!setKey.startsWith('piece:')) continue;
-    const rid = setKey.split(':')[2];
-    if (!rid) continue;
-    const region = world.regions.find((r) => r.id === rid);
-    if (!region) continue;
+    const cur = expected.get(setKey);
+    if (!cur) continue; // 本帧未合成的件（隐藏层/未参与）不碰
     const cached = entry.book.set;
-    const cur = region.cells;
     if (cached.size === cur.length) {
       let same = true;
       for (const id of cur) {

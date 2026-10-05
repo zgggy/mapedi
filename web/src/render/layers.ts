@@ -1,5 +1,5 @@
 import { SCALE_FLOOR } from '../core/tolerances';
-import type { World } from '../core/types';
+import type { World, LabelMode, CoreSymbol, CellSymbol, CellMarker } from '../core/types';
 import type { StyleSet } from '../core/styles';
 import type { Camera } from './map2d';
 import {
@@ -32,6 +32,10 @@ import {
 import { catmullRomPolyline } from '../core/paths';
 import { ringPath2D, cellPolyPath2D } from '../core/ring/path2d';
 import type { DisplayPiece } from '../core/displayCompose';
+import { layerTreeOf } from '../core/hierarchy/derive';
+import { isCJK, labelSpecOf, labelTextOf, type LabelSpec } from '../core/layer/labelStyle';
+import { buildLabelGeom, ELONGATION_MIN, type LabelGeom } from '../core/ring/labelPlace';
+import { coreCellOf } from '../core/regionCenter';
 import { isLayerShown } from '../core/displayCompose';
 import { dataRev } from '../core/rev';
 
@@ -489,8 +493,6 @@ function pathPointsSig(proj: string, pp: unknown, points: { lon: number; lat: nu
 
 /** 标签文字宽度缓存（同字体同名跨帧复用） */
 const labelWidthCache = new Map<string, number>();
-/** 元素中心缓存：rev + id + cells 长度为键 */
-const regionCenterCache = new Map<string, { x: number; y: number }>();
 
 /** 元素级副本：在帧级 k 集上再展开 ±1（元素 bbox 比全图窄，需邻副本余量）。 */
 function elementCopies(env: RenderEnv): number[] {
@@ -601,53 +603,129 @@ export const pathsLayer: RenderLayer = {
   },
 };
 
-/** 核心地块符号：按 LayerDef.coreSymbol 画 */
+/**
+ * 核心符号屏幕半径（px）= 字号 × 倍率 × 主题符号缩放（R15：随字号，不再用固定 1.1px——
+ * 旧值画出来直径只有 2px，图上几乎看不见）。倍率依据 LABEL_DESIGN §1.7 实测：
+ * 首府符号直径 ≈ 0.8–1.05× 字号（CIA）、一般中心 0.4–0.55×（OSM）。
+ */
+function coreSymbolRadiusPx(sym: CoreSymbol, size: number): number {
+  switch (sym) {
+    case 'star':
+    case 'hollowStar':
+      return size * 0.5;
+    case 'ring':
+      return size * 0.35;
+    case 'diamond':
+      return size * 0.32;
+    case 'square':
+      return size * 0.3;
+    case 'circle':
+    default:
+      return size * 0.28;
+  }
+}
+
+/**
+ * 核心地块符号：按 LayerDef.coreSymbol 画（`s` = **视觉半径**，世界空间单位——
+ * 调用方按 `coreSymbolRadiusPx × symbols.scale ÷ cam.scale` 算好，故屏幕尺寸恒定）。
+ * 描边居中于路径 → 路径半径按形状回缩，使**外缘**正好落在 R 上。
+ */
 function drawCoreSymbol(
   ctx: CanvasRenderingContext2D,
-  sym: 'star' | 'square' | 'circle',
+  sym: CoreSymbol,
   x: number,
   y: number,
   s: number,
   regionColor: string,
   style: { labels: Record<string, { color: string; halo?: string }> },
 ): void {
+  if (sym === 'none' || s <= 0) return;
+  const bright = style.labels.default?.color ?? '#ffe68c';
+  const dark = style.labels.default?.halo ?? 'rgba(0,0,0,0.7)';
+  const starPath = (r: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r * 0.3, y - r * 0.3);
+    ctx.lineTo(x + r, y - r * 0.2);
+    ctx.lineTo(x + r * 0.4, y + r * 0.2);
+    ctx.lineTo(x + r * 0.6, y + r);
+    ctx.lineTo(x, y + r * 0.5);
+    ctx.lineTo(x - r * 0.6, y + r);
+    ctx.lineTo(x - r * 0.4, y + r * 0.2);
+    ctx.lineTo(x - r, y - r * 0.2);
+    ctx.lineTo(x - r * 0.3, y - r * 0.3);
+    ctx.closePath();
+  };
   if (sym === 'star') {
-    ctx.fillStyle = style.labels.default?.color ?? '#ffe68c';
-    ctx.beginPath();
-    ctx.arc(x, y, s * 0.35, 0, Math.PI * 2);
+    // 实心星 = 国家首都。**先描边再填充**：描边是居中线，反过来画时 0.36R 宽的深色
+    // 轮廓会向内吞掉细长星臂的亮色填充（15px 星实测只剩 4 个亮像素 = 几乎全黑）；
+    // 反序后描边只留外半 → 亮星 + 深色外缘，外缘正好落在 R 上。
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = s * 0.36;
+    starPath(s * 0.82);
+    ctx.stroke();
+    ctx.fillStyle = bright;
+    starPath(s * 0.82);
     ctx.fill();
-    ctx.strokeStyle = style.labels.default?.halo ?? 'rgba(0,0,0,0.7)';
-    ctx.lineWidth = 0.8 * s;
+  } else if (sym === 'hollowStar') {
+    // 空心星 = 其他首府（省会）：元素色填充（视觉上"空"）+ 亮色轮廓
+    ctx.fillStyle = regionColor;
+    starPath(s * 0.82);
+    ctx.fill();
+    ctx.strokeStyle = bright;
+    ctx.lineWidth = s * 0.36;
+    ctx.stroke();
+  } else if (sym === 'ring') {
+    // 同心圆 ⊙ = 中心/圣城（OSM 首都样式）：环 + 亮色圆心
+    ctx.fillStyle = regionColor;
     ctx.beginPath();
-    ctx.moveTo(x, y - s);
-    ctx.lineTo(x + s * 0.3, y - s * 0.3);
-    ctx.lineTo(x + s, y - s * 0.2);
-    ctx.lineTo(x + s * 0.4, y + s * 0.2);
-    ctx.lineTo(x + s * 0.6, y + s);
-    ctx.lineTo(x, y + s * 0.5);
-    ctx.lineTo(x - s * 0.6, y + s);
-    ctx.lineTo(x - s * 0.4, y + s * 0.2);
-    ctx.lineTo(x - s, y - s * 0.2);
-    ctx.lineTo(x - s * 0.3, y - s * 0.3);
+    ctx.arc(x, y, s * 0.75, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = bright;
+    ctx.lineWidth = s * 0.5;
+    ctx.stroke();
+    ctx.fillStyle = bright;
+    ctx.beginPath();
+    ctx.arc(x, y, s * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (sym === 'diamond') {
+    // 菱形：自定义地块标记同款（与行政符号族并列，包5）
+    const r = s * 0.85;
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = s * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = bright;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
     ctx.closePath();
     ctx.fill();
-    ctx.stroke();
   } else if (sym === 'square') {
-    const hs = s * 0.7;
-    ctx.fillStyle = '#fff8c8';
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 0.6 * s;
+    const r = s * 0.8;
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = s * 0.4;
     ctx.beginPath();
-    ctx.rect(x - hs, y - hs, hs * 2, hs * 2);
-    ctx.fill();
+    ctx.rect(x - r, y - r, r * 2, r * 2);
     ctx.stroke();
-  } else {
-    const rs = s * 0.65;
-    ctx.fillStyle = regionColor;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 0.7 * s;
+    ctx.fillStyle = bright;
     ctx.beginPath();
-    ctx.arc(x, y, rs, 0, Math.PI * 2);
+    ctx.rect(x - r, y - r, r * 2, r * 2);
+    ctx.fill();
+  } else {
+    // circle：元素色底 + 亮描边（一般中心，视觉最轻）
+    ctx.fillStyle = regionColor;
+    ctx.strokeStyle = bright;
+    ctx.lineWidth = s * 0.5;
+    ctx.beginPath();
+    ctx.arc(x, y, s * 0.75, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
   }
@@ -677,6 +755,319 @@ function drawTree(
 }
 
 /**
+ * 注记放置统计：装饰层是 `repeat` 层，**按世界副本逐 pass 重入**——用帧号做令牌把
+ * 各 pass 的计数并进同一帧（`__drawCount` 在 drawWorld 末尾自增 → 帧内恒定）。
+ * 否则最后一个「远副本 pass（屏内无物）」会把可见 pass 的结果覆盖掉。
+ */
+interface LabelFrameStat {
+  /** 帧令牌（= __drawCount） */
+  frame: number;
+  placed: number;
+  hid: number;
+  hidNoFit: number;
+  hidCollide: number;
+  noPiece: number;
+  cold: number;
+  off: number;
+  /** 已放置项（name + 屏幕坐标）：验收/回归读数 */
+  items: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number }[];
+  /** 视口盒 [vL,vR,vB,vT]（世界 y 向上） */
+  view: number[];
+  /** 本帧画出的核心符号数（累加各副本 pass）——R14「符号先消失」验收读数 */
+  syms: number;
+  /** 用户自定义地块标记数（包5 验收读数） */
+  marks: number;
+  /** 符号读数：形状 + 屏幕坐标 + 视觉半径（验收用，封顶） */
+  symbols: { sym: string; sx: number; sy: number; r: number }[];
+  /** 放置几何构建归因：gate=冷件闸 / empty=环解析不出 / built=建成 */
+  geom?: { gate: number; empty: number; built: number };
+}
+let labelFrameAcc: LabelFrameStat | null = null;
+/** 帧级「已画名字的元素」：同一元素每帧只画一个名字（跨世界副本 pass 去重，2026-10-04 报障） */
+let placedFrameNo = -1;
+let placedIds = new Set<string>();
+
+/**
+ * 注记碰撞表（R13/R20）：屏幕空间均匀网格，**跨层共用一张**（原实现每层重置 occupied
+ * → 下层名称会被上层压字）。cell 64px ≈ 4-6 个标签一格，命中后仍做精确盒判定。
+ */
+class BoxGrid {
+  private readonly cell = 64;
+  private readonly map = new Map<string, number[]>();
+  private readonly boxes: { x: number; y: number; w: number; h: number }[] = [];
+
+  add(x: number, y: number, w: number, h: number): void {
+    const i = this.boxes.length;
+    this.boxes.push({ x, y, w, h });
+    this.eachCell(x, y, w, h, (k) => {
+      const a = this.map.get(k);
+      if (a) a.push(i);
+      else this.map.set(k, [i]);
+    });
+  }
+
+  hits(x: number, y: number, w: number, h: number): boolean {
+    let found = false;
+    this.eachCell(x, y, w, h, (k) => {
+      if (found) return;
+      const a = this.map.get(k);
+      if (!a) return;
+      for (const j of a) {
+        const o = this.boxes[j];
+        if (x < o.x + o.w && x + w > o.x && y < o.y + o.h && y + h > o.y) {
+          found = true;
+          return;
+        }
+      }
+    });
+    return found;
+  }
+
+  private eachCell(x: number, y: number, w: number, h: number, cb: (k: string) => void): void {
+    const c0 = Math.floor(x / this.cell);
+    const c1 = Math.floor((x + w) / this.cell);
+    const r0 = Math.floor(y / this.cell);
+    const r1 = Math.floor((y + h) / this.cell);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cb(`${c},${r}`);
+  }
+}
+
+/**
+ * 一件注记（包4）：投影空间锚点 + **方向点**（dx,dy 单位向量）——屏幕角由消费端用
+ * `toScreen(锚点)` 与 `toScreen(锚点+方向)` 两点求 atan2，天然吸收投影形变与 y 翻转
+ * （解析求导会被罗宾森 scale(y)·Δλ 的 y 依赖坑掉）。
+ */
+interface LabelItemAt {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  text: string;
+  /** 字距拉伸（em，0=档位常规字距）：狭长面**一个名字沿长轴铺开**（2026-10-04 用户否掉重复注记） */
+  ls?: number;
+}
+
+/** 布局结果；mode=null 表示全部失败（blocked 区分「放不下」与「被占位」） */
+interface LabelLayout {
+  mode: 'flat' | 'stretch' | 'curve' | null;
+  items: LabelItemAt[];
+  blocked: boolean;
+}
+
+/**
+ * 选一个排布（LABEL_DESIGN 包4 · R4/R5；**2026-10-04 用户拍板：不要重复注记，改「拉伸字距」**）：
+ *  - **非狭长** → 只走现状的水平直排（最宽处候选 + 局部细化），行为零变化；
+ *  - **狭长**（长宽比 ≥ 2.5）→ ①**一个名字沿长轴**：轴向旋转 + 字距拉伸铺开
+ *    （每字符额外间距上限：中文 1×字大、西文 0.5em——调研 B3；拉伸放不下就退回常规字距）
+ *    → ②**逐字弯曲**（整串沿中轴弧长贴合，相邻字转角滑动窗口 ≤25°、不倒置）
+ *    → ③退回水平 → ④省略。
+ * `place(items, union)` = 屏幕空间碰撞检查（union=true 时按整串联合盒判）。
+ */
+function pickLabelLayout(
+  geom: LabelGeom,
+  text: string,
+  textW: number,
+  size: number,
+  padPx: number,
+  scale: number,
+  measure: (t: string) => number,
+  place: (items: LabelItemAt[], union: boolean) => boolean,
+  specSpacingEm: number,
+): LabelLayout {
+  const w = textW / scale;
+  const h = size / scale;
+  const pad = padPx / scale;
+  let blocked = false;
+
+  if (geom.elongation >= ELONGATION_MIN && geom.spine.length >= 2 && geom.axisU) {
+    const u = geom.axisU;
+    const theta = Math.atan2(u.y, u.x);
+    const n = Array.from(text).length || 1;
+    // 拉伸上限（调研 B3）：中文 1×字大/字符、西文 0.5em/字符；目标宽 = min(自然宽+上限, 轴向可用)
+    const gapMax = isCJK(text) ? size : size * 0.5;
+    const axisLen = Math.max(0, geom.spineLen * scale - padPx * 2); // 轴向可用长度（px）
+    // 量宽含档位字距的尾距 → 还原「无字距自然宽」，拉伸后总宽才与目标一致
+    const natural = textW - n * specSpacingEm * size;
+    const wStretch = Math.min(natural + n * gapMax, axisLen);
+    // 按局部宽度（节点 d）降序试锚点：最宽处先放
+    const nodes = [...geom.spine].sort((a, b) => b.d - a.d);
+    // 阶梯回落：一步到顶常因「锚点局部不够宽」全失败 → 退回自然宽（视觉=没拉伸）；
+    // 分三档试，保证拿到「能放下的最大拉伸」。
+    const attempts =
+      wStretch > natural
+        ? [wStretch, natural + (wStretch - natural) * 0.5, natural]
+        : [natural];
+    for (const node of nodes) {
+      for (const wTry of attempts) {
+        const ls = wTry > natural ? (wTry - natural) / (n * size) : 0;
+        if (!geom.fitsRot(node.x, node.y, wTry / scale, h, pad, theta)) continue;
+        const it: LabelItemAt = { x: node.x, y: node.y, dx: u.x, dy: u.y, text, ls };
+        if (!place([it], false)) {
+          blocked = true;
+          continue;
+        }
+        return { mode: 'stretch', items: [it], blocked };
+      }
+    }
+    // 轴向整体放不下 → 逐字沿中轴贴合
+    const curve = curveLayout(geom, text, w, h, pad, size, scale, measure, place);
+    if (curve) return { mode: 'curve', items: curve, blocked };
+  }
+
+  const slot = pickLabelSlot(geom, textW, size, padPx, scale, (x, y) =>
+    place([{ x, y, dx: 1, dy: 0, text }], false),
+  );
+  if (slot.slot) {
+    return { mode: 'flat', items: [{ x: slot.slot.x, y: slot.slot.y, dx: 1, dy: 0, text }], blocked: slot.blocked || blocked };
+  }
+  return { mode: null, items: [], blocked: slot.blocked || blocked };
+}
+
+/** 逐字沿中轴排布（R5）：整串放得下 + 逐字在面内 + 相邻字转角窗口 ≤25° + 不倒置 */
+function curveLayout(
+  geom: LabelGeom,
+  text: string,
+  w: number,
+  h: number,
+  pad: number,
+  size: number,
+  scale: number,
+  measure: (t: string) => number,
+  place: (items: LabelItemAt[], union: boolean) => boolean,
+): LabelItemAt[] | null {
+  const L = geom.spineLen;
+  if (!(L > 0)) return null;
+  const chars = Array.from(text);
+  if (!chars.length) return null;
+  const adv = chars.map((c) => measure(c) / scale);
+  const total = adv.reduce((a, b) => a + b, 0);
+  if (total > L) return null;
+  const items: LabelItemAt[] = [];
+  const winArc = Math.max(1e-9, (size * 0.6) / scale); // 窗口 ≈ 3/5 字高（MapLibre 同款）
+  const maxA = (25 * Math.PI) / 180; // QGIS/Mapnik 档位（R5）
+  let t = (L - total) / 2;
+  let prev: number | null = null;
+  let win: { at: number; d: number }[] = [];
+  let sum = 0;
+  for (let i = 0; i < chars.length; i++) {
+    const cw = adv[i];
+    const p = geom.spineAt(t + cw / 2);
+    if (!p) return null;
+    const ang = Math.atan2(p.ty, p.tx);
+    if (Math.abs(ang) > Math.PI / 2) return null; // 不倒置：轴向反了就整串放弃
+    if (prev !== null) {
+      let d = ang - prev;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      win.push({ at: t, d });
+      sum += d;
+      while (win.length > 1 && t - win[0].at > winArc) sum -= win.shift()!.d;
+      if (Math.abs(sum) > maxA) return null;
+    }
+    prev = ang;
+    if (!geom.fitsRot(p.x, p.y, cw, h, pad, ang)) return null;
+    items.push({ x: p.x, y: p.y, dx: p.tx, dy: p.ty, text: chars[i] });
+    t += cw;
+  }
+  if (!place(items, true)) return null;
+  return items;
+}
+
+/**
+ * 面内放置几何缓存（R19）：键 = `投影|件键`，**不含缩放**（候选点是纯几何）；
+ * 判活 = `cells` 数组引用（本项目写入全 COW 换数组 → O(1) 失效，不扫内容）。
+ * 环未预热（渐现冷件）时返回 null：名称随元素一起补热后出现，不阻塞首帧。
+ */
+interface LabelGeomCell {
+  cellsRef: readonly number[];
+  geom: LabelGeom | null;
+}
+const labelGeomCache = new Map<string, LabelGeomCell>();
+/** 放置几何构建原因计数（诊断：区分「冷件闸」与「环解析不出几何」） */
+const labelGeomStat = { gate: 0, empty: 0, built: 0 };
+function labelGeomOf(env: RenderEnv, dp: DisplayPiece): LabelGeom | null {
+  const key = `${env.proj}|${dp.key}`;
+  const hit = labelGeomCache.get(key);
+  if (hit && hit.cellsRef === dp.cellIds) return hit.geom;
+  if (labelGeomCache.size > 1024) labelGeomCache.clear();
+  const setKey = `piece:${dp.key}`;
+  if (env.warmQueue && !hasPieceEntry(setKey, env.proj)) {
+    labelGeomStat.gate++;
+    return null;
+  }
+  const entry = getCellSetRingsCached(
+    env.world,
+    dp.cellIds,
+    (ll) => projectPt(env, ll),
+    env.proj,
+    setKey,
+  );
+  // 吃**与实绘同一份** preparePieces（unwrap/框闭合/frameFlip 框环全在内）：
+  // 判定的「面内」必须等于画出来的填充（单源，AGENTS §3/§9.3）。preparePieces 自带
+  // WeakMap 缓存，按 rings 数组身份命中。
+  const prepared = preparePieces(env, entry.rings, frameYOf(env), entry.frameFlip);
+  const geom = buildLabelGeom(prepared);
+  if (geom) labelGeomStat.built++;
+  else labelGeomStat.empty++;
+  labelGeomCache.set(key, { cellsRef: dp.cellIds, geom });
+  return geom;
+}
+
+/**
+ * 选一个能放下文字的放置点（P8 降级链第一步 = 候选位轮换）：
+ * ① 逐候选（按「最宽阔」降序）试放；② 全失败 → 在前两个候选附近按**文字尺寸**为步长
+ * 局部细化再试（候选是网格近似，最宽处可能落在两格之间）；③ 仍失败 → null，消费端
+ * **省略名称**（保留核心符号）。文字盒 = px/scale（字号是屏幕恒定 → 判定天然随缩放变化：
+ * 放大到放得下就出现，正是想要的）。判定早退（首点失败即返回），逐帧成本百来次运算。
+ */
+function pickLabelSlot(
+  geom: LabelGeom,
+  textW: number,
+  textH: number,
+  padPx: number,
+  scale: number,
+  /** 额外筛选：放得下 **且** 没被别的注记/符号占位（P8「候选位轮换」逐个试，不是只试一个） */
+  filter?: (x: number, y: number) => boolean,
+): { slot: { x: number; y: number; d: number } | null; blocked: boolean } {
+  const w = textW / scale;
+  const h = textH / scale;
+  const pad = padPx / scale;
+  const need = h / 2 + pad; // 内接半径下限：连「零宽的一行字」都放不下
+  const diag = Math.hypot(w / 2, h / 2) + pad; // 居中放入所需的半径
+  let anyFits = false; // 归因：有位置放得下却被占位 = blocked（否则 = 根本放不下）
+  let maxD = 0;
+  for (const c of geom.cands) {
+    maxD = Math.max(maxD, c.d);
+    if (c.d < need) continue; // 可靠下界不足 ⇒ 必放不下（免 16 点奇偶）
+    let fitsHere: boolean;
+    if (c.d >= diag) fitsHere = true; // 可靠下界足以包住整盒 ⇒ 必放得下（免奇偶）
+    else fitsHere = geom.fits(c.x, c.y, w, h, pad);
+    if (!fitsHere) continue;
+    anyFits = true;
+    if (!filter || filter(c.x, c.y)) return { slot: c, blocked: false };
+  }
+  // 局部细化：候选是网格近似，最宽处可能落在两格之间——只在「确有宽处」时才值得找
+  if (maxD >= need * 0.5) {
+    const step = Math.max(w, h) / 2;
+    const limit = Math.min(2, geom.cands.length);
+    for (let i = 0; i < limit; i++) {
+      const c = geom.cands[i];
+      for (let gy = -2; gy <= 2; gy++) {
+        for (let gx = -2; gx <= 2; gx++) {
+          if (!gx && !gy) continue;
+          const x = c.x + gx * step;
+          const y = c.y + gy * step;
+          if (!geom.fits(x, y, w, h, pad)) continue;
+          anyFits = true;
+          if (!filter || filter(x, y)) return { slot: { x, y, d: c.d }, blocked: false };
+        }
+      }
+    }
+  }
+  return { slot: null, blocked: anyFits };
+}
+
+/**
  * 装饰层：元素名称 + 核心标记 + 逐 cell 装饰 + cell 标记。
  * 统一规则：
  * - 显示范围 = isLayerShown（与元素层同一规则）
@@ -689,9 +1080,24 @@ export const decorationsLayer: RenderLayer = {
   repeat: true,
   draw(env) {
     const { ctx, world, cam, style, focus, pcache, dpr, w, h, showLabels } = env;
-    if (cam.scale < 90) return;
+    // 旧实现：`cam.scale < 90` 整层一刀切 → 现改为 **R14 分档缩放阶梯**：
+    // 名称按本层 `minScale`（档位表），核心符号 = 名称门槛 + 20（缩小过程中**符号先消失**），
+    // cell 级装饰（树 / id 标记，调试性质）保留旧的 90 地板。
+    const decorFloor = cam.scale < 90;
     const sc = style.symbols?.scale || 1;
     const font = style.labels.default;
+    /** 符号比名称早 20 个 scale 消失（R14：符号先消失、名称后消失） */
+    const SYM_LADDER = 20;
+    const specMemo = new Map<string, LabelSpec>();
+    const specOf = (layer: World['layers'][number]): LabelSpec => {
+      let hit = specMemo.get(layer.id);
+      if (!hit) {
+        hit = labelSpecOf(world, layer, style);
+        specMemo.set(layer.id, hit);
+      }
+      return hit;
+    };
+    const hasLetterSpacing = 'letterSpacing' in ctx;
     beginWorld(ctx, env);
     clipToMapFrame(ctx, env);
     // 屏幕坐标换算：MapTransform 只含相机；内容平移是 y 依赖重映射 → 点级 off(y)
@@ -723,7 +1129,19 @@ export const decorationsLayer: RenderLayer = {
       );
     };
 
-    for (const layer of world.layers) {
+    // —— 收集本帧画装饰的层（过滤条件与原逐层循环一致：任一装饰开关 + 显示）——
+    interface Decor {
+      order: number;
+      layer: World['layers'][number];
+      regions: World['regions'];
+      labelMode: LabelMode;
+      coreSym: CoreSymbol;
+      cellSym: CellSymbol;
+      cellMarker: CellMarker;
+    }
+    const decors: Decor[] = [];
+    for (let li = 0; li < world.layers.length; li++) {
+      const layer = world.layers[li];
       const labelMode = layer.labelMode ?? 'none';
       const coreSym = layer.coreSymbol ?? 'none';
       const cellSym = layer.cellSymbol ?? 'none';
@@ -734,134 +1152,381 @@ export const decorationsLayer: RenderLayer = {
         ? (focus === layer.id || layer.visible === true)
         : isLayerShown(world, layer.id, focus);
       if (!shown) continue;
-
       const regions = decorRegionsOf(world, layer.id);
       // baseMesh 层的 cellMarker 遍历所有 cell，不依赖 Region
       const needsRegions = labelMode !== 'none' || coreSym !== 'none' || cellSym !== 'none' ||
         (cellMarker !== 'none' && !layer.baseMesh);
       if (needsRegions && !regions.length) continue;
+      decors.push({ order: li, layer, regions, labelMode, coreSym, cellSym, cellMarker });
+    }
 
-      // —— 元素名称 ——
-      if (labelMode !== 'none' && showLabels !== false) {
-        const occupied: { x: number; y: number; w: number; h: number }[] = [];
-        const hitsBox = (bx: number, by: number, bw: number, bh: number) => {
-          for (const o of occupied) {
-            if (bx < o.x + o.w && bx + bw > o.x && by < o.y + o.h && by + bh > o.y) return true;
-          }
-          return false;
-        };
-        const place = (bx: number, by: number, bw: number, bh: number) => {
-          occupied.push({ x: bx, y: by, w: bw, h: bh });
-        };
-        /** 屏幕坐标投影（走统一 MapTransform，标签随内容平移） */
-        const toScreen = (x: number, y: number) =>
-          tScreen.worldToScreen(x + (offAt?.(y) ?? 0), y);
-        const regionCenter = (r: { id: string; cells: number[] }): { x: number; y: number } | null => {
-          const key = `${dataRev()}|${r.id}|${r.cells.length}`;
-          const hit = regionCenterCache.get(key);
-          if (hit) return hit;
-          const cells = r.cells;
-          if (!cells.length) return null;
-          let sx = pcache.centers[cells[0] * 2];
-          let sy = pcache.centers[cells[0] * 2 + 1];
-          for (let i = 1; i < cells.length; i++) {
-            sx += pcache.centers[cells[i] * 2];
-            sy += pcache.centers[cells[i] * 2 + 1];
-          }
-          const c = { x: sx / cells.length, y: sy / cells.length };
-          if (regionCenterCache.size > 512) regionCenterCache.clear();
-          regionCenterCache.set(key, c);
-          return c;
-        };
+    /** 屏幕坐标投影（走统一 MapTransform，标签随内容平移） */
+    const toScreen = (x: number, y: number) => tScreen.worldToScreen(x + (offAt?.(y) ?? 0), y);
 
-        // 标签在屏幕空间画（字号不随缩放）
+    // —— 跨层碰撞表（R13）：名称与符号共用一张屏幕网格，先放者占位 ——
+    const boxes = new BoxGrid();
+
+    // —— ① 核心符号先占位（名称要避让符号；符号本体最后画，压在名称之上）——
+    const symPlan: {
+      sym: Exclude<CoreSymbol, 'none'>;
+      coreId: number;
+      color: string;
+      size: number;
+      sx: number;
+      sy: number;
+      r: number;
+    }[] = [];
+    for (const d of decors) {
+      if (d.coreSym === 'none') continue;
+      const spec = specOf(d.layer);
+      if (cam.scale < spec.minScale + SYM_LADDER) continue; // 符号先消失（R14）
+      for (const r of d.regions) {
+        // 核心两形态单源（选项1）：coreRegionId（核心=子元素）→ 取其核心格
+        const coreId = coreCellOf(world, r);
+        if (coreId === undefined) continue;
+        const x = pcache.centers[coreId * 2];
+        const y = pcache.centers[coreId * 2 + 1];
+        if (!Number.isFinite(x)) continue;
+        const sp = toScreen(x, y);
+        if (sp.sx < -40 || sp.sx > w + 40 || sp.sy < -40 || sp.sy > h + 40) continue;
+        // 占位盒 = 符号视觉半径（随字号，R15）× 描边余量；与实际画出来的尺寸同源
+        const half = coreSymbolRadiusPx(d.coreSym, spec.size) * sc * 1.15;
+        boxes.add(sp.sx - half, sp.sy - half, half * 2, half * 2);
+        symPlan.push({
+          sym: d.coreSym,
+          coreId,
+          color: r.color,
+          size: spec.size,
+          sx: sp.sx,
+          sy: sp.sy,
+          r: coreSymbolRadiusPx(d.coreSym, spec.size) * sc,
+        });
+      }
+    }
+
+    // —— 用户自定义地块标记（包5 · CellMark）：画在指定格上，独立于任何层。
+    //    复用 symPlan = 复用「占位（名称避让）+ 绘制（pass③ 压在名称之上）」全链。
+    for (const m of world.cellMarks ?? []) {
+      const x = pcache.centers[m.cellId * 2];
+      const y = pcache.centers[m.cellId * 2 + 1];
+      if (!Number.isFinite(x)) continue; // 悬空 cell（撒点重生后）→ 跳过
+      const sp = toScreen(x, y);
+      if (sp.sx < -40 || sp.sx > w + 40 || sp.sy < -40 || sp.sy > h + 40) continue;
+      const half = coreSymbolRadiusPx(m.symbol, font.size) * sc * 1.15;
+      boxes.add(sp.sx - half, sp.sy - half, half * 2, half * 2);
+      symPlan.push({
+        sym: m.symbol,
+        coreId: m.cellId,
+        color: m.color ?? font.color,
+        size: font.size,
+        sx: sp.sx,
+        sy: sp.sy,
+        r: coreSymbolRadiusPx(m.symbol, font.size) * sc,
+      });
+    }
+
+    // —— ② 元素名称：面内最宽处放置 + 放得下才画（放不下 = 省略，绝不缩字号，见 P8）——
+    let placed = 0;
+    let hid = 0;
+    let noPiece = 0;
+    let cold = 0;
+    let off = 0;
+    let hidNoFit = 0;
+    let hidCollide = 0;
+    /** 已放置项（name + 屏幕坐标）——验收/回归读数用，封顶防热路径膨胀 */
+    const debugInfo: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number }[] = [];
+    // 帧级防重令牌（**必须在模块级**：装饰层 draw 每个世界副本 pass 重入，局部变量
+    //  每 pass 新建 = 防不住；按 __drawCount 与 labelFrameAcc 同一帧令牌重置）
+    const frameNo0 = globalThis.__drawCount ?? 0;
+    if (frameNo0 !== placedFrameNo) {
+      placedFrameNo = frameNo0;
+      placedIds = new Set<string>();
+    }
+    const labelT0 = performance.now();
+    if (showLabels !== false) {
+      // 本帧要画名称的层 = 有 labelMode **且过了本档的缩放门槛**（R14 分档阶梯）
+      const labelDecors = decors
+        .filter((d) => d.labelMode !== 'none')
+        .map((d) => ({ d, spec: specOf(d.layer) }))
+        .filter((x) => cam.scale >= x.spec.minScale);
+      if (labelDecors.length) {
+        // 放置优先级 = 叠放同源（R12）：焦点层 → 层深度（父层先于子层）→ 列表序
+        const depth = new Map(layerTreeOf(world).map((r) => [r.id, r.depth]));
+        labelDecors.sort((a, b) => {
+          const fa = a.d.layer.id === focus ? 0 : 1;
+          const fb = b.d.layer.id === focus ? 0 : 1;
+          if (fa !== fb) return fa - fb;
+          const da = depth.get(a.d.layer.id) ?? 0;
+          const db = depth.get(b.d.layer.id) ?? 0;
+          if (da !== db) return da - db;
+          return a.d.order - b.d.order;
+        });
+        // 一元素多显示片时取最大片（LabelLargestPartOnly）
+        const labelIds = new Set(labelDecors.map((x) => x.d.layer.id));
+        const pieceOf = new Map<string, DisplayPiece>();
+        for (const dp of env.displayPieces ?? []) {
+          if (!labelIds.has(dp.layerId)) continue;
+          const k = `${dp.layerId}:${dp.regionId}`;
+          const cur = pieceOf.get(k);
+          if (!cur || dp.cellIds.length > cur.cellIds.length) pieceOf.set(k, dp);
+        }
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.font = `${font.size}px ${font.family}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-
-        for (const r of regions) {
-          const c = regionCenter(r);
-          if (!c) continue;
-          const sp = toScreen(c.x, c.y);
-          const name = labelMode === 'coreLabel' && (r.coreLabel ?? r.centerLabel) ? (r.coreLabel ?? r.centerLabel)! : r.name;
-          if (!name) continue;
-          const wkey = `${font.size}|${font.family}|${name}`;
-          let tw = labelWidthCache.get(wkey);
-          if (tw === undefined) {
-            tw = ctx.measureText(name).width;
-            if (labelWidthCache.size > 1024) labelWidthCache.clear();
-            labelWidthCache.set(wkey, tw);
-          }
-          const bh = font.size + 8;
-          if (hitsBox(sp.sx - tw / 2, sp.sy - bh / 2, tw, bh)) continue;
-          if (font.halo) {
-            ctx.strokeStyle = font.halo;
-            ctx.lineWidth = 3;
-            ctx.strokeText(name, sp.sx, sp.sy);
-          }
-          ctx.fillStyle = font.color;
-          ctx.fillText(name, sp.sx, sp.sy);
-          place(sp.sx - tw / 2, sp.sy - bh / 2, tw, bh);
-        }
-        ctx.restore();
-      }
-
-      // —— 核心标记 + 逐 cell 装饰 + cell 标记 ——
-      if (coreSym !== 'none' || cellSym !== 'none' || cellMarker !== 'none') {
-        const sc2 = (1.1 * sc) / cam.scale;
-
-        if (coreSym !== 'none') {
-          for (const r of regions) {
-            const coreId = r.coreCellId ?? r.centerCellId;
-            if (coreId === undefined) continue;
-            const x = pcache.centers[coreId * 2];
-            const y = pcache.centers[coreId * 2 + 1];
-            drawCoreSymbol(ctx, coreSym, x + (offAt?.(y) ?? 0), y, sc2, r.color, style);
-          }
-        }
-
-        if (cellSym === 'tree') {
-          for (const r of regions) {
-            for (const id of r.cells) {
-              const cell = world.cells[id];
-              if (!cell || !inView(id)) continue;
-              const x = pcache.centers[id * 2];
-              const y = pcache.centers[id * 2 + 1];
-              drawTree(ctx, x + (offAt?.(y) ?? 0), y, (0.55 * sc) / cam.scale, ((id * 9973) % 100) / 100);
+        ctx.lineJoin = 'round';
+        for (const { d, spec } of labelDecors) {
+          // 每档一套排版（R6/R7）：字重 + 字号 + 中英字体栈 + 字距（拉丁疏排、方块字也吃字距）
+          ctx.font = `${spec.weight} ${spec.size}px ${spec.family}`;
+          if (hasLetterSpacing) ctx.letterSpacing = `${spec.spacing}em`;
+          const padPx = Math.max(2, Math.round(spec.size / 4)); // 碰撞余量 = halo 宽度 = 字号/4（R8）
+          const haloW = padPx;
+          /** 量宽（键含字重/字号/字体/字距，跨帧复用）——排布与碰撞同源 */
+          const widthOf = (t: string): number => {
+            const key = `${spec.weight}|${spec.size}|${spec.family}|${spec.spacing}|${t}`;
+            let cw = labelWidthCache.get(key);
+            if (cw === undefined) {
+              cw = ctx.measureText(t).width;
+              if (labelWidthCache.size > 1024) labelWidthCache.clear();
+              labelWidthCache.set(key, cw);
+            }
+            return cw;
+          };
+          /**
+           * 屏幕盒（包4）：投影锚点+方向 → toScreen 两点求**屏幕角** → 旋转盒 AABB。
+           * 角度从屏幕两点取，天然吸收投影形变与 y 翻转，不需要解析导数。
+           */
+          const boxOf = (it: LabelItemAt) => {
+            const s0 = toScreen(it.x, it.y);
+            const s1 = toScreen(it.x + it.dx, it.y + it.dy);
+            let a = Math.atan2(s1.sy - s0.sy, s1.sx - s0.sx);
+            // 不倒置（R5）：PCA 主轴方向是任意的，屏幕角可能落在 ±90° 外 → 归一到
+            // (-90°,90°]。盒是中心对称的（旋转 a 与 a+180° 同一矩形），所以归一只影响
+            // 「字往哪边读」；逐字（curve）在投影空间已挡掉反向，这里对它是恒等。
+            if (a > Math.PI / 2) a -= Math.PI;
+            else if (a <= -Math.PI / 2) a += Math.PI;
+            // 拉伸件（ls）按**拉伸后**的实际宽算盒：量宽时是档位字距，绘制时是 ls
+            const twI = widthOf(it.text) + (it.ls ? (it.ls - spec.spacing) * spec.size * Array.from(it.text).length : 0);
+            const thI = spec.size;
+            const hw = (Math.abs(twI * Math.cos(a)) + Math.abs(thI * Math.sin(a))) / 2 + padPx;
+            const hh = (Math.abs(twI * Math.sin(a)) + Math.abs(thI * Math.cos(a))) / 2 + padPx;
+            return { x: s0.sx - hw, y: s0.sy - hh, w: hw * 2, h: hh * 2, a, cx: s0.sx, cy: s0.sy };
+          };
+          /** 碰撞检查（只查不占位；重复/逐字的占位在选定布局后统一做） */
+          const place = (items: LabelItemAt[], union: boolean): boolean => {
+            const bs = items.map(boxOf);
+            if (union && bs.length > 1) {
+              let x0 = Infinity;
+              let y0 = Infinity;
+              let x1 = -Infinity;
+              let y1 = -Infinity;
+              for (const b of bs) {
+                if (b.x < x0) x0 = b.x;
+                if (b.y < y0) y0 = b.y;
+                if (b.x + b.w > x1) x1 = b.x + b.w;
+                if (b.y + b.h > y1) y1 = b.y + b.h;
+              }
+              return !boxes.hits(x0, y0, x1 - x0, y1 - y0);
+            }
+            for (const b of bs) if (boxes.hits(b.x, b.y, b.w, b.h)) return false;
+            return true;
+          };
+          for (const r of d.regions) {
+            const raw = d.labelMode === 'coreLabel' && (r.coreLabel ?? r.centerLabel)
+              ? (r.coreLabel ?? r.centerLabel)!
+              : r.name;
+            if (!raw) continue;
+            const name = labelTextOf(raw, spec); // 拉丁全大写（汉字原样，混排=地图常见样）
+            const dp = pieceOf.get(`${d.layer.id}:${r.id}`);
+            if (!dp) {
+              noPiece++;
+              continue; // 未合成/未显示 → 不画
+            }
+            if (placedIds.has(r.id)) continue; // 帧内已画（跨副本 pass 去重）
+            const geom = labelGeomOf(env, dp);
+            if (!geom) {
+              cold++;
+              continue; // 冷件：补热后再出现（与元素层渐现同语义）
+            }
+            const bb = geom.bbox;
+            if (bb.maxX < vL || bb.minX > vR || bb.maxY < vB || bb.minY > vT) {
+              off++;
+              continue; // 视口外
+            }
+            const tw = widthOf(name);
+            // 选排布（包4）：非狭长=水平直排；狭长=沿轴重复 → 逐字弯曲 → 退回水平
+            const layout = pickLabelLayout(geom, name, tw, spec.size, padPx, cam.scale, widthOf, place, spec.spacing);
+            if (!layout.mode) {
+              hid++;
+              if (layout.blocked) hidCollide++;
+              else hidNoFit++;
+              continue;
+            }
+            // 副本 pass 的保守视口判定会略微多收（视口盒按 offset 区间取并集）：
+            // 屏外的既不画也不占位（否则会凭空挤掉真正可见的标签）
+            // 出屏判定用**盒中心**（而非「完全在外」）：贴边被截一半的名字不画，
+            // 也让后一个副本 pass 有机会画完整那条（配合帧级防重 = 屏内唯一且不截断）
+            const drawn = layout.items
+              .map((it) => ({ it, b: boxOf(it) }))
+              .filter((o) => {
+                const cx2 = o.b.x + o.b.w / 2;
+                const cy2 = o.b.y + o.b.h / 2;
+                return cx2 >= 0 && cx2 <= w && cy2 >= 0 && cy2 <= h;
+              });
+            if (!drawn.length) {
+              off++;
+              continue;
+            }
+            // 选定后统一占位（探索阶段只查不占，避免失败布局留下残余）
+            for (const o of drawn) boxes.add(o.b.x, o.b.y, o.b.w, o.b.h);
+            // 逐字（弯曲）模式：字距已由弧长推进承担 → 临时归零，画完恢复
+            const perChar = layout.mode === 'curve';
+            if (perChar && hasLetterSpacing) ctx.letterSpacing = '0px';
+            for (const o of drawn) {
+              const b = o.b;
+              const ls = o.it.ls ?? 0;
+              if (ls > 0 && hasLetterSpacing) ctx.letterSpacing = `${ls}em`;
+              // 尾距补偿：letterSpacing 在**每个字符后**都加（含尾），居中会左偏半格 → 右移 ls/2·字号
+              const tail = ls > 0 ? (ls * spec.size) / 2 : 0;
+              const drawOne = (tx: number, ty: number, text: string) => {
+                if (spec.halo) {
+                  ctx.lineWidth = haloW;
+                  ctx.strokeStyle = spec.halo;
+                  ctx.strokeText(text, tx, ty);
+                }
+                ctx.fillStyle = spec.color;
+                ctx.fillText(text, tx, ty);
+              };
+              if (Math.abs(b.a) < 1e-3) {
+                drawOne(b.cx + tail, b.cy, o.it.text); // 水平：与旧行为完全一致（tail=0）
+              } else {
+                ctx.save();
+                ctx.translate(b.cx, b.cy);
+                ctx.rotate(b.a);
+                drawOne(tail, 0, o.it.text);
+                ctx.restore();
+              }
+              if (ls > 0 && hasLetterSpacing) ctx.letterSpacing = `${spec.spacing}em`;
+            }
+            if (perChar && hasLetterSpacing) ctx.letterSpacing = `${spec.spacing}em`;
+            placed += drawn.length;
+            placedIds.add(r.id);
+            if (debugInfo.length < 16) {
+              const first = drawn[0];
+              debugInfo.push({
+                id: r.id,
+                name: layout.mode === 'curve' ? name : first.it.text,
+                tier: spec.tier,
+                mode: layout.mode,
+                angle: Math.round((first.b.a * 180) / Math.PI),
+                el: Math.round(geom.elongation * 100) / 100,
+                n: layout.mode === 'curve' ? layout.items.length : 1,
+                ls: Math.round((layout.items[0]?.ls ?? 0) * 1000) / 1000,
+                sx: Math.round(first.b.cx),
+                sy: Math.round(first.b.cy),
+              });
             }
           }
         }
+        ctx.restore();
+      }
+    }
+    {
+      const frameNo = globalThis.__drawCount ?? 0;
+      if (!labelFrameAcc || labelFrameAcc.frame !== frameNo) {
+        globalThis.__labelMs = 0; // 帧起始清零，末尾统一累加本 pass 耗时
+        labelFrameAcc = {
+          frame: frameNo,
+          placed: 0,
+          hid: 0,
+          hidNoFit: 0,
+          hidCollide: 0,
+          noPiece: 0,
+          cold: 0,
+          off: 0,
+          syms: 0,
+          marks: 0,
+          symbols: [],
+          items: [],
+          view: [vL, vR, vB, vT],
+        };
+      }
+      labelFrameAcc.placed += placed;
+      labelFrameAcc.hid += hid;
+      labelFrameAcc.hidNoFit += hidNoFit;
+      labelFrameAcc.hidCollide += hidCollide;
+      labelFrameAcc.noPiece += noPiece;
+      labelFrameAcc.cold += cold;
+      labelFrameAcc.off += off;
+      if (labelFrameAcc.items.length < 16) labelFrameAcc.items.push(...debugInfo);
+      labelFrameAcc.view = [vL, vR, vB, vT];
+      labelFrameAcc.syms = labelFrameAcc.syms + symPlan.length;
+      labelFrameAcc.marks = world.cellMarks?.length ?? 0;
+      // 符号读数（验收：屏幕坐标 + 视觉半径，配 getImageData 做像素级独立验证）
+      if (labelFrameAcc.symbols.length < 16) {
+        for (const sy of symPlan) {
+          if (sy.sx < 0 || sy.sx > w || sy.sy < 0 || sy.sy > h) continue;
+          labelFrameAcc.symbols.push({ sym: sy.sym, sx: Math.round(sy.sx), sy: Math.round(sy.sy), r: Math.round(sy.r * 10) / 10 });
+          if (labelFrameAcc.symbols.length >= 16) break;
+        }
+      }
+      labelFrameAcc.geom = { ...labelGeomStat };
+      globalThis.__labelStat = labelFrameAcc;
+      // 注记段耗时（含逐副本 pass 累加）：验收「注记不抢帧预算」的读数
+      globalThis.__labelMs = (globalThis.__labelMs ?? 0) + (performance.now() - labelT0);
+    }
 
-        if (cellMarker !== 'none') {
-          ctx.save();
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          ctx.font = `${Math.max(8, font.size - 4)}px ${font.family}`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          // baseMesh 层标记所有 cell；普通层标记所属元素的 cell
-          // baseMesh 全量 cell 走惰性迭代（不每帧建 10 万级数组）
-          const cellIds: Iterable<number> = layer.baseMesh
-            ? (function* () {
-                for (const c of world.cells) yield c.id;
-              })()
-            : decorMarkerIdsOf(world, layer.id, regions);
-          for (const id of cellIds) {
+    // —— ③ 核心符号 + 逐 cell 装饰 + cell 标记（世界空间绘制，压在名称之上）——
+    for (const sym of symPlan) {
+      const x = pcache.centers[sym.coreId * 2];
+      const y = pcache.centers[sym.coreId * 2 + 1];
+      // 屏幕视觉半径（随字号 × 主题缩放）→ 世界半径（drawCoreSymbol 画在世界空间）
+      const rPx = coreSymbolRadiusPx(sym.sym, sym.size) * sc;
+      const wx = x + (offAt?.(y) ?? 0);
+      const wr = rPx / cam.scale;
+      drawCoreSymbol(ctx, sym.sym, wx, y, wr, sym.color, style);
+    }
+    for (const d of decors) {
+      if (!decorFloor && d.cellSym === 'tree') {
+        for (const r of d.regions) {
+          for (const id of r.cells) {
             const cell = world.cells[id];
             if (!cell || !inView(id)) continue;
             const x = pcache.centers[id * 2];
             const y = pcache.centers[id * 2 + 1];
-            const label = cellMarker === 'id' ? String(id) : String(Math.round(cell.height));
-            const sp = tScreen.worldToScreen(x + (offAt?.(y) ?? 0), y);
-            if (sp.sx < -20 || sp.sx > w + 20 || sp.sy < -20 || sp.sy > h + 20) continue;
-            ctx.fillStyle = 'rgba(255,255,255,0.7)';
-            ctx.fillText(label, sp.sx, sp.sy);
+            drawTree(ctx, x + (offAt?.(y) ?? 0), y, (0.55 * sc) / cam.scale, ((id * 9973) % 100) / 100);
           }
-          ctx.restore();
         }
       }
+
+      if (!decorFloor && d.cellMarker !== 'none') {
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.font = `${Math.max(8, font.size - 4)}px ${font.family}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // baseMesh 标记所有 cell；普通层标记所属元素的 cell
+        // baseMesh 全量 cell 走惰性迭代（不每帧建 10 万级数组）
+        const cellIds: Iterable<number> = d.layer.baseMesh
+          ? (function* () {
+              for (const c of world.cells) yield c.id;
+            })()
+          : decorMarkerIdsOf(world, d.layer.id, d.regions);
+        for (const id of cellIds) {
+          const cell = world.cells[id];
+          if (!cell || !inView(id)) continue;
+          const x = pcache.centers[id * 2];
+          const y = pcache.centers[id * 2 + 1];
+          const label = d.cellMarker === 'id' ? String(id) : String(Math.round(cell.height));
+          const sp = toScreen(x, y);
+          if (sp.sx < -20 || sp.sx > w + 20 || sp.sy < -20 || sp.sy > h + 20) continue;
+          ctx.fillStyle = 'rgba(255,255,255,0.7)';
+          ctx.fillText(label, sp.sx, sp.sy);
+        }
+        ctx.restore();
+      }
     }
+
 
     ctx.restore();
     endWorld(ctx);

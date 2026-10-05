@@ -50,7 +50,7 @@
 
   function onDocPointer(e: PointerEvent) {
     if (!open) return;
-    const t = e.target as Node | null;
+    const t = e.target as Element | null;
     if (t && (t.closest?.('.pop') || t.closest?.('.gear'))) return;
     onClose();
   }

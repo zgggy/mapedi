@@ -35,4 +35,30 @@ declare global {
   var __reconcileN: number | undefined;
   /** 金钮看门狗观测（模式胶囊卡死自归位，2026-10-04 手感批二） */
   var __knobV: { n: number; snap: number; last: string; eff?: number } | undefined;
+  /** 注记段单帧耗时（ms，含逐副本 pass；帧令牌见 __labelStat.frame） */
+  var __labelMs: number | undefined;
+  /** 注记放置观测（包1 面内放置：最新一帧 placed=画出的名称数 / hid=放不下或被遮挡省略数） */
+  var __labelStat:
+    | {
+        /** 帧令牌（= __drawCount，装饰层逐副本重入的合并键） */
+        frame: number;
+        placed: number;
+        hid: number;
+        noPiece: number;
+        cold: number;
+        off: number;
+        /** 已放置项（name + 屏幕坐标）：验收/回归读数 */
+        items?: { id: string; name: string; tier: string; mode: string; angle: number; el: number; n: number; ls: number; sx: number; sy: number }[];
+        /** 视口盒 [vL,vR,vB,vT]（世界 y 向上） */
+        view?: number[];
+        /** 本帧核心符号数（各副本 pass 累加，R14 验收读数） */
+        syms?: number;
+        /** 自定义地块标记数（包5 验收读数） */
+        marks?: number;
+        /** 符号读数：形状 + 屏幕坐标 + 视觉半径（像素级验收用，封顶16） */
+        symbols?: { sym: string; sx: number; sy: number; r: number }[];
+        /** 放置几何构建归因：gate=冷件闸 / empty=环解析不出 / built=建成 */
+        geom?: { gate: number; empty: number; built: number };
+      }
+    | undefined;
 }

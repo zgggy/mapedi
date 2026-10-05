@@ -9,6 +9,40 @@
   import type { World } from '../../core/types';
   import PanelShell from './PanelShell.svelte';
   import StateCapsule from './StateCapsule.svelte';
+  import type { CellMarker, CoreSymbol, LabelMode, LabelTier } from '../../core/types';
+
+  /** 摘要行的符号短名（与 coreSymbol 五种一一对应） */
+  const SYM_LABEL: Record<string, string> = {
+    none: '无', star: '★', hollowStar: '☆', ring: '⊙', square: '■', circle: '●', diamond: '◆',
+  };
+  /** 分段按钮选项 [value, 文案, title]（原 <select> 改按钮组：分段控件是本项目风格，
+   *  且 click 事件链在验收环境可靠——合成 change 事件不触发 Svelte handler，2026-10-04 实测） */
+  const NAME_MODES: [string, string, string][] = [
+    ['none', '不显示', '本层元素不画名称'],
+    ['name', '元素名', '显示元素名（name）'],
+    ['coreLabel', '核心', '显示核心标签（如「首都」「文化中心」）'],
+  ];
+  const TIER_OPTS: [string, string, string][] = [
+    ['', '自动', '按层深度自动推导（父层=国家级）'],
+    ['primary', '国家级', '15px · 600 · 衬线 · 疏排大写'],
+    ['secondary', '行省级', '13px · 500 · 无衬线'],
+    ['tertiary', '语义', '12px · 常规'],
+    ['minor', '次级', '10px · 最轻'],
+  ];
+  const SYM_OPTS: [string, string, string][] = [
+    ['none', '无', '不画核心符号'],
+    ['star', '★', '实心星 = 国家首都'],
+    ['hollowStar', '☆', '空心星 = 省会/其他首府'],
+    ['ring', '⊙', '同心圆 = 中心/圣城'],
+    ['square', '■', '方块'],
+    ['circle', '●', '圆'],
+    ['diamond', '◆', '菱形（与自定义地块标记同款）'],
+  ];
+  const MARK_OPTS: [string, string, string][] = [
+    ['none', '无', '不画格级标记'],
+    ['id', 'ID', '每个格画地块 ID（调试）'],
+    ['height', '高度', '每个格画高度值（调试）'],
+  ];
   import CapsuleSlider from './CapsuleSlider.svelte';
 
   let {
@@ -18,6 +52,7 @@
     world = null,
     cfg,
     onChange,
+    onDecor,
     onCollapse,
     x = 250,
     y = 56,
@@ -30,6 +65,8 @@
     world?: World | null;
     cfg?: ElementStyle;
     onChange?: (patch: ElementStylePatch) => void;
+    /** 注记配置写回（包5：labelMode/档位/字号/门槛/符号 → editor.setLayerDecor，一条命令可撤销） */
+    onDecor?: (patch: import('../../core/types').LayerDecorPatch) => void;
     onCollapse?: () => void;
     /** 卡片锚点（右键菜单处打开，越界由调用方 clamp） */
     x?: number;
@@ -40,6 +77,8 @@
 
   const isFreeform = $derived(isFreeLayerId(world, layerId));
   const c = $derived(patchElementStyle(cfg ?? defaultElementStyle(), {}));
+  // 图层当前注记配置（world 每次 touch 换引用 → derived 必重算；写入方 setLayerDecor 也换引用）
+  const decor = $derived(world?.layers.find((l) => l.id === layerId) ?? null);
   /** 嵌入检查区默认折叠（2026-10-02 D1 拍板：低频参数收摘要行） */
   let styleOpen = $state(false);
 
@@ -72,7 +111,8 @@
         <span
           >边界 {fmt(c.border.width)} · 平滑 {fmt(c.border.smooth, 2)} · 填充{c.fill.enabled
             ? '开'
-            : '关'}</span
+            : '关'} · 名称{decor?.labelMode && decor.labelMode !== 'none' ? '开' : '关'} · 符号
+          {SYM_LABEL[decor?.coreSymbol ?? 'none']}</span
         >
         <span class="caret">{styleOpen ? '▾' : '▸'}</span>
       </button>
@@ -120,6 +160,66 @@
           </label>
         {/if}
       </div>
+
+      <div class="grp">
+        <div class="grp-hd"><span>注记</span><span class="dim">名称 · 档位 · 符号</span></div>
+        <label class="r">
+          <span>名称</span>
+          <span class="seg-group">
+            {#each NAME_MODES as [v, t, tip]}
+              <button type="button" class:on={(decor?.labelMode ?? 'none') === v} title={tip}
+                onclick={() => onDecor?.({ labelMode: v as LabelMode })}>{t}</button>
+            {/each}
+          </span>
+        </label>
+        <label class="r">
+          <span>档位</span>
+          <span class="seg-group">
+            {#each TIER_OPTS as [v, t, tip]}
+              <button type="button" class:on={(decor?.labelTier ?? '') === v} title={tip}
+                onclick={() => onDecor?.({ labelTier: (v || undefined) as LabelTier | undefined })}>{t}</button>
+            {/each}
+          </span>
+        </label>
+        <label class="r">
+          字号
+          <input type="number" min="8" max="40" placeholder="档位默认"
+            value={decor?.labelSize ?? ''}
+            onchange={(e) => onDecor?.({ labelSize: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value) })} />
+          <span class="v">px</span>
+        </label>
+        <label class="r">
+          门槛
+          <input type="number" min="10" max="600" placeholder="档位默认"
+            value={decor?.labelMinScale ?? ''}
+            onchange={(e) => onDecor?.({ labelMinScale: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value) })} />
+          <span class="v">scale</span>
+        </label>
+        <label class="r">
+          <span>符号</span>
+          <span class="seg-group">
+            {#each SYM_OPTS as [v, t, tip]}
+              <button type="button" class:on={(decor?.coreSymbol ?? 'none') === v} title={tip}
+                onclick={() => onDecor?.({ coreSymbol: v as CoreSymbol })}>{t}</button>
+            {/each}
+          </span>
+        </label>
+        <label class="r">
+          树点
+          <StateCapsule icon="🌳" onText="开" offText="关"
+            on={(decor?.cellSymbol ?? 'none') === 'tree'}
+            onchange={(v) => onDecor?.({ cellSymbol: v ? 'tree' : 'none' })} />
+        </label>
+        <label class="r">
+          <span>格标</span>
+          <span class="seg-group">
+            {#each MARK_OPTS as [v, t, tip]}
+              <button type="button" class:on={(decor?.cellMarker ?? 'none') === v} title={tip}
+                onclick={() => onDecor?.({ cellMarker: v as CellMarker })}>{t}</button>
+            {/each}
+          </span>
+        </label>
+      </div>
       {/if}
     </div>
     {/if}
@@ -136,20 +236,6 @@
   .row {
     display: flex;
     gap: var(--sp-3);
-  }
-  .seg {
-    flex: 1;
-    padding: 4px 8px;
-    border: 1px solid var(--border, #3a4354);
-    border-radius: var(--r-1);
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    font-size: var(--fs-md);
-  }
-  .seg.on {
-    background: var(--accent, #4a7ab0);
-    border-color: var(--accent, #4a7ab0);
   }
   .body {
     padding: 8px 12px 12px;
@@ -206,6 +292,18 @@
     border-radius: 4px;
     cursor: pointer;
   }
+  .r input[type='number'] {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border, #3a4354);
+    border-radius: var(--r-1);
+    padding: 2px 6px;
+    font-size: var(--fs-sm);
+    font-family: inherit;
+  }
+  /* 分段按钮组（注记四项）：可换行避免窄面板挤压 */
   .r .v {
     min-width: 2.5em;
     font-variant-numeric: tabular-nums;

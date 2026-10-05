@@ -1,4 +1,5 @@
 import type { World } from '../types';
+import { coreCellOf } from '../regionCenter';
 import { createRng, hashSeed } from '../rng';
 import { gcDistanceDeg } from '../sphere';
 import { pickCell } from '../world';
@@ -94,9 +95,10 @@ export function generateRoads(
 ): void {
   // 群系代价（森林/沙漠/山地系数）按**当前地形**取——缓存不落盘+rev 失效（还债步骤 4）
   ensureBiome(world);
+  // 首都格 = 核心格单源（coreCellOf：支持「核心=子元素」形态，选项1）
   const capitals = world.regions
-    .filter((r) => r.layerId === 'country' && r.centerCellId !== undefined)
-    .map((r) => ({ id: r.id, cell: r.centerCellId!, name: r.name, color: r.color }));
+    .filter((r) => r.layerId === 'country' && coreCellOf(world, r) !== undefined)
+    .map((r) => ({ id: r.id, cell: coreCellOf(world, r)!, name: r.name, color: r.color }));
   // 校验先于清空（步骤7 已知问题修复）：无法重建时保留既有路网，杜绝「路网归零不可复」
   if (capitals.length < 2) return;
   world.regions = world.regions.filter((r) => r.layerId !== 'road');

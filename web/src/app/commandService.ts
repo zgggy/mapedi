@@ -5,7 +5,7 @@
  * 方法体自 store **原样搬运**（this.* 走下方代理），$state 写仍留 store 闭包。
  * 选中/聚焦等 UI 态选择留在 store（selectLayerTop 等，App 直连）。
  */
-import type { Region, World } from '../core/types';
+import type { CellId, CellMark, LayerDecorPatch, Region, World } from '../core/types';
 import { defaultPathColor } from '../core/paths';
 import { ensureBuiltinLayers } from '../core/world';
 import { emptyDrawSession, type DrawSession } from '../core/draw/brush';
@@ -36,6 +36,7 @@ import {
   DeleteLayerCommand,
   DeleteRegionCommand,
   HeightCellsCommand,
+  CellMarksCommand,
   LayerFieldsCommand,
   LayerStyleCommand,
   LayersOrderCommand,
@@ -486,6 +487,74 @@ export class CommandService {
     this.status = `已挂靠到「${best.name || best.id}」（Ctrl+Z 可撤销）`;
   }
 
+  /**
+   * 设核心格（首府/省会/中心，LABEL_DESIGN R16）：一条 RegionFieldsCommand 入栈可撤销（两形态互斥，顺带清 coreRegionId）。
+   * **失效域 = regions**：centerCellId 只影响符号渲染、不动几何——原先 setCenterAt 走
+   * touchWorld（bumpAllRev → geomRev++ → 全部件环换键重建）是闪屏根因，接 UI 时一并纠正。
+   */
+  setCoreCell(regionId: string, cellId: CellId): void {
+    const w = this.world;
+    if (!w) return;
+    const r = w.regions.find((x) => x.id === regionId);
+    if (!r) return;
+    if (!r.cells.includes(cellId)) {
+      this.status = '该格不在元素地块内，未设置核心';
+      return;
+    }
+    if (r.centerCellId === cellId && !r.coreRegionId) {
+      this.status = '核心格未变化';
+      return;
+    }
+    const before = { centerCellId: r.centerCellId, coreRegionId: r.coreRegionId };
+    // 两形态互斥（选项1）：设地块核心 → 清子元素核心。alreadyApplied 必须**手动写世界**
+    r.centerCellId = cellId;
+    r.coreRegionId = undefined;
+    history.run(
+      w,
+      new RegionFieldsCommand(
+        [{ id: regionId, before, after: { centerCellId: cellId, coreRegionId: undefined } }],
+        '设核心格',
+      ),
+      { alreadyApplied: true },
+    );
+    this.touchRegions();
+    this.status = `已设核心格 → #${cellId}（Ctrl+Z 撤销）`;
+  }
+
+  /**
+   * 核心第二形态（选项1 · 2026-10-04 用户拍板）：核心 = 某个**子元素**。
+   * 闸：必须是本元素的子元素（parentId=regionId，且跨层桥不变量由层树保证）。
+   * 两形态互斥：设子元素核心 → 清 centerCellId。地图上点格 → store 找到该格所属子元素后调这里。
+   */
+  setCoreRegion(regionId: string, coreRegionId: string): void {
+    const w = this.world;
+    if (!w) return;
+    const r = w.regions.find((x) => x.id === regionId);
+    const child = w.regions.find((x) => x.id === coreRegionId);
+    if (!r || !child) return;
+    if (child.parentId !== r.id) {
+      this.status = '核心子元素必须是本元素的直接子元素，未设置';
+      return;
+    }
+    if (r.coreRegionId === coreRegionId) {
+      this.status = '核心子元素未变化';
+      return;
+    }
+    const before = { centerCellId: r.centerCellId, coreRegionId: r.coreRegionId };
+    r.centerCellId = undefined; // alreadyApplied：必须手动写世界
+    r.coreRegionId = coreRegionId;
+    history.run(
+      w,
+      new RegionFieldsCommand(
+        [{ id: regionId, before, after: { centerCellId: undefined, coreRegionId } }],
+        '设核心子元素',
+      ),
+      { alreadyApplied: true },
+    );
+    this.touchRegions();
+    this.status = `核心设为子元素「${child.name}」（Ctrl+Z 撤销）`;
+  }
+
   doAnnex(targetId: string) {
     if (!this.world || !this.selectedRegionId || this.selectedRegionId === targetId) return;
     const a = this.world.regions.find((r) => r.id === this.selectedRegionId);
@@ -534,6 +603,57 @@ export class CommandService {
   /** 图层显示样式（DisplayStyle 面板） */
   layerStyleConfig(id: string): ElementStyle {
     return resolveLayerStyle(this.world, id);
+  }
+
+  /**
+   * 地块标记循环（包5 · 特殊地块）：单击格子 = 无 → ★ → ● → ◆ → 无。
+   * 整表 before/after 快照一条入栈（CellMarksCommand，alreadyApplied → 手动写世界）；
+   * 失效域 touchLayerView（标记只影响装饰渲染）。
+   */
+  cycleCellMark(cellId: CellId): void {
+    const w = this.world;
+    if (!w) return;
+    const before = (w.cellMarks ?? []).map((m) => ({ ...m }));
+    const cur = before.find((m) => m.cellId === cellId);
+    const order: ('star' | 'circle' | 'diamond')[] = ['star', 'circle', 'diamond'];
+    let after: CellMark[];
+    if (!cur) after = [{ cellId, symbol: 'star' }];
+    else {
+      const i = order.indexOf(cur.symbol);
+      const next = i + 1;
+      after = next < order.length ? before.map((m) => (m.cellId === cellId ? { ...m, symbol: order[next] } : m)) : before.filter((m) => m.cellId !== cellId);
+    }
+    w.cellMarks = after.length ? after : undefined; // alreadyApplied：手动写世界
+    history.run(w, new CellMarksCommand(before, after), { alreadyApplied: true });
+    this.touchLayerView();
+    const label = (m?: CellMark) => (!m ? '无' : m.symbol === 'star' ? '★' : m.symbol === 'circle' ? '●' : '◆');
+    const still = after.find((m) => m.cellId === cellId);
+    this.status = still
+      ? `标记 #${cellId} → ${label(still)}（再点同格切换，Ctrl+Z 撤销）`
+      : `已清除 #${cellId} 的标记（Ctrl+Z 撤销）`;
+  }
+
+  /**
+   * 图层注记配置（包5 配置面）：labelMode/档位/字号/门槛/符号 一次性 patch。
+   * 一条 LayerFieldsCommand 入栈可撤销（alreadyApplied → **先手动写世界**）；
+   * 失效域 = `touchLayerView`（只影响装饰渲染：bumpRegionsRev + 换身份 + notify，
+   * 不碰几何/件环——注记配置不改任何 cell 集）。
+   */
+  setLayerDecor(id: string, patch: LayerDecorPatch): void {
+    const w = this.world;
+    if (!w) return;
+    const l = w.layers.find((x) => x.id === id);
+    if (!l) return;
+    const before: LayerDecorPatch = {};
+    for (const k of Object.keys(patch) as (keyof LayerDecorPatch)[]) {
+      (before as Record<string, unknown>)[k] = (l as unknown as Record<string, unknown>)[k];
+    }
+    Object.assign(l, patch); // alreadyApplied：手动写世界
+    history.run(w, new LayerFieldsCommand([{ id, before, after: patch }], '注记设置'), {
+      alreadyApplied: true,
+    });
+    this.touchLayerView();
+    this.status = '已更新注记设置（Ctrl+Z 撤销）';
   }
 
   setLayerStyle(id: string, patch: ElementStylePatch) {

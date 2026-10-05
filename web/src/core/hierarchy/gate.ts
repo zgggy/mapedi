@@ -126,6 +126,17 @@ export function repairHierarchy(world: World): RepairReport {
 
   // ③ 元素父悬空/环 → 清为未分配
   const regionIds = new Set(world.regions.map((r) => r.id));
+  // ③' 核心第二形态（选项1）：coreRegionId 必须指向**本元素的子元素**，否则清除
+  //    （跨层/悬空/指向孙辈 → 回退 centerCellId 形态；不动 cells/邻接）
+  for (const r of world.regions) {
+    if (!r.coreRegionId) continue;
+    const c = world.regions.find((x) => x.id === r.coreRegionId);
+    if (!c || c.parentId !== r.id) {
+      notes.push(`元素「${r.name || r.id}」核心子元素无效 → 清除（回退地块核心）`);
+      r.coreRegionId = undefined;
+      fixed++;
+    }
+  }
   for (const r of world.regions) {
     if (!r.parentId) continue;
     if (!regionIds.has(r.parentId)) {

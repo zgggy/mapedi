@@ -13,7 +13,13 @@ export type GenPattern =
   | 'scattered'
   | 'longStrip'
   | 'cluster';
-export type CoreSelector = 'centermost' | 'nearBoundary' | 'highElevation' | 'lowElevation' | 'random';
+export type CoreSelector =
+  | 'visualCenter'
+  | 'centermost'
+  | 'nearBoundary'
+  | 'highElevation'
+  | 'lowElevation'
+  | 'random';
 
 /**
  * 世界形状（height 层生成参数，单源）——**由 Perlin-FBM 算法一一导出**（见 core/terrain.ts）：
