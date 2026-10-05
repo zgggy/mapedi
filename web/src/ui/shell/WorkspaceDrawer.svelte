@@ -131,11 +131,51 @@ import { isRowOrControlClick } from './shell';
     return out;
   });
 
-  /** 单列网格的全部格：行（ItemButton）+ 选中行后的模式展开区（panel）。
+  /** 同父分组（2026-10-06 用户定）：焦点层为子图层 → 同父元素聚拢 + 组头（父名小字居左）
+   *  + 组间横分割线；顶层图层（无 parentLayerId）平铺不变。 */
+  const groupedByParent = $derived(
+    !!focusLayer && !!world?.layers.find((l) => l.id === focusLayer)?.parentLayerId,
+  );
+
+  /** 单列网格的全部格：行（ItemButton）+ 选中行后的模式展开区（panel）+ 分组头/分隔线。
    *  子级建子行（CreateBox）随子元素功能一起删除（2026-10-01）。 */
   const cells = $derived.by(() => {
-    const acc: { kind: 'row'; node: Node }[] = [];
-    for (const v of visibleFlat) acc.push({ kind: 'row', node: v.node });
+    const acc: { kind: 'row' | 'head' | 'sep'; node: Node }[] = [];
+    if (!groupedByParent) {
+      for (const v of visibleFlat) acc.push({ kind: 'row', node: v.node });
+      return acc;
+    }
+    // 稳定分区：无父组置顶，其后按父元素首见序（= 原叠放反序里的首次出现序）；
+    // 组内保持原序（排序不改元素相对次序，只聚拢）
+    const order: string[] = [];
+    const buckets = new Map<string, { node: Node }[]>();
+    for (const v of visibleFlat) {
+      const pid = v.node.region.parentId ?? '';
+      let b = buckets.get(pid);
+      if (!b) {
+        b = [];
+        buckets.set(pid, b);
+        order.push(pid);
+      }
+      b.push(v);
+    }
+    order.sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0)); // 无父组置顶（合法弱序）
+    const regionById = new Map(world!.regions.map((r) => [r.id, r]));
+    let firstGroup = true;
+    for (const pid of order) {
+      const rows = buckets.get(pid)!;
+      if (!rows.length) continue;
+      if (!firstGroup) acc.push({ kind: 'sep', node: rows[0].node });
+      firstGroup = false;
+      if (pid) {
+        const pr = regionById.get(pid);
+        acc.push({
+          kind: 'head',
+          node: { region: pr ?? rows[0].node.region, depth: 0, parentId: null, expandable: false },
+        });
+      }
+      for (const r of rows) acc.push({ kind: 'row', node: r.node });
+    }
     return acc;
   });
 
@@ -337,9 +377,16 @@ import { isRowOrControlClick } from './shell';
         />
       {/snippet}
 
-      {#snippet cellNode(c: { kind: 'row' | 'create'; node: Node }, i: number)}
+      {#snippet cellNode(c: { kind: 'row' | 'create' | 'head' | 'sep'; node: Node }, i: number)}
         {@const n = c.node}
         {@const id = n.region.id}
+        {#if c.kind === 'sep'}
+          <!-- 组间横分割线（不同父元素之间，2026-10-06） -->
+          <li class="cell gsep" aria-hidden="true"></li>
+        {:else if c.kind === 'head'}
+          <!-- 组头：同父元素列表上方、居左小字 = 父元素名 -->
+          <li class="cell ghead" data-kind="group-head">{n.region.name}</li>
+        {:else}
         <li
           class="cell"
           class:create={c.kind === 'create'}
@@ -473,6 +520,7 @@ import { isRowOrControlClick } from './shell';
             )}
           {/if}
         </li>
+        {/if}
       {/snippet}
 
       {#if isFreeLayer}
@@ -654,6 +702,31 @@ import { isRowOrControlClick } from './shell';
     height: var(--ibtn-h, 40px);
     display: flex;
     align-items: center;
+  }
+  /* 分组头（2026-10-06）：父元素名，居左小字 */
+  .cell.ghead {
+    height: 24px;
+    display: flex;
+    align-items: flex-end;
+    padding: 0 2px 2px;
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  /* 组间横分割线 */
+  .cell.gsep {
+    height: 9px;
+    position: relative;
+  }
+  .cell.gsep::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 4px;
+    border-top: 1px solid var(--border, #3a4354);
+    opacity: 0.7;
   }
   .dim.pad {
     padding: 12px;
