@@ -14,6 +14,7 @@
   import { isFreeLayerId } from '../../core/displayCompose';
   import { childLayerIdOf } from '../../core/hierarchy/derive';
   import ItemButton from './ItemButton.svelte';
+  import StateCapsule from './StateCapsule.svelte';
   import CapsuleSlider from './CapsuleSlider.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
   import CreateRow from './CreateRow.svelte';
@@ -394,17 +395,19 @@ import { isRowOrControlClick } from './shell';
                     />
                     <span class="dim">{brushRadius.toFixed(1)}°</span>
                   </label>
-                  <label
+                  <span
                     class="field inline"
                     title="开 = 抢占（replace：连同其他元素占着的格一起夺）；关 = 只填空白（emptyOnly，现状）。2026-10-04 用户拍板 6.2"
                   >
                     <span>抢占</span>
-                    <input
-                      type="checkbox"
-                      checked={!editor.draw.addMode}
-                      onchange={(e) => (editor.draw = { ...editor.draw, addMode: !e.currentTarget.checked })}
+                    <StateCapsule
+                      icon="⚔️"
+                      onText="抢占"
+                      offText="填空"
+                      on={!editor.draw.addMode}
+                      onchange={(v) => (editor.draw = { ...editor.draw, addMode: !v })}
                     />
-                  </label>
+                  </span>
                   <!-- 核心选取（2026-10-04 用户：在**绘制模式**下选核心，联排胶囊按钮） -->
                   <div class="field inline">
                     <span>核心</span>
