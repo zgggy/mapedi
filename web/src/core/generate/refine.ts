@@ -12,8 +12,9 @@
  * 4. 多源 BFS（起点集）→ 每格 (最近峰, 测地距 g)，陆内 h = peakH·falloff(g/span)
  *    （单峰递减 ⇒ max 合成 = 最近峰主导，分水岭脊线自然出现）；
  * 5. 海内 h = −63·pow(dSea/max, gamma)（贴岸 0 → 最深 −63，离岸越深）；
- * 6. 微扰：球面 fbm/ridged（seed 相位 = 用户种子，**可复现非随机**；幅度贴岸
- *    smoothstep 归零保护轮廓）+ flatness 幂弯（量程分布形状）；
+ * 6. 结构噪声（中尺度 fbm，打破距离场同心环/锥）+ 微扰（球面 fbm/ridged，seed
+ *    相位可复现非随机；贴岸 smoothstep 归零保护轮廓）+ flatness 幂弯；
+ * 7. 两级侵蚀（热+粒子水力）按旋钮**增量**生效（默认 2 = 关）。
  * 7. 量程收口：陆 [1,64] 海 [−63,0]、isOcean 同步。
  *
  * 不变量：mask 逐格不变；同 seed 同 shape 同输出；无陆世界 return 0。
@@ -173,7 +174,7 @@ export function refineHeight(world: World, opts: RefineOpts): number {
   const seaDist = multiBfs(world, (i) => !isLand(i), shoreSea).dist;
 
   // ② 起点搜索（确定性）：逐连通陆块 argmax dLand；面积 > K_AREA 再 farthest-point 补峰
-  const K_AREA = 600;
+  const K_AREA = 5000;
   const seen = new Uint8Array(n);
   const peaks: number[] = [];
   for (const c of cells) {
@@ -192,7 +193,9 @@ export function refineHeight(world: World, opts: RefineOpts): number {
     let p0 = comp[0];
     for (const i of comp) if (dLand[i] > dLand[p0] || (dLand[i] === dLand[p0] && i < p0)) p0 = i;
     const chosen = [p0];
-    const K = Math.max(1, Math.round(area / K_AREA));
+    // 峰密度 = 每 ~5000 格一峰、上限 6（拍脑袋 600 曾给 2.4 万格大陆生成 41 座
+    // 尖塔 = 观感灾难，2026-10-06「完全错误」修复之一）
+    const K = Math.min(6, Math.max(1, Math.round(area / K_AREA)));
     while (chosen.length < K) {
       // farthest-point：离已选峰测地距离（以 comp 内 dLand 近似“同侧”度量，用多源
       // BFS 的粗略版——直接用与已选峰的 hop 距离由 dLand 不可得，改用坐标欧氏距离
@@ -266,14 +269,20 @@ export function refineHeight(world: World, opts: RefineOpts): number {
     const w = isP ? 0 : smoothstep(1, 4, dLand[i]);
     const n1 = fbm(p0.x * 11, p0.y * 11, p0.z * 11, opts.seed + 501, 4);
     const r1 = ridged(p0.x * 3.4, p0.y * 3.4, p0.z * 3.4, opts.seed + 301, 5) - 0.5;
-    const v = base[i] + w * (d0 * 0.07 * n1 + mu * 0.12 * r1);
+    // 结构噪声（中尺度）：距离场本质是同心洋葱圈/锥，高频微噪救不了（v3「太差」
+    // 的结构性根源）→ 幅度 0.22·detail 的中尺度分量打破同心性（结构层非毛刺层）；
+    // 与海侧同种子同分量 → 海岸两侧地形连续
+    const s1 = fbm(p0.x * 2.8, p0.y * 2.8, p0.z * 2.8, opts.seed + 701, 4);
+    const v = base[i] + w * (0.22 * d0 * s1 + d0 * 0.07 * n1 + mu * 0.12 * r1);
     // 非起点格上界收 1%：防压平后邻格 round 仍到 64 并列（顶峰唯一归起点）
     base[i] = Math.max(0, Math.min(v, isP ? cap : cap * 0.99));
   }
 
   // ④ 两级侵蚀（2026-10-06 用户拍板 a）：热侵蚀粗削 + 粒子水力细刻——
   //    河谷/山脊/冲积的「自然感」来源；erosion 旋钮 = 强度（0=关）
-  const eIters = Math.max(0, Math.min(6, Math.round(opts.shape.erosion)));
+  // 侵蚀默认关（「完全错误」修复之三）：细化路径 = 旋钮**增量**——常规生成默认 2
+  // → 此处 0 不侵蚀（没调旋钮 = 干净的匹配扩散形态）；调到 4/6 → 2/4 逐级增强
+  const eIters = Math.max(0, Math.min(4, Math.round(opts.shape.erosion) - 2));
   thermalPass(world, base, land, peakSet, eIters);
   const drops = eIters > 0 ? Math.round(6000 * eIters) : 0;
   if (drops > 0) {
@@ -306,9 +315,11 @@ export function refineHeight(world: World, opts: RefineOpts): number {
       const p0 = unitOf(c.center.lon, c.center.lat);
       const w = smoothstep(1, 4, seaDist[i] >= 0 ? seaDist[i] : 0);
       const n1 = fbm(p0.x * 7, p0.y * 7, p0.z * 7, opts.seed + 611, 3);
-      // base∈[-1,0]：按侵蚀后实际最深线性铺满 → 端点 -63 必达；seaRugged=海内微扰幅度
+      const s1 = fbm(p0.x * 2.8, p0.y * 2.8, p0.z * 2.8, opts.seed + 701, 4);
+      // base∈[-1,0]：按侵蚀后实际最深线性铺满 → 端点 -63 必达；
+      // 结构噪声（与陆侧同分量同种子）打破同心环观感；seaRugged=海侧结构/微扰幅度
       const norm = seaMin < 0 ? Math.pow(base[i] / seaMin, gammaS) : 0;
-      const dv = -63 * norm + w * seaR * 4 * n1;
+      const dv = -63 * norm + seaR * 16 * s1 * smoothstep(1, 4, seaDist[i] >= 0 ? seaDist[i] : 0) + w * seaR * 4 * n1;
       v = Math.max(-63, Math.min(0, Math.round(dv)));
     }
     if (c.height !== v) { c.height = v; changed++; }
