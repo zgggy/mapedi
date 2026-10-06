@@ -207,6 +207,24 @@ removeCellsFromRegion`（brush.ts，仅测试引用）。
 - **验收**：用户例端到端（建层→运行→两元素占据正确→渲染/撤销/存档）+ 死配置 grep 归零 + 既有生成回归
   （同 seed 逐位）。**待拍板：规则参数集边界。**
 
+**包 D 包内分析（2026-10-06 执行前，三套词汇与派生能力逐一核完）**
+
+- **三套词汇死活判定（file:line 已核）**：
+  | 词汇 | 位置 | 死活 |
+  |---|---|---|
+  | 活 A `defaultGenConfig(layerId, seed)` | `core/layer.ts:28-90`（**生成唯一真相**）；`genConfigFromParams` :93-119 逐键覆盖 profile params + worldShape 十旋钮 | 活 |
+  | 活 B `genStrategy`（scatter/heightmap/elements） | 类型 `types.ts:106`；读 `layer/flags.ts:19-23 genStrategyOf`（缺省 'elements'）；内置声明 world.ts + 旧档回填 :265-268；消费 App.svelte:55 / GenerateSection / unified.ts:376 | 活 |
+  | 半死 C `LayerConfig` | `core/layer/config.ts:38-52` | 分字段：`placement` 活（drawController:266→membershipDraw:61）· `style` 活（defaultStyleForLayer:203、resolveLayerStyle）· **`splitPolicy` 事实全死**（唯一实现 applySplitPolicy 只认 'newElement'（membershipDraw:134），而全表无层声明 'newElement'（cells='reject'、其余 'keepEnclave'）→ 行为恒=保留；tests 零引用）· **`gen`（含 diffusion）零读取者** · **`elementSource` 零消费者** · **`workspace.listElements` 零消费者** |
+  - **漂移两处（已核）**：country `coreSelector` config:140 `'centermost'` ≠ layer.ts:44 `'visualCenter'`（死表 vs 活表）；culture `placement='any'`（config:175）vs 生成 `scope='landOnly'`（layer.ts:76）——**placement 与 GenScope 是同一语义（能否落在此 cell）的两套表达式**，分叉即漂移（统一归包 E，本包只登记）。
+- **派生能力现状**：`generateFromLayer`（unified.ts:248+）= **按源层元素归并**（国家←行省，拓扑聚合）；**无**值域/属性谓词派生——用户例「高度>0 = 陆/海两元素」不存在。
+- **结论与不变量**：单一规则声明 = 活 A（参数）+ 活 B（产出策略），C 收编为**能力参数表**（只留 placement/style）；规则 = **内置 preset + 参数集**（不做表达式解析——北极星原文 §8「不写代码、不解析谓词」；"更复杂判定"经 preset 家族+参数表达，判据=新增规则只加 preset、不动存储/渲染）。**派生层 v1**：`LayerDef.layerSource: 'derived'` + `DerivationSpec{preset, params}`；运行=显式「生成/重建」→ 产出**普通 Region**（占据经 `occupy.writeCells` cause='generate'）；**不做自动跟随重算**（高度改动后自动重跑=全局重算，红线否决；将来可做"依赖标记+手动重建"）。首个 preset=用户例 `heightThreshold`（界 t：h>t→元素A 否则元素B）；同族预留 `heightBands`（界列表→n 元素，与高度档同构但**存储平凡**——正是 B 样板的复用点）。
+- **选项（拍板）**：
+  1. 规则边界：**A（推荐）preset+参数** ／ B 通用谓词 DSL（✗ 违背 §8，且引入用户表达式求值/校验/撤销面）／ C 只做 fromLayer 聚合（✗ 用户例落不了地）。
+  2. `splitPolicy` 处置：**①（推荐）删词汇**（keepEnclave/reject 无实现、newElement 无人声明、零测试——"删就真删"，将来要拆块按产品需求重建）／ ② 保留 newElement 并在检查区暴露为层开关（兑现能力但需新增 UI+验证）／ ③ 维持现状（✗ 死词汇续存）。
+  3. 死字段删除范围：`LayerConfig.gen`（连 diffusion 声明）、`elementSource`、`workspace` 删；country coreSelector 漂移随 gen 删除自然消失。
+- **实施草图（拍板后）**：①词汇收编（config.ts 瘦身；drawController/membershipDraw 同步）②`layerSource:'derived'` 类型 + 建层入口（生成面板第四分支：散点/高度图/元素/派生）③`core/generate/derive.ts` 规则运行器（preset 表 + 参数归一 + 产出 Region + 经 occupy 写入 + 重跑幂等）④用户例端到端（建层→运行→陆/海占据正确→渲染/撤销/存档）⑤验收：既有生成同 seed 逐位不变 + 派生层重跑幂等 + 存档回环。
+- **反例清单**：h=0 界点归属（>0 陆、否则海——写死并测）；全陆世界（海元素空 → 结构性保留）；岛屿世界；界设极值（-63/64）；重跑幂等（同结果不产生新命令噪音）；撤销后重跑；旧档（无 layerSource）载入；多派生层彼此独立。
+
 ### 包 E · 约束概念化 + 多归属立项
 - **现状事实**：字段清单与位置（world.ts builtinLayers / config.ts placement+splitPolicy / gate.ts:12-68
   链约束 / validate.ts:30-147 检查）；"父子"硬编码为 parentLayerId 单值（Max=1 不可配）；多归属不支持。
