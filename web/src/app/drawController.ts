@@ -269,9 +269,8 @@ export class DrawController {
       elementId: target.region.id,
       overwrite: (this.ctx.draw.addMode ? 'emptyOnly' : 'replace') as OverwriteMode,
       placement: lcfg.placement,
-      splitPolicy: lcfg.splitPolicy,
     };
-    // placement 闸 + overwrite + splitPolicy
+    // placement 闸 + overwrite（splitPolicy 词汇已于包 D 删除）
     // **不因笔画改选中**（C1 不变量：会话目标 ≡ 选中元素）：父会话里被画的是**子**元素，
     // 曾把 selectedRegionId 改成子 → 推导 effect 判「换目标」→ endDraw+startDraw 会话重启
     // （闪屏 + 笔刷半径回默认）。副作用采集在 commit 走快照-diff（含 replace/split/steal）。
@@ -381,7 +380,7 @@ export class DrawController {
 
   /**
    * 笔画提交（快照-diff）：捕获本次笔画触碰的**所有** Region——目标、被 replace/steal
-   * 剥 cell 的旁者、splitPolicy/自动建新建的元素——→ MultiRegionCommand 入栈。
+   * 剥 cell 的旁者、自动建新建的元素——→ MultiRegionCommand 入栈。
    * 返回被修改的**已存在** Region id（新建元素无旧缓存条目，只需 touch 不需件失效）。
    */
   private commitStrokeDiff(label: string): string[] {

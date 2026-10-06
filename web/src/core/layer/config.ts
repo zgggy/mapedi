@@ -1,6 +1,8 @@
 /**
  * 图层 = 配置实例（不是子类）。
- * 能力差异全部落在参数：placement / splitPolicy / style / workspace / gen。
+ * 能力差异全部落在参数：placement / style（生成侧=core/layer.ts defaultGenConfig + GenStrategy）。
+ * 2026-10-06 包 D 词汇收编：删 `splitPolicy`（无实现、无人声明、零测试）、`elementSource`
+ * 与 `workspace`（零消费者）、`gen`（零读取者，其 country coreSelector 还与活配置漂移）。
  */
 import type { LayerId, LayerKind, World } from '../types';
 import { isLand } from '../types';
@@ -11,11 +13,8 @@ import {
   normalizeStyle,
   patchElementStyle,
 } from './style';
-import type { GenMethod, GenScope, GenPattern, CoreSelector } from './genTypes';
 
-export type SplitPolicy = 'newElement' | 'keepEnclave' | 'reject';
 export type LandSeaRule = 'landOnly' | 'oceanOnly' | 'any' | 'noCrossLandSea';
-export type ElementSource = 'explicit' | 'derivedFromHeight' | 'onePerCell';
 
 export interface PlacementRule {
   landSea: LandSeaRule;
@@ -23,30 +22,12 @@ export interface PlacementRule {
   heightMax?: number;
 }
 
-export interface LayerGenParams {
-  method: GenMethod;
-  scope: GenScope;
-  pattern: GenPattern;
-  coreSelector: CoreSelector;
-  count: number;
-  fromLayerCount?: number;
-  /** 海国等：勾选才生成海上元素 */
-  allowOcean: boolean;
-  diffusion?: { falloff: number; radius: number; roughness: number; peakHeight: number };
-}
-
 export interface LayerConfig {
   id: LayerId;
   name: string;
   kind: LayerKind;
-  elementSource: ElementSource;
-  splitPolicy: SplitPolicy;
   placement: PlacementRule;
-  gen: LayerGenParams;
   style: ElementStyle;
-  workspace: {
-    listElements: boolean;
-  };
   /** 高度层 12 区间等固定元素，生成不增删 */
   fixedElements?: boolean;
 }
@@ -61,127 +42,63 @@ function style(
   };
 }
 
-function genBase(count: number): LayerGenParams {
-  return {
-    method: 'randomConnected',
-    scope: 'unlimited',
-    pattern: 'scattered',
-    coreSelector: 'random',
-    count,
-    allowOcean: false,
-  };
-}
-
 export function defaultLayerConfigs(): LayerConfig[] {
   return [
     {
       id: 'cells',
       name: '地块',
       kind: 'custom',
-      elementSource: 'onePerCell',
-      splitPolicy: 'reject',
       placement: { landSea: 'any' },
-      // 性能参数：关阴影/填充——是配置
-      gen: { ...genBase(0), method: 'randomConnected' },
       style: style({
         border: { enabled: true, width: 0.8, color: '#ffffff', smooth: 0 },
         fill: { enabled: false, alpha: 0, color: '#C4A882' },
       }),
-      workspace: { listElements: false },
     },
     {
       id: 'height',
       name: '高度',
       kind: 'height',
-      elementSource: 'derivedFromHeight',
-      splitPolicy: 'keepEnclave',
       placement: { landSea: 'any' },
-      gen: {
-        ...genBase(6),
-        method: 'diffusion',
-        scope: 'unlimited',
-        pattern: 'cluster',
-        diffusion: { falloff: 2, radius: 0.6, roughness: 0.8, peakHeight: 0.8 },
-      },
       style: style({
         border: { enabled: true, width: 1.0, color: '#ffffff', smooth: 1 },
         fill: { enabled: true, alpha: 0.9, color: '#888888' },
       }),
-      workspace: { listElements: true },
       fixedElements: true,
     },
     {
       id: 'province',
       name: '行省',
       kind: 'political',
-      elementSource: 'explicit',
-      splitPolicy: 'keepEnclave',
       placement: { landSea: 'noCrossLandSea' },
-      gen: {
-        ...genBase(15),
-        scope: 'noCrossLandSea',
-        pattern: 'partitionLand',
-      },
       style: style(),
-      workspace: { listElements: true },
     },
     {
       id: 'country',
       name: '国家',
       kind: 'political',
-      elementSource: 'explicit',
-      splitPolicy: 'keepEnclave',
       placement: { landSea: 'landOnly' },
-      gen: {
-        ...genBase(8),
-        method: 'fromLayer',
-        scope: 'landOnly',
-        pattern: 'partitionLand',
-        coreSelector: 'centermost',
-        fromLayerCount: 3,
-        allowOcean: false,
-      },
       style: style(),
-      workspace: { listElements: true },
     },
     {
       id: 'ecosystem',
       name: '生态',
       kind: 'ecosystem',
-      elementSource: 'explicit',
-      splitPolicy: 'keepEnclave',
       placement: { landSea: 'landOnly' },
-      gen: { ...genBase(12), scope: 'landOnly', pattern: 'cluster' },
       style: style(),
-      workspace: { listElements: true },
     },
     {
       id: 'race',
       name: '种族',
       kind: 'race',
-      elementSource: 'explicit',
-      splitPolicy: 'keepEnclave',
       placement: { landSea: 'landOnly' },
-      gen: { ...genBase(5), scope: 'landOnly', pattern: 'partitionLand' },
       style: style(),
-      workspace: { listElements: true },
     },
     {
       id: 'culture',
       name: '文化',
       kind: 'cultural',
-      elementSource: 'explicit',
-      splitPolicy: 'keepEnclave',
       placement: { landSea: 'any' },
-      gen: {
-        ...genBase(8),
-        scope: 'landOnly',
-        pattern: 'cluster',
-        coreSelector: 'highElevation',
-        allowOcean: false,
-      },
       style: style(),
-      workspace: { listElements: true },
     },
   ];
 }

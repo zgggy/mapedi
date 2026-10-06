@@ -199,6 +199,11 @@ import { isRowOrControlClick } from './shell';
         editor.addLayer(text);
         text = '';
       }}
+      onCreateDerived={() => {
+        // 派生层（2026-10-06 包 D）：规则声明随层定义落盘，生成面板「运行派生」产元素
+        editor.addLayer(text, { derived: true });
+        text = '';
+      }}
     />
   </div>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

@@ -17,6 +17,7 @@ import { defaultStarSystem } from '../core/astro';
 import { DEFAULT_WORLD_SHAPE, type WorldShape } from '../core/layer/genTypes';
 import { installProjCache } from '../render/projCache';
 import { refineHeight } from '../core/generate/refine';
+import { DEFAULT_DERIVATION, runDerivation } from '../core/generate/derive';
 import { HeightCellsCommand, history } from '../core/history';
 
 export interface GenerationCtx {
@@ -195,6 +196,21 @@ export class GenerationService {
   regenLayer(layerId: string, seed?: number, cascadeDown = false): void {
     const world = this.ctx.world;
     if (!world) return;
+    // 派生层（genStrategy='derived'，2026-10-06 包 D）：规则运行器直跑——不走 registry/Worker
+    // （一次高度扫描、主线程即回），只替换本层元素、**无跨层清除**（清壳规则不适用）。
+    if (genStrategyOf(world, layerId) === 'derived') {
+      const spec = world.layers.find((l) => l.id === layerId)?.derivation ?? DEFAULT_DERIVATION;
+      const els = runDerivation(world, layerId, spec);
+      // 生成即可见（同 height 的 focusAfterGen 精神）：否则「运行了却看不见」= 隐藏层陷阱
+      const ld = world.layers.find((l) => l.id === layerId);
+      if (ld) ld.visible = true;
+      this.ctx.touchWorld();
+      this.ctx.setStatus(
+        `派生运行「${spec.preset}」：${els.map((e) => `${e.name} ${e.cells.length} 格`).join(' · ')}`,
+      );
+      this.ctx.scheduleAutosave();
+      return;
+    }
     // 种子（2026-10-04 用户报障）：UI 种子行/🎲 直传；不传或非法 = 世界种子（旧行为）。
     const s = Number.isFinite(seed) ? (seed as number) : world.meta.seed;
     // R2 递归（HIERARCHY §6.3 包3）：先确保单元源（子层）可用——

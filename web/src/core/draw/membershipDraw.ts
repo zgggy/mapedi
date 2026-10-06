@@ -1,9 +1,10 @@
 /**
  * MembershipDraw：cell ↔ 元素归属。
- * placement 闸 + overwrite（emptyOnly / replace）+ splitPolicy（end 时拆连通块）。
+ * placement 闸 + overwrite（emptyOnly / replace）。（splitPolicy 词汇已于 2026-10-06 包 D 删除——
+ * 唯一实现只认 'newElement' 而全表无层声明它，事实恒为「保留飞地」=默认行为。）
  */
 import type { CellId, Region, World } from '../types';
-import type { PlacementRule, SplitPolicy } from '../layer/config';
+import type { PlacementRule } from '../layer/config';
 import { placementAllows } from '../layer/config';
 import { writeCells } from '../occupy';
 
@@ -14,7 +15,6 @@ export interface DrawActor {
   elementId: string;
   overwrite: OverwriteMode;
   placement: PlacementRule;
-  splitPolicy: SplitPolicy;
 }
 
 export interface DrawInput {
@@ -39,7 +39,6 @@ export interface MembershipChange {
 
 export interface DrawResult {
   membershipChanges: MembershipChange[];
-  elementSplit?: Array<{ fromId: string; toIds: string[] }>;
 }
 
 function ownersOnLayer(world: World, layerId: string, cellId: CellId): Region[] {
@@ -127,54 +126,6 @@ export function membershipDrawStroke(
     writeCells(target, [...set], 'paint', { delta: { added: [], removed: removedFromTarget } });
   }
 
-  const split = applySplitPolicy(world, actor, target);
-  return { membershipChanges: changes, elementSplit: split };
+  return { membershipChanges: changes };
 }
 
-/** splitPolicy: newElement → 断开的额外连通块拆成新元素 */
-export function applySplitPolicy(
-  world: World,
-  actor: DrawActor,
-  target: Region,
-): Array<{ fromId: string; toIds: string[] }> {
-  if (actor.splitPolicy !== 'newElement') return [];
-  const set = new Set(target.cells);
-  if (set.size < 2) return [];
-  const seen = new Set<CellId>();
-  const comps: CellId[][] = [];
-  for (const start of target.cells) {
-    if (seen.has(start)) continue;
-    const comp: CellId[] = [];
-    const q = [start];
-    seen.add(start);
-    while (q.length) {
-      const id = q.pop()!;
-      comp.push(id);
-      for (const n of world.cells[id].neighbors) {
-        if (set.has(n) && !seen.has(n)) {
-          seen.add(n);
-          q.push(n);
-        }
-      }
-    }
-    comps.push(comp);
-  }
-  if (comps.length <= 1) return [];
-  comps.sort((a, b) => b.length - a.length);
-  writeCells(target, comps[0], 'paint');
-  const toIds = [target.id];
-  for (let i = 1; i < comps.length; i++) {
-    const id = `${target.id}-split${i}`;
-    if (world.regions.some((r) => r.id === id)) continue;
-    const clone: Region = {
-      ...target,
-      id,
-      name: `${target.name}·${i + 1}`,
-      cells: comps[i],
-      attributes: { ...target.attributes, splitFrom: target.id },
-    };
-    world.regions.push(clone);
-    toIds.push(id);
-  }
-  return [{ fromId: target.id, toIds }];
-}

@@ -87,7 +87,7 @@ export class PaintCellsCommand implements EditCommand {
 
 /**
  * 多元素笔画补丁（undo 腐蚀修复，2026-09-30 还债步骤 1-①）。
- * 一次笔画可能触碰多个 Region（replace 剥他人 cell / splitPolicy 新建拆分元素 /
+ * 一次笔画可能触碰多个 Region（replace 剥他人 cell / 自动建新建元素 /
  * flood steal 同层互斥），单元素 PaintCellsCommand 会漏记副作用 → 撤销后
  * 原归属元素永久丢 cell、拆分克隆残留。统一以「每元素增减 + 新建快照」入栈：
  * 撤销一次 = 全部副作用一并还原；重做 = 提交时刻终态一并重建。

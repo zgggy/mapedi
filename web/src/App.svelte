@@ -377,6 +377,7 @@
         layerName={world?.layers.find((l) => l.id === focusLayer)?.name ?? focusLayer}
         strategy={focusStrategy}
         freeform={!!world && isFreeLayerId(world, focusLayer)}
+        derivation={world?.layers.find((l) => l.id === focusLayer)?.derivation ?? null}
         layerParams={focusStrategy === 'heightmap' ? null : (editor.profiles.find((p) => p.layerId === focusLayer)?.params ?? null)}
         onGenerate={(s, n) => {
           bootError = '';

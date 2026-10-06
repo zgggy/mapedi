@@ -9,6 +9,7 @@ import type { CellId, CellMark, LayerDecorPatch, Region, World } from '../core/t
 import { defaultPathColor } from '../core/paths';
 import { ensureBuiltinLayers } from '../core/world';
 import { emptyDrawSession, type DrawSession } from '../core/draw/brush';
+import { DEFAULT_DERIVATION } from '../core/generate/derive';
 import { siblingRegions } from '../core/hierarchy/derive';
 import { moveAmongSiblings } from '../core/hierarchy/ops';
 import {
@@ -574,8 +575,10 @@ export class CommandService {
     this.status = '已吞并（Ctrl+Z 可撤销）';
   }
 
-  /** 添加自定义图层（可选名称，与工作区创建同一套 header）——1-b 命令化 */
-  addLayer(name?: string) {
+  /** 添加自定义图层（可选名称，与工作区创建同一套 header）——1-b 命令化。
+   *  `opts.derived`（2026-10-06 包 D）：建**派生层**——规则声明随层定义落盘，
+   *  生成面板「运行派生」按规则产元素（preset+参数集，不做自动跟随重算）。 */
+  addLayer(name?: string, opts?: { derived?: boolean }) {
     if (!this.world) return;
     const n = this.world.layers.filter((l) => l.id.startsWith('custom-')).length + 1;
     const id = `custom-${Date.now().toString(36)}`;
@@ -589,13 +592,22 @@ export class CommandService {
       requireAdjacency: false,
       requireCenter: false,
       styleSetId: 'default',
+      ...(opts?.derived
+        ? {
+            genStrategy: 'derived' as const,
+            // 深拷贝（不与 DEFAULT_DERIVATION 别名共享——后续参数编辑整对象替换）
+            derivation: { preset: DEFAULT_DERIVATION.preset, params: { ...DEFAULT_DERIVATION.params } },
+          }
+        : {}),
     } as World['layers'][number];
     this.world.layers.push(layer);
     history.run(this.world, new AddLayerCommand(layer), { alreadyApplied: true });
     this.newName = '';
     this.touchWorld();
     this.focusLayer = id;
-    this.status = `已添加图层「${label}」（Ctrl+Z 可撤销）`;
+    this.status = opts?.derived
+      ? `已添加派生层「${label}」（生成面板「运行派生」按规则产元素；Ctrl+Z 可撤销）`
+      : `已添加图层「${label}」（Ctrl+Z 可撤销）`;
   }
 
   randomLayerName(): string {

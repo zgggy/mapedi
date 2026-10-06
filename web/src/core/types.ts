@@ -99,11 +99,30 @@ export type LabelTier = 'primary' | 'secondary' | 'tertiary' | 'minor';
  * - `scatter`：重新撒点——Voronoi 重建整世界（cells 层）
  * - `heightmap`：地形赋高度——重跑地形场 + 派生层删旧建新（height 层）
  * - `elements`：以单元布局/聚合（缺省；无显式声明的层都是它）
+ * - `derived`：**派生层**（2026-10-06 包 D）——按 `LayerDef.derivation` 声明规则重算元素，
+ *   规则=preset+参数集（禁用户表达式）；不走 registry/Worker（一次扫描、主线程直跑）
  * 路径类（road/route/river）生成方法待设计（GEN R7），暂无专属值——
  * 其生成面板走「有 profile params 即可再生成」的通用分支，行为不变。
  * 读取一律经 `core/layer/flags.ts`，禁止在消费点直接比 id。
  */
-export type GenStrategy = 'scatter' | 'heightmap' | 'elements';
+export type GenStrategy = 'scatter' | 'heightmap' | 'elements' | 'derived';
+
+/**
+ * 派生层规则声明（2026-10-06 包 D · 北极星对齐）：**preset + 参数集**。
+ * 规则 = 内置判定（禁用户表达式——北极星原文 §8「不写代码、不解析谓词」）；
+ * 运行 = 显式「运行派生」（生成面板），**不做自动跟随重算**（高度改动后不自动重跑＝拒全局重算红线）。
+ * 运行产物 = 本层普通 Region（占据照常存储/渲染/存档）。
+ */
+export interface DerivationSpec {
+  preset: 'heightThreshold';
+  params: {
+    /** 界：round(h) > threshold → A 侧元素；否则 B 侧（界点归属写死：等于界 → B 侧） */
+    threshold: number;
+    /** 两侧元素名（缺省「陆地」/「海洋」） */
+    aname?: string;
+    bname?: string;
+  };
+}
 
 export interface LayerDef {
   id: LayerId;
@@ -132,6 +151,8 @@ export interface LayerDef {
   baseMesh?: boolean;
   /** 生成策略；缺省 'elements'（见 GenStrategy） */
   genStrategy?: GenStrategy;
+  /** 派生层规则（genStrategy='derived' 时生效；见 DerivationSpec） */
+  derivation?: DerivationSpec;
   /** 生成/重建完成后本层默认显示并成为焦点（产品默认：生成 → 看地形 = height 层） */
   focusAfterGen?: boolean;
   /** 本层域 = cell 高度：元素为高度区间档（派生、不可手建）、绘制刷高度值、

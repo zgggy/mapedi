@@ -10,9 +10,7 @@ import { DEFAULT_WORLD_SHAPE, type GenConfig, type GenMethod, type GenScope, typ
 export type {
   LayerConfig,
   PlacementRule,
-  SplitPolicy,
   LandSeaRule,
-  ElementSource,
 } from './layer/config';
 export {
   defaultLayerConfigs,

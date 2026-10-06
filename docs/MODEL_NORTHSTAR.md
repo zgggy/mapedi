@@ -190,7 +190,7 @@ removeCellsFromRegion`（brush.ts，仅测试引用）。
 - **迁移顺序（每步一次全量回归）**：① 物化（#8）+ normalize（#9）——最静；② 高度 update（#10，opts.delta 直传现有 Δ）；③ 生成（#11 顺手改批量：收集后每国一次 writeCells，顺序=现 push 序，输出逐位不变）；④ 绘制（#1-7，opts.delta 由 commitStrokeDiff 现有快照差供给）；⑤ 命令回放（#13/#14，cause='undo'，直取快照引用不 diff；Annex/Delete 载荷同理）；⑥ validate 修复（#15）纳入或标注（仅测试可达）。
 - **反例清单**：涂改跨档（高度 Δ 与写入同源）/ 撤销回放（引用直取不二次 COW）/ 物化父残留（F 联动）/ 生成同 seed 逐位不变 / 端点拖动 `touchPaint` 轻失效不被改重 / 空并集（无变化返回 null）/ 100k 世界物化 diff 不劣化 p50。
 
-### 包 D · 规则显式化 + 派生层能力
+### 包 D ✓ · 规则显式化 + 派生层能力（2026-10-06 用户拍板「A/1/删」后落地）
 - **现状事实**：§2 三套词汇；`genConfigFromParams` layer.ts:86-116 逐键覆盖 profile；
   `layerConfig.gen` 无读取者；splitPolicy 仅 `newElement` 有实现（membershipDraw:134）；派生层不存在。
 - **结论**：单一规则声明（活配置为准、死配置删、漂移对齐）；规则=**内置判定带参数**（不做表达式解析
@@ -283,6 +283,30 @@ E（依赖 D 词汇）→ F/G（支撑，可插任意间隙；F 的真 bug 可�
 ---
 
 ## 决策记录（倒序追加）
+
+### 包 D ✓（2026-10-06，用户拍板「规则=A preset+参数 / splitPolicy=①删词 / 死字段=删」）
+- **规则边界 = A**：`DerivationSpec{preset:'heightThreshold', params:{threshold, aname?, bname?}}`（types.ts）；
+  `GenStrategy` += `'derived'`（**复用现有策略词汇，不另立 layerSource 第二套**）；新增
+  `core/generate/derive.ts`（PRESETS 表 + `runDerivation`：id 稳定 `${layerId}-a/-b` → 重跑幂等；
+  产物=普通 Region 创建字面量——与各生成器同语义，不做自动跟随重算=红线）。
+- **运行接线**：`generationService.regenLayer` 的 derived 分支——主线程直跑（不进 registry/Worker）、
+  无跨层清除（清壳规则不适用）、运行即可见（visible=true，防"运行了却看不见"隐藏层陷阱）。
+- **splitPolicy = 删词**：`SplitPolicy` 类型、`DrawActor.splitPolicy`、`applySplitPolicy`
+  （唯一实现只认 'newElement' 而全表无层声明 → 事实恒"保留"）、`DrawResult.elementSplit`
+  （零消费者）全删；drawController actor 同步。
+- **死字段删**：`LayerConfig` 的 `gen`（零读取者；其 country coreSelector 'centermost' 与活表
+  'visualCenter' 漂移）、`elementSource`、`workspace` + `LayerGenParams`/`ElementSource` 类型
+  + config.ts 七层条目同步清；`core/layer.ts` 再导出收窄。
+- **建层/配置入口**：图层创建行新增 🧭（`CreateRow.onCreateDerived` → `addLayer(name, {derived})`
+  → LayerDef 带 genStrategy+derivation 深拷贝）；生成面板第四分支（规则描述 + 高度界/两侧名输入
+  → `store.setDerivationParam`=LayerFieldsCommand 可撤销）→「运行派生」。
+- **验收（浏览器实测，API 与真实点击双路）**：建层（11→12 层、焦点、声明正确）→ 运行 → 陆地
+  21034 = 暴力统计、海洋 78966、mism=0（完备互斥）→ 幂等（重跑 cells 逐位同、恒 2 元素）→
+  参数生效（t=20 → 1814 = 暴力统计；名字改「大陆/大洋」✓）→ 参数撤销回 0 ✓ → 存档回环
+  （genStrategy/derivation/cells 全保留）→ 面板 UI 渲染 ✓（运行派生/高度阈值/高度界/陆侧名/
+  海侧名/界点算海侧）→ 测试层已删（用户世界保留一个「陆海」演示层，可右键删除）。
+- **已知边界（诚实）**：撤销「建层」不清理已产元素（与其它图层"生成不可撤销"同现状——登记观察）；
+  派生层不进整世界生成（撒点清空后需手动运行一次）。
 
 ### 包 C ✓（2026-10-06）：**形态 1（瘦写入器）落地**——按手册思考方向"最小可用（COW/patch/审计）"执行
 - 新 `core/occupy.ts`：`writeCells(region, next, cause, { delta? })`——COW 写 + Δ 记账（已知差直用、

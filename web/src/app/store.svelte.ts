@@ -1,10 +1,11 @@
-import type { LayerDecorPatch, Region } from '../core/types';
+import type { DerivationSpec, LayerDecorPatch, Region } from '../core/types';
 import { deserializeWorld, invalidatePickCache, ensureBuiltinLayers } from '../core/world';
 import { repairHierarchy } from '../core/hierarchy/gate';
 import { installProjCache, type ProjCache } from '../render/projCache';
 import { invalidateCellGraph } from '../core/index/cellGraph';
 import { invalidateViewIndex } from '../render/viewIndex';
-import { history } from '../core/history';
+import { history, LayerFieldsCommand } from '../core/history';
+import { DEFAULT_DERIVATION } from '../core/generate/derive';
 import { ChangePipeline } from './changePipeline';
 import { AutosaveService } from './autosaveService';
 import { GenerationService } from './generationService';
@@ -577,8 +578,24 @@ export class EditorStore {
     this.cmds.doAnnex(targetId);
   }
 
-  addLayer(name?: string) {
-    this.cmds.addLayer(name);
+  addLayer(name?: string, opts?: { derived?: boolean }) {
+    this.cmds.addLayer(name, opts);
+  }
+
+  /** 派生层规则参数（生成面板，2026-10-06 包 D）：写 LayerDef.derivation（LayerFieldsCommand，可撤销） */
+  setDerivationParam(layerId: string, patch: Partial<DerivationSpec['params']>): void {
+    const w = this.world;
+    const l = w?.layers.find((x) => x.id === layerId);
+    if (!w || !l) return;
+    const cur = l.derivation ?? DEFAULT_DERIVATION;
+    const after = { ...cur, params: { ...cur.params, ...patch } };
+    history.run(
+      w,
+      new LayerFieldsCommand([{ id: layerId, before: { derivation: cur }, after: { derivation: after } }], '派生规则'),
+      { alreadyApplied: true },
+    );
+    l.derivation = after; // alreadyApplied：必须手动写世界（教训：status 会说谎）
+    this.touchLayerView();
   }
 
   randomLayerName(): string {

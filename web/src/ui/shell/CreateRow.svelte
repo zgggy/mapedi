@@ -12,6 +12,7 @@
     onNewName,
     onRandom,
     onCreate,
+    onCreateDerived,
   }: {
     placeholder?: string;
     newName?: string;
@@ -21,6 +22,8 @@
     onNewName?: (v: string) => void;
     onRandom?: () => void;
     onCreate?: () => void;
+    /** 提供时多显示「🧭」= 新建派生层（按规则产元素，2026-10-06 包 D） */
+    onCreateDerived?: () => void;
   } = $props();
 </script>
 
@@ -52,6 +55,17 @@
         onCreate?.();
       }}
     >➕</button>
+    {#if onCreateDerived}
+      <button
+        type="button"
+        title="新建派生层（按规则产元素）"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => {
+          e.stopPropagation();
+          onCreateDerived?.();
+        }}
+      >🧭</button>
+    {/if}
   {/if}
 </div>
 

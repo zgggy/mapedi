@@ -13,8 +13,11 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第五十七轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
+## 当前状态（第五十八轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
   - **包 D 包内分析已出（写入手册，待拍板）**：三套词汇死活判定（活=defaultGenConfig/genStrategy；半死=LayerConfig：placement/style 活、**splitPolicy 事实全死**、gen/elementSource/workspace 零消费）；漂移两处（country coreSelector 死表 vs 活表、culture placement=any vs scope=landOnly）；派生能力现状=仅从层聚合（generateFromLayer），无值域谓词派生。**待拍板三条**：规则边界（preset+参数 推荐）／splitPolicy 处置（删词 推荐）／死字段删除范围。
+  - **✓ 第五十八轮（2026-10-06 北极星对齐·包 D：规则显式化 + 派生层——用户拍板「A/1/删」）**：①词汇收编：`SplitPolicy` 类型/`DrawActor.splitPolicy`/`applySplitPolicy`（唯一实现只认 newElement 而全表无层声明=事实恒保留）/`DrawResult.elementSplit` 全删；`LayerConfig` 的 `gen`（零读取者，country coreSelector 与活表漂移）/`elementSource`/`workspace` + `LayerGenParams`/`ElementSource` 类型 + 七层条目同步清；`core/layer.ts` 再导出收窄。②**派生层**：`GenStrategy += derived`（复用策略词汇，不立第二套 flag）+ `LayerDef.derivation: DerivationSpec{preset:'heightThreshold', params:{threshold, aname?, bname?}}` + 新 `core/generate/derive.ts`（PRESETS 表 + runDerivation：id 稳定 `${layerId}-a/-b`、重跑幂等、产物=普通 Region）；运行=regenLayer 的 derived 分支（主线程直跑、无跨层清除、运行即 visible=true）；**不做自动跟随重算**（红线）。③入口：图层创建行 🧭（CreateRow.onCreateDerived → addLayer(name,{derived})）+ 生成面板第四分支（规则描述/高度界/两侧名 → setDerivationParam=LayerFieldsCommand 可撤销 →「运行派生」）。
+  - **验收（浏览器 API+真实点击双路）**：建层 11→12、运行后陆地 21034=暴力统计 / 海洋 78966 / mism=0（完备互斥）→ 幂等（重跑逐位同、恒 2 元素）→ 参数生效（t=20 → 1814；名字改「大陆/大洋」）→ 参数撤销回 0 → 存档回环（genStrategy/derivation/cells 全保留）→ 面板六要素渲染 ✓；测试层已删，用户世界保留一个「陆海」演示层（可右键删）。**已知边界**：撤销建层不清理已产元素（与其它层"生成不可撤销"同现状）；派生层不进整世界生成。
+  - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=包 E（约束概念化 + 多归属评估，待拍板：多归属做不做）**。
   - **✓ 第五十七轮（2026-10-06 北极星对齐·包 C：占据写入单一入口——形态 1 瘦写入器）**：新 `core/occupy.ts`（COW 写 + Δ 记账 + 审计钩子；`setOccupyObserver` 探针、`setOccupyGuard` 包 E 预留拒名单闸；**不做**失效分发/物化/校验拦截=记账点非管家）；**15 处 `Region.cells` 写点全部迁移**（绘制 brush×2/membershipDraw×4/roads×1、物化 1、高度 normalize+update、生成 political 逐格 push→每国一次写、命令回放 5（cause=undo）、validate 修复 1）；grep 复核赋值只剩写入器内部。验收：绘制域观察者 cause=paint Δ 数正确、真实世界高度涂改+undo 逐位还原、物化父≡∪子 0 违例且零变化不记账、**生成域 12 组合（4 seed×3 国家数）新旧逐位对照 0 差异**（git 旧文件临时挂载对照法）、写入器单测（同引用 no-op/集合等价 null/拒名单闸）、热路径 p50=0ms p95=0.1ms；tsc/svelte-check 0 errors。
   - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=包 D（规则显式化+派生层；包内分析已写入手册，待拍板三条：规则边界/splitPolicy 处置/死字段删除范围）**。
   - **✓ 第五十六轮（2026-10-06 北极星对齐·包 B：高度域平凡化——用户拍板 A 案，单真相落地）**：`Region.cells` 本身即**累积**（h≥lo，规则在重算期落成占据；原「数据=精确档/显示=累积」双真相退役）；**精确档=现算**（`exactIntervalElementOf` 拾取/悬停、`exactCountOfInterval` 检查区计数，heightRev+world 键控缓存）；删 `displayCellsOfInterval/displayCellsOfRegion`（件直接用 reg.cells）；**`reconcilePieceMembership` 对账补丁退役**（成员变化=高度 Δ 经 patchQueues + 成员笔画经 queuePieceInvalidation 两路）；`store.regionIdsOfCell` 跳过 interval 入图+现算档位追加（★旧「同层末位命中」依赖数组序、已弃）；懒建收敛=store.replaceWorld 安装时 `ensureHeightIntervalElements`（撒点新世界也即刻 12 档）+ update/rebuild `!==12` 兜底，删 WorkspaceDrawer effect+`regionsBump`；契约=AGENTS §3/RENDER_LOGIC/记忆已改（语义 2026-09-30 不变，仅形态）。**成本（诚实）**：序列化/clone ≈6×（100k 世界 +~500k id）；子项 A2（区间 cells 不落盘）未做，实测后定。反例九项见手册包 B 段。
@@ -136,7 +139,7 @@
 
 ## 下一轮候选
 
-- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓、包 B ✓、包 C ✓，下一包=D（规则显式化+派生层，含一项待拍板：规则参数集边界）**；随后 E（约束概念化）/F/G（支撑）/H（使用侧）。
+- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓ B ✓ C ✓ D ✓，下一包=E（约束概念化+多归属评估，含一项待拍板：多归属做不做）**；随后 F/G（支撑）/H（使用侧）。
 - **新议题（2026-10-04，未开工）：元素名称注记与核心符号**——调研+需求细化已落 `docs/LABEL_DESIGN_2026-10-04.md`（现状盘点带 file:line / 外部调研带来源 / R1–R21 / **待拍板 P1–P12** / 分期五包），等用户拍板 P1–P12 再动代码。
 - **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓、手感批+金钮 ✓）**；**下一阶段重心 = 用户使用**——选题与排序见 `docs/OPTIMIZE_REVIEW_2026-10-04.md` §7（第一梯队=搜索/测距/吞并/校验 toast 四个半成品入口），点名即做；并行技术线=存档镜像离线程/死码甲档/存档字段清洗/测试固化（同文档 §3-§5）。路径生成 R7 用户已定先不做；路网 paths=0 待点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

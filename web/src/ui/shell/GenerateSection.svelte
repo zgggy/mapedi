@@ -3,14 +3,16 @@
    * 生成模式的图层展开内容（2026-09-30 三模式重构：把手架构退役，本组件 = 纯面板体）。
    * 由工作区「生成」模式在图层树焦点行下方渲染。
    *
-   * **生成 = 针对焦点层的三分支（读 `LayerDef.genStrategy`，禁比 id 字符串）**：
+   * **生成 = 针对焦点层的四分支（读 `LayerDef.genStrategy`，禁比 id 字符串）**：
    * - `scatter`（cells）→ 「重新撒点」：种子/地块数/地形旋钮 + 整世界重建（onGenerate）
    * - `heightmap`（height）→ 「生成高度图」：只重跑地形（editor.regenLayer(layerId, seed)）
+   * - `derived`（派生层，2026-10-06 包 D）→ 规则=preset+参数集，显式「运行派生」（regenLayer 直跑规则运行器）
    * - `elements`（缺省）有 profile params → 单层再生成（regenLayer；params 类型化控件）
    * - 路径类生成方法待设计（GEN R7）：暂无专属策略值，走 elements 分支（行为保持）
    * 防误触由「须先切生成模式」承担（原 D5 长按把手随把手架构退役）。
    */
   import { editor } from '../../app/store.svelte';
+  import type { DerivationSpec } from '../../core/types';
   import { heightmapLayerId } from '../../core/layer/flags';
   import { childLayerIdOf } from '../../core/hierarchy/derive';
   import CapsuleSlider from './CapsuleSlider.svelte';
@@ -33,6 +35,7 @@
     strategy = 'elements' as GenStrategy,
     freeform = false,
     layerParams = null as Record<string, number | string | boolean> | null,
+    derivation = null as DerivationSpec | null,
     onGenerate,
   }: {
     generating?: boolean;
@@ -50,6 +53,8 @@
     freeform?: boolean;
     /** 该层 profile 参数（editor.profiles 单源） */
     layerParams?: Record<string, number | string | boolean> | null;
+    /** 派生层规则（genStrategy='derived'；editor.world 单源，2026-10-06 包 D） */
+    derivation?: DerivationSpec | null;
     /** 整世界重建（仅 scatter 层走此入口） */
     onGenerate: (seed: number, n: number) => void;
 
@@ -65,13 +70,16 @@
   /** 勾选后：从最深层子层逐层向上重新生成到本层（子先父后）；默认关 = 只生成本层 */
   let cascadeDown = $state(false);
   const isHeightmap = $derived(strategy === 'heightmap');
+  /** 派生层（2026-10-06 包 D）：规则=preset+参数集；运行=显式（不做自动跟随重算） */
+  const isDerived = $derived(strategy === 'derived');
+  const presetLabel = $derived(derivation?.preset === 'heightThreshold' ? '高度阈值（二侧）' : String(strategy));
   /** 基于已有手绘骨架细化（v6）：开 = 档位为骨架 + 同源形态场细化 */
   let basedOn = $state(false);
   /** 保护海岸开关（2026-10-06 用户定：默认关；开 = mask 逐格不动，关 = 海岸随形态场带内弯曲进出） */
   let basedCoast = $state(false);
-  /** 生成可用性：scatter/heightmap 恒可用；其他层需有 profile params */
+  /** 生成可用性：scatter/heightmap/derived 恒可用；其他层需有 profile params */
   const canGen = $derived(
-    isScatter || isHeightmap || (layerParams !== null && Object.keys(layerParams).length > 0),
+    isScatter || isHeightmap || isDerived || (layerParams !== null && Object.keys(layerParams).length > 0),
   );
 
   /** 非 height 层参数 key 的人话标签（未列出的 key 按原样显示） */
@@ -258,6 +266,39 @@
             {/if}
           </div>
         {/if}
+      {:else if isDerived}
+        <!-- 派生层（2026-10-06 包 D）：规则=preset+参数集；运行=显式（高度改动后不自动重跑） -->
+        <div class="bhead"><span class="sb">🧭 派生</span><span class="bh-t">按规则刷新「{layerName}」</span></div>
+        <div class="row">
+          <span>规则 <b>{presetLabel}</b></span>
+        </div>
+        <div class="row">
+          <label>高度界 <input
+            type="number"
+            value={derivation?.params.threshold ?? 0}
+            onchange={(e) => editor.setDerivationParam(layerId, { threshold: Number(e.currentTarget.value) || 0 })}
+          /></label>
+          <label>陆侧名 <input
+            value={derivation?.params.aname ?? ''}
+            placeholder="陆地"
+            onchange={(e) => editor.setDerivationParam(layerId, { aname: e.currentTarget.value })}
+          /></label>
+          <label>海侧名 <input
+            value={derivation?.params.bname ?? ''}
+            placeholder="海洋"
+            onchange={(e) => editor.setDerivationParam(layerId, { bname: e.currentTarget.value })}
+          /></label>
+        </div>
+        <div class="row">
+          <button
+            type="button"
+            class="primary"
+            disabled={generating}
+            title="按当前高度重算本层元素（同高度同参数 = 同结果；不做自动跟随）"
+            onclick={fire}
+          >🧭 运行派生</button>
+        </div>
+        <div class="hint">规则：高度 &gt; 界 →「陆侧」元素，否则 →「海侧」（界点算海侧）；只替换本层元素、不清其它图层；高度改动后不会自动重跑——想同步就再点一次。</div>
       {:else}
         <!-- 其他有 profile 的层 = 单层再生成（genConfigFromParams 单源消费 profile params） -->
         <div class="bhead">
