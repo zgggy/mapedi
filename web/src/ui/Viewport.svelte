@@ -9,8 +9,7 @@
     project,
     type ProjectionId,
     type ProjectionParams,
-    defaultProjParams,
-  } from '../core/project/projections';
+    defaultProjParams, projectionPeriodAt } from '../core/project/projections';
   import {
     defaultCamera,
     drawWorld,
@@ -521,11 +520,15 @@
         // **逐格绘制**（2026-10-06 用户「难道就不能一个一个地块的绘制吗？」=正解）：
         // 顶点先 unwrap 连续化——跨 180° 的格其顶点本在 ±180 两侧，不连续化会投影成
         // 一条横贯屏幕的长条（前几轮「拉长/横线穿屏」的真正根因，与副本选择无关）。
+        // unwrap 周期必须与件渲染（projCache）同链 = **y 依赖** periodAt(y)
+        // （伪圆柱 = scale(y)·2π）：常数 2π 在罗宾森会把高纬格拉成 π 长条
+        //（=「拉长半个地图」，2026-10-06 用户四轮实证）。
+        const perAt = (yy: number) => projectionPeriodAt(projection, yy) ?? Math.PI * 2;
         const qs: { x: number; y: number }[] = [];
         let prevX: number | null = null;
         for (const ll of poly) {
           const q = project(ll, projection, ppp);
-          const x: number = prevX === null ? q.x : unwrapXAgainst(prevX, q.x);
+          const x: number = prevX === null ? q.x : unwrapXAgainst(prevX, q.x, perAt(q.y));
           qs.push({ x, y: q.y });
           prevX = x;
         }
