@@ -175,35 +175,16 @@ function quantile(arr: Float64Array, q: number): number {
 }
 
 /**
- * 高度形态场（**与 buildTerrain 完全同源**：同一 heightField + 同 rng 派生，
- * 但不写 world——供 refineHeight 借用「随机方向、弯曲的山川」结构：域扭曲 +
- * 大陆度 FBM + ridged 山系 + 细节/海底，2026-10-06 用户定形态标准）。
+ * field 后处理链（热侵蚀 → 去尖刺）——**buildTerrain 与 refineHeight 共用的唯一实现**
+ * （2026-10-06：refine「效果必须和不基于已有一样」→ 连侵蚀后的形态都同一份代码）。
  */
-export function heightFieldFor(
+export function erodeAndDespike(
+  f: Float64Array,
   cells: Cell[],
-  seed: number,
-  shape: WorldShape,
-): Float64Array {
-  const rng = createRng(hashSeed(seed, 17));
-  return heightField(cells, seed, shape, rng);
-}
-
-/** 建地形：写 cell.height / cell.isOcean。 */
-export function buildTerrain(
-  world: World,
-  seed: number,
   shape: WorldShape,
   onProgress?: (label: string, frac: number) => void,
 ): void {
-  const cells = world.cells;
-  const n = cells.length;
-  if (!n) return;
-  const rng = createRng(hashSeed(seed, 17));
-  void rng;
-
-  onProgress?.('Perlin-FBM 地形', 0.15);
-  const f = heightField(cells, seed, shape, rng);
-
+  const n = f.length;
   const iters = Math.max(0, Math.min(6, Math.round(shape.erosion)));
   if (iters > 0) {
     onProgress?.('热侵蚀', 0.5);
@@ -242,6 +223,40 @@ export function buildTerrain(
     }
     f.set(next);
   }
+}
+
+/**
+ * 完整地形形态场（**与 buildTerrain 的 f 链完全同源**：heightField + 热侵蚀 +
+ * 去尖刺，唯一差别是不做刻度、不写 world）——refineHeight 的形态来源，
+ * 「效果与不基于已有一样」的代码保证。
+ */
+export function terrainFieldFor(
+  cells: Cell[],
+  seed: number,
+  shape: WorldShape,
+): Float64Array {
+  const rng = createRng(hashSeed(seed, 17));
+  const f = heightField(cells, seed, shape, rng);
+  erodeAndDespike(f, cells, shape);
+  return f;
+}
+
+/** 建地形：写 cell.height / cell.isOcean。 */
+export function buildTerrain(
+  world: World,
+  seed: number,
+  shape: WorldShape,
+  onProgress?: (label: string, frac: number) => void,
+): void {
+  const cells = world.cells;
+  const n = cells.length;
+  if (!n) return;
+  const rng = createRng(hashSeed(seed, 17));
+  void rng;
+
+  onProgress?.('Perlin-FBM 地形', 0.15);
+  const f = heightField(cells, seed, shape, rng);
+  erodeAndDespike(f, cells, shape, onProgress);
 
   // 刻度：海平面 = landRatio 分位（占比精确）；线性映射保算法形状；落差精确；平整率幂弯
   onProgress?.('刻度', 0.85);
