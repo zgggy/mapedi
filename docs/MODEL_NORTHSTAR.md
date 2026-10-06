@@ -131,10 +131,11 @@ removeCellsFromRegion`（brush.ts，仅测试引用）。
 - **现状事实**：改 `Region.cells` 的全部路径=绘制（membershipDraw.ts:113/106/158、stealFromSiblings
   brush:142、flood:427、endpoint drawController:446-469）、生成（unified.ts 各生成器、political.ts:112）、
   物化（materializeParentCells displayCompose:126-152）、高度重算（heightElements 三函数）；失效调用散在
-  各写者（touchRegions/Incremental/queuePieceInvalidation/reconcile）。
+  各写者（touchRegions/Incremental/queuePieceInvalidation/**reconcile 已于包 B 退役**）。
+  → 精确写点表（15 处/7 文件）见下方「包内分析」。
 - **结论**：建 `core/occupy.ts`（暂名）——**统一入口与协议，不重写算法**：`writeCells(region, next, cause)`
-  统一（COW 写+产出 patch+按 cause 记录失效/物化需求）；命令层（MultiRegionCommand history:94 /
-  HeightCellsCommand history:13）与写入器的关系=先分析（包内设计稿定）。
+  统一（COW 写 + Δ 记账 + 审计钩子；**失效/物化不在写入器内**——那是包 F 的 cause→touch 表）。
+  命令层（MultiRegionCommand history:94 / HeightCellsCommand history:13）与写入器的关系见下方包内分析。
 - **做法**：①"写点清单"复核（上列）+ 设计最小接口（热路径零分配约束、$state.raw 原地写禁令）
   ②逐模块迁移（先物化→高度→生成→绘制）③每迁移一步全量回归。
 - **必读参考**：本手册 §2；AGENTS §4 拓扑硬规则；记忆 `mapedi-render-diagnosis-*`（失效史）。
@@ -142,6 +143,52 @@ removeCellsFromRegion`（brush.ts，仅测试引用）。
   placement/allowOverlap 校验钩子在此预留（与 E/F 呼应）；`$state` 深代理 / structuredClone 历史坑
   （记忆 `mapedi-1b-paths-command.md` 的 DataCloneError）。
 - **验收**：笔画/生成/物化/undo 四类回归 + 热路径性能采样（p50 不劣化）。**待拍板：接口形态。**
+
+**包 C 包内分析（2026-10-06 执行前，写点逐一核完）**
+
+- **写点清单（`Region.cells` 全部写入，file:line 已核）**：
+
+  | # | 写点 | 域/谓词 | 写后失效（现状） |
+  |---|------|---------|------------------|
+  | 1 | `core/draw/brush.ts:127` addCellsToRegion | 绘制·并集（COW `[...set]`） | 无（由调用方收尾） |
+  | 2 | `core/draw/brush.ts:146` stealFromSiblings | 绘制·抢格（filter 旁者） | 无（同上） |
+  | 3-5 | `core/draw/membershipDraw.ts:108/113/121` | 绘制·replace 剥离 / 加 / 减 | 无（commit 后统一） |
+  | 6 | `core/draw/membershipDraw.ts:158` applySplitPolicy | 绘制·拆连通块（改本件+新建件） | 无 |
+  | 7 | `core/draw/roads.ts:70/72` dragRoadEndpoint | 绘制·端点格迁移（filter+push） | `touchPaint`（move）/`touchRegions`（end） |
+  | 8 | `core/displayCompose.ts:139` materializeParentCells | 物化·父=子并集 | 无（被 touchRegions* 在 bump 之后调用） |
+  | 9 | `core/layer/heightElements.ts:134` normalize | 高度·全量重导 | 载入路径由 replaceWorld/touchWorld 收尾 |
+  | 10 | `core/layer/heightElements.ts:195-196` update | 高度·增量（已自算 Δ） | `flushHeightRegions`→Δ 队列 + bumpHeightRev |
+  | 11 | `core/political.ts:63` 逐格 push | 生成·归属（O(n) push，顺序=land 序） | 世界替换→touchWorld |
+  | 12 | `core/political.ts:95-112` 行省分区（filter 后建字面量） | 生成·创建（非既有件写入） | 同上 |
+  | 13 | `core/history.ts:74/83/120` 快照回放 | 命令·apply/revert（`[...set]`） | `historyEffect` + 调用方 touchWorld/materialize |
+  | 14 | `core/history.ts:250/265` Annex/Delete 载荷 | 命令·吞并/移交 | 同上 |
+  | 15 | `core/validate.ts:187` 修复 zero_weight | 修复（**当前全库仅测试可达**，ValidatorPanel 已归档 D4=B） | 无 |
+
+  - 生成器（unified.ts 等）全部经**创建字面量**（`cells: [...]` 属对象构造，不是对既有件的写入）→ 写入器不覆盖创建，只覆盖"改已有归属"。
+  - 绘制域的失效时机在 **commit**（`DrawController.commitStroke`：快照-diff→MultiRegionCommand + `touchRegionsIncremental` + 逐件 queuePieceInvalidation），不在写点——写入器**不得**顺带失效，否则回到"写一半就失效"的老坑。
+
+- **接口设计（形态 1 · 瘦写入器，推荐）**：
+  ```ts
+  // core/occupy.ts
+  export type OccupyCause = 'paint' | 'height' | 'materialize' | 'generate' | 'undo' | 'repair';
+  export interface CellsDelta { regionId: string; layerId: string; added: CellId[]; removed: CellId[]; }
+  /** COW 写 + Δ 记账 + 审计钩子；无变化 → null（不换引用/不记账）。
+   *  opts.delta 已知差时跳过 diff（高度 update/物化自算、history 回放直取快照引用）。 */
+  export function writeCells(region: Region, next: readonly CellId[], cause: OccupyCause,
+                             opts?: { delta?: { added: CellId[]; removed: CellId[] } }): CellsDelta | null;
+  export function setOccupyObserver(fn: ((d: CellsDelta, cause: OccupyCause) => void) | null): void; // 探针/测试
+  export function setOccupyGuard(fn: ((r: Region, added: readonly CellId[], cause: OccupyCause) => CellId[] | null) | null): void; // 包 E 预留（placement/allowOverlap 是否前移）
+  ```
+  - 三件事：**COW**（`region.cells = next`——调用方保证 next 为独占新数组；写入器防呆：next === region.cells 时视为无变化）、**Δ**（opts.delta 或自算 diff；diff = O(|old|+|next|)，仅用于几百格的绘制/物化档）、**审计钩子**（默认 null，生产零开销）。
+  - 不做：失效分发、物化、校验拦截（guard 默认 null；包 E 拍板后才启用）——**写入器是记账点，不是管家**。
+
+- **形态对比**：
+  - **形态 1（推荐）瘦写入器**：零行为变更、可逐模块迁移、热路径零额外分配（已知差路径）；为 F 的 cause→touch 表与 E 的写入闸留好单一挂点。
+  - 形态 2 胖写入器（按 cause 查表失效/物化）：一步到位但侵入事务边界（笔画须等 commit、生成期世界未安装、载入期无 store）→ 极易复现旧坑，不建议。
+  - 形态 3 写入器+命令层合一（生成/载入/物化全部命令化）：最大重构，与"不做大爆炸"及现有 undo 快照机制冲突，✗。
+
+- **迁移顺序（每步一次全量回归）**：① 物化（#8）+ normalize（#9）——最静；② 高度 update（#10，opts.delta 直传现有 Δ）；③ 生成（#11 顺手改批量：收集后每国一次 writeCells，顺序=现 push 序，输出逐位不变）；④ 绘制（#1-7，opts.delta 由 commitStrokeDiff 现有快照差供给）；⑤ 命令回放（#13/#14，cause='undo'，直取快照引用不 diff；Annex/Delete 载荷同理）；⑥ validate 修复（#15）纳入或标注（仅测试可达）。
+- **反例清单**：涂改跨档（高度 Δ 与写入同源）/ 撤销回放（引用直取不二次 COW）/ 物化父残留（F 联动）/ 生成同 seed 逐位不变 / 端点拖动 `touchPaint` 轻失效不被改重 / 空并集（无变化返回 null）/ 100k 世界物化 diff 不劣化 p50。
 
 ### 包 D · 规则显式化 + 派生层能力
 - **现状事实**：§2 三套词汇；`genConfigFromParams` layer.ts:86-116 逐键覆盖 profile；
