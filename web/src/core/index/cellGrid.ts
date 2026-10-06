@@ -43,8 +43,10 @@ export class CellGrid {
     }
   }
 
+  /** 经度归一到 [−180,180)——wrap 后桶列必在域内（越界 lon=副本/反解表示，2026-10-06 跨 180 绘制 bug） */
   private col(lon: number) {
-    return Math.max(0, Math.min(this.cols - 1, Math.floor((lon + 180) / CELL_DEG)));
+    const l = (((lon + 180) % 360) + 360) % 360 - 180;
+    return Math.max(0, Math.min(this.cols - 1, Math.floor((l + 180) / CELL_DEG)));
   }
   private row(lat: number) {
     return Math.max(0, Math.min(this.rows - 1, Math.floor((lat + 90) / CELL_DEG)));
@@ -108,8 +110,10 @@ export class CellGrid {
     for (let dr = -ring; dr <= ring; dr++) {
       for (let dc = -ring; dc <= ring; dc++) {
         const rr = ri + dr;
-        const cc = ci + dc;
-        if (rr < 0 || cc < 0 || rr >= this.rows || cc >= this.cols) continue;
+        if (rr < 0 || rr >= this.rows) continue;
+        // 经度环绕：跨 180° 时桶列 wrap（2026-10-06 跨线绘制丢格 bug——nearest 有 wrap、
+        // queryRadius 没有：跨线笔刷系统性丢 40-55% 格 =「绘制偏移」）
+        const cc = ((ci + dc) % this.cols + this.cols) % this.cols;
         const list = this.buckets[rr * this.cols + cc];
         if (!list) continue;
         for (const id of list) test(id);

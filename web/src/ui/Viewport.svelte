@@ -56,6 +56,7 @@
     world,
     focusLayer = 'cells',
     centerBias = 0,
+    forceLayerId = null,
     drawActive = false,
     drawTool = 'brush' as DrawTool,
     brushRadiusDeg = 1.5,
@@ -79,6 +80,8 @@
      * ≡ W/2+inset/2），但画布恢复全宽 → 地图透到左栏组件后面（2026-10-06 用户定）。
      */
     centerBias?: number;
+    /** 绘制模式强制显示的焦点层（App 按模式传：draw → focusLayer；其余 null） */
+    forceLayerId?: string | null;
     drawActive?: boolean;
     drawTool?: DrawTool;
     brushRadiusDeg?: number;
@@ -698,6 +701,7 @@
           projParams,
           styleId,
           displayPieces: undefined,
+          forceLayerId,
           showCellMesh: false,
           styleOf: (id: string) => resolveLayerStyle(world, id, styleById(styleId)),
         },
@@ -851,7 +855,7 @@
     // 统一接口：选中 ≡ 显示；无图层特殊性
     const displayPieces = pathEdit
       ? undefined
-      : composeShownPieces(world, focusLayer, highlightRegionId);
+      : composeShownPieces(world, focusLayer, highlightRegionId, forceLayerId);
     // 成员对账补丁（手感批 2026-10-04）：本次数据修订内一次——已缓存件与**合成件
     // cellIds**（唯一显示真相，含区间型累积/父切片）的 Δ 就地补上（替代 touch* 的
     // 全清，全清=重建长帧闪屏）。必须在 compose 之后：期望集吃 dp.cellIds。
@@ -873,6 +877,7 @@
       pipeline: pathEdit ? pathPipeline : undefined,
       singleWorldCopy: pathEdit,
       displayPieces,
+      forceLayerId,
       isDragging: panningLive || zoomingLive,
       glScene: ensureMapGl() ?? undefined,
       onGeometryReady: requestRender,
@@ -958,6 +963,7 @@
     void styleId;
     void cam.scale;
     void centerBias; /* 面板开合 → 偏置变 → 立即重绘（viewCam 随动） */
+    void forceLayerId; /* 绘制模式强制显示 → 随动重绘 */
     onzoom?.(cam.scale / 180);
     requestRender();
     requestOverlay();

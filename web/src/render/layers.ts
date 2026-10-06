@@ -98,6 +98,8 @@ export interface RenderEnv {
   drawDx?: number;
   /** 本帧世界副本（整数序号 k；投影域位移由 offsetAt 点级派生） */
   copyKs?: number[];
+  /** 绘制模式强制显示的焦点层（2026-10-06：画了要看得见；非绘制模式无此例外） */
+  forceLayerId?: string | null;
   /** 点级内容位移：投影域 x 位移 = scale(y)·drawDx（圆柱族退化常数）。消费方唯一求值点。 */
   offsetAt?: (y: number) => number;
   /** 平移/缩放中：跳过脏区域重烘焙（贴图本身仍 1:1，不拉伸） */
@@ -1186,8 +1188,8 @@ export const decorationsLayer: RenderLayer = {
       if (labelMode === 'none' && coreSym === 'none' && cellSym === 'none' && cellMarker === 'none') continue;
       // baseMesh 层不进元素合成，但可以有装饰（cell 标记等）；显隐唯一真相=眼睛（2026-10-06）
       const shown = layer.baseMesh
-        ? layer.visible === true
-        : isLayerShown(world, layer.id);
+        ? layer.visible === true || (env.forceLayerId != null && env.forceLayerId === layer.id)
+        : isLayerShown(world, layer.id, env.forceLayerId);
       if (!shown) continue;
       const regions = decorRegionsOf(world, layer.id);
       // baseMesh 层的 cellMarker 遍历所有 cell，不依赖 Region

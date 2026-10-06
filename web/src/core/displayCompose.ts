@@ -250,11 +250,15 @@ export function splitRegionForDisplay(
  * placed=3/symbols=7 全残留））。
  * I6 有效显隐：自身 ∧ 祖先链——读时派生，旧档「父隐子显」自愈。
  */
-export function isLayerShown(world: World, layerId: string): boolean {
+export function isLayerShown(world: World, layerId: string, forceLayerId?: string | null): boolean {
   const l = world.layers.find((x) => x.id === layerId);
   if (!l) return false;
   // baseMesh（地块网格）单独走 cells 门（不进元素合成；其装饰在 decorationsLayer 直判 visible）
   if (l.baseMesh) return false;
+  // **绘制模式例外**（2026-10-06 用户定「绘制模式下，选中的图层要强制显示」——
+  // 否则画了看不见；替代 2026-10-02 旧「选中即显示」的仅此场景）：force = 绘制
+  // 模式下的焦点层 → 读时强制显示（不写 visible、眼睛状态不变）。
+  if (forceLayerId && layerId === forceLayerId) return true;
   return effectiveVisible(world, layerId);
 }
 
@@ -273,10 +277,11 @@ export function composeShownPieces(
   world: World,
   focusLayerId?: string | null,
   highlightRegionId?: string | null,
+  forceLayerId?: string | null,
 ): DisplayPiece[] {
-  const cacheKey = `${dataRev()}|${focusLayerId ?? ''}|${highlightRegionId ?? ''}`;
+  const cacheKey = `${dataRev()}|${focusLayerId ?? ''}|${highlightRegionId ?? ''}|${forceLayerId ?? ''}`;
   if (composeCache && composeCache.key === cacheKey) return composeCache.result;
-  const result = composeShownPiecesUncached(world, focusLayerId, highlightRegionId);
+  const result = composeShownPiecesUncached(world, focusLayerId, highlightRegionId, forceLayerId);
   composeCache = { key: cacheKey, result };
   return result;
 }
@@ -285,12 +290,13 @@ function composeShownPiecesUncached(
   world: World,
   focusLayerId?: string | null,
   highlightRegionId?: string | null,
+  forceLayerId?: string | null,
 ): DisplayPiece[] {
   const focus = focusLayerId || null;
   const byId = new Map(world.layers.map((l) => [l.id, l]));
 
   const shown = world.layers
-    .filter((l) => isLayerShown(world, l.id))
+    .filter((l) => isLayerShown(world, l.id, forceLayerId))
     .map((l) => l.id);
 
   // 叠放键 = derive 层叠放比较器单源（HIERARCHY §6.1 包2：焦点整段最后画）

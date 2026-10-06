@@ -70,7 +70,8 @@
       : (world.regions.find((r) => r.id === t)?.layerId ?? focusLayer);
     const l = world.layers.find((x) => x.id === layerId);
     if (!l) return '';
-    return isLayerShown(world, l.id)
+    // 绘制模式强制显示（2026-10-06）：画了看得见 → 仅在「非绘制模式残留会话」时才警告
+    return isLayerShown(world, l.id, shell.wsMode === 'draw' ? focusLayer : undefined)
       ? ''
       : `⚠ 正在绘制「${l.name}」但该图层已隐藏 —— 笔画画了看不见`;
   });
@@ -268,6 +269,7 @@
           {world}
           {focusLayer}
           centerBias={centerBias}
+          forceLayerId={shell.wsMode === 'draw' ? focusLayer : null}
           drawActive={draw.active}
           drawTool={draw.tool}
           brushRadiusDeg={draw.radiusDeg}

@@ -109,7 +109,9 @@ export function cellsInBrush(
   const r2 = radiusDeg * radiusDeg;
   const hits: CellId[] = [];
   for (const c of world.cells) {
-    const dx = c.center.lon - lon;
+    // 经度差 wrap（跨 180° 等价，2026-10-06 与 grid 同修）
+    let dx = c.center.lon - lon;
+    dx = (((dx + 180) % 360) + 360) % 360 - 180;
     const dy = c.center.lat - lat;
     if (dx * dx + dy * dy <= r2) hits.push(c.id);
   }

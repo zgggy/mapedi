@@ -90,6 +90,7 @@ export function buildRenderEnv(
     contentOffsetX,
     drawDx: contentOffsetX,
     copyKs,
+    forceLayerId: opts?.forceLayerId,
     highlightRegionId: opts?.highlightRegionId,
     hidePathId: opts?.hidePathId,
     displayPieces: opts?.displayPieces,
@@ -185,6 +186,8 @@ export function drawWorld(
     pipeline?: RenderLayer[];
     displayPieces?: import('../core/displayCompose').DisplayPiece[];
     showCellMesh?: boolean;
+    /** 绘制模式强制显示的焦点层（2026-10-06：画了要看得见） */
+    forceLayerId?: string | null;
     useDefaultRegions?: boolean;
     focusLayerId?: string;
     fillStyle?: import('../core/layer/style').ElementStyle;
