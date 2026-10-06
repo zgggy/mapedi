@@ -17,7 +17,7 @@
 import type { World } from '../types';
 import { isOcean } from '../types';
 import { terrainFieldFor } from '../terrain';
-import { clampHeight } from '../layer/heightIntervals';
+import { clampHeight, heightToIntervalIndex, HEIGHT_INTERVALS } from '../layer/heightIntervals';
 import type { WorldShape } from '../layer/genTypes';
 
 export interface RefineOpts {
@@ -387,6 +387,53 @@ export function refineHeight(world: World, opts: RefineOpts): number {
       if (!sm[c.id]) continue;
       c.height = clampHeight(Math.round(c.height + sm[c.id]));
       c.isOcean = isOcean({ height: c.height });
+    }
+  }
+
+  // ⑤b 手绘档位骨架（v8，2026-10-06——接回被 v7「效果同常规生成」改版覆盖丢失的
+  //    第六轮档语义：用户原话「平原整体是平原只在边缘起山、顶峰在哪哪起山」）：
+  //    - **只对 h0≠0（手绘过）且侧未被护岸 flip 的格**生效：带外 clamp 到本档
+  //      [lo,hi]（平原不出档、顶峰保高位）；档界带（同侧异档相接 + 膨胀 2）clamp 到
+  //      **同侧相接档联合区间** → 档间自然过渡（顶峰61↔平原12 之间长出 13..60 山脚）；
+  //    - h0=0（未画）格不受骨架约束 = 完全自由（=「其他地方自由发挥」）；
+  //    - 同侧 clamp 值不跨海陆（档区间天然同侧：陆 lo≥1 / 海 hi≤0）→ mask 不受扰。
+  //    顺序放⑦后：锚定/岸平滑可能把值推出档，骨架做最后的档收口。
+  {
+    const gi = new Uint8Array(n);
+    for (const c of cells) gi[c.id] = heightToIntervalIndex(h0[c.id]);
+    const isB = new Uint8Array(n);
+    for (const c of cells) {
+      const i = c.id;
+      if (h0[i] === 0) continue;
+      for (const j of c.neighbors) {
+        if (land[j] === land[i] && gi[j] !== gi[i]) { isB[i] = 1; break; }
+      }
+    }
+    const band = new Uint8Array(isB);
+    for (let t = 0; t < 2; t++) {
+      const add: number[] = [];
+      for (const c of cells) {
+        if (band[c.id]) continue;
+        for (const j of c.neighbors) if (band[j]) { add.push(c.id); break; }
+      }
+      for (const i of add) band[i] = 1;
+    }
+    for (const c of cells) {
+      const i = c.id;
+      if (h0[i] === 0) continue; // 未画：自由
+      if (land[i] !== (h0[i] >= 1 ? 1 : 0)) continue; // 护岸 flip 格：保持 v7 自由
+      let lo = HEIGHT_INTERVALS[gi[i]].lo;
+      let hi = HEIGHT_INTERVALS[gi[i]].hi;
+      if (band[i]) {
+        for (const j of c.neighbors) {
+          if (land[j] !== land[i]) continue; // 同侧相接档 → 联合区间（过渡）
+          const gj = HEIGHT_INTERVALS[gi[j]];
+          if (gj.lo < lo) lo = gj.lo;
+          if (gj.hi > hi) hi = gj.hi;
+        }
+      }
+      const v = Math.max(lo, Math.min(hi, c.height));
+      if (v !== c.height) c.height = v; // 同侧区间 → 值不跨侧，isOcean 无需改
     }
   }
 
