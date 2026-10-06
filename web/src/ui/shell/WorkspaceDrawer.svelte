@@ -101,13 +101,10 @@ import { isRowOrControlClick } from './shell';
   }
   const roots = $derived.by(() => {
     if (!world) return [] as Node[];
-    // 空档隐藏（2026-10-06 用户「总是显示所有高度元素，即使图中没有这个高度的
-    // 地块存在」=不合理）：**区间型空档**（cells 为空）不进列表——数据层 12 档
-    // 恒在（涂改/反算/重建不受影响），只是不占列表行；普通元素的空 cells（新建
-    // 未刷）照常显示。
-    const all = world.regions.filter(
-      (r) => r.layerId === focusLayer && !(r.attributes?.kind === 'interval' && r.cells.length === 0),
-    );
+    // 高度元素恒在（2026-10-06 用户澄清「我要求的所有高度元素一直在」——澄清句
+    // 推翻了此前按抱怨句式的空档隐藏）：**所有区间元素（含空档）始终显示**；
+    // 数据层缺档由下方 effect 的 ≠12 补齐兜底。
+    const all = world.regions.filter((r) => r.layerId === focusLayer);
     const tops = all.filter((r) => {
       if (!r.parentId) return true;
       const p = world.regions.find((x) => x.id === r.parentId);
@@ -203,8 +200,9 @@ import { isRowOrControlClick } from './shell';
   let listEl: HTMLElement | undefined = $state();
 
   $effect(() => {
-    // 只补缺失的高度区间元素；禁止依赖 world.regions 的条件重建（会无限触发）
-    if (world && isHeight && heightIntervalRegions(world).length === 0) {
+    // 高度元素**一直在**（2026-10-06 用户要求）：缺档即补齐（≠12 才重建——重建恒产
+    // 12 个元素，条件随即为假，不会无限触发；仅空档不动 cells）
+    if (world && isHeight && heightIntervalRegions(world).length !== 12) {
       rebuildHeightIntervalElements(world);
     }
   });

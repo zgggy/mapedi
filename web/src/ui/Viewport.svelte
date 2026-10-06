@@ -19,6 +19,7 @@
     type HoverInfo,
   } from '../render/map2d';
   import { getProjCache } from '../render/projCache';
+  import { worldCopyKs } from '../render/space';
   import { frameLayer, pathsLayer } from '../render/layers';
   import {
     screenToContentLonLat,
@@ -490,6 +491,27 @@
     ctx.clearRect(0, 0, overlay.width / dpr, overlay.height / dpr);
     const rect = canvas.getBoundingClientRect();
     const toScreen = (x: number, y: number) => toScreenXY(x, y, rect);
+    /**
+     * 副本展开（2026-10-06 用户「跨 180° 绘制高亮也要显示在左边的地图副本上」）：
+     * 反馈层（高亮/高度值）与件渲染同一副本集（worldCopyKs + 与会件同规 ±1）——
+     * 每格按 k 位移 contentOffsetAt(y, contentOffsetX + k·2π) 逐一投影，
+     * 跨线绘制时副本上也出高亮，与本体的无缝相接。
+     */
+    const pcFB = getProjCache(world, projection, projParamsOr());
+    const kAcc = new Set<number>();
+    for (const k of worldCopyKs(contentOffsetX, viewCam, rect.width, projection, pcFB.worldBBox)) {
+      kAcc.add(k - 1);
+      kAcc.add(k);
+      kAcc.add(k + 1);
+    }
+    const copyKsFB = [...kAcc].sort((a, b) => a - b);
+    const toScreenK = (q: { x: number; y: number }, k: number) => {
+      const off = contentOffsetAt(projection, q.y, contentOffsetX + k * Math.PI * 2);
+      return {
+        sx: worldToScreenX(q.x + off, viewCam, rect.width, 0),
+        sy: worldToScreenY(q.y, viewCam, rect.height),
+      };
+    };
 
     // —— 【绘制模型】cell 色块高亮：拖动中即时反馈，松手后真实重算落地即清 ——
     if (paintPreview.size) {
@@ -503,16 +525,18 @@
         const cell = world.cells[id];
         const poly = cell?.polygon;
         if (!poly?.length) continue;
-        const p = new Path2D();
-        for (let i = 0; i < poly.length; i++) {
-          const q = project(poly[i], projection, ppp);
-          const s = toScreen(q.x, q.y);
-          if (i === 0) p.moveTo(s.sx, s.sy);
-          else p.lineTo(s.sx, s.sy);
+        const qs = poly.map((ll) => project(ll, projection, ppp));
+        for (const k of copyKsFB) {
+          const p = new Path2D();
+          for (let i = 0; i < qs.length; i++) {
+            const s = toScreenK(qs[i], k);
+            if (i === 0) p.moveTo(s.sx, s.sy);
+            else p.lineTo(s.sx, s.sy);
+          }
+          p.closePath();
+          ctx.fill(p);
+          ctx.stroke(p);
         }
-        p.closePath();
-        ctx.fill(p);
-        ctx.stroke(p);
       }
     }
 
@@ -546,18 +570,20 @@
         const x = pc.centers[cell.id * 2];
         const y = pc.centers[cell.id * 2 + 1];
         if (!Number.isFinite(x)) continue;
-        const sp = toScreenXY(x, y, rect);
-        if (
-          sp.sx < -8 ||
-          sp.sy < -8 ||
-          sp.sx > rect.width + 8 ||
-          sp.sy > rect.height + 8
-        )
-          continue;
-        // 圈外兜底（投影/半径近似误差）
-        if (Math.hypot(sp.sx - brushSx, sp.sy - brushSy) > brushR * 1.15 && !isHover) continue;
         const label = cell.height.toFixed(2);
-        drawHLabel(sp.sx, sp.sy, label, isHover);
+        for (const k of copyKsFB) {
+          const sp = toScreenK({ x, y }, k);
+          if (
+            sp.sx < -8 ||
+            sp.sy < -8 ||
+            sp.sx > rect.width + 8 ||
+            sp.sy > rect.height + 8
+          )
+            continue;
+          // 圈外兜底（投影/半径近似误差）：副本实例离光标远则跳过——只显光标处副本的值
+          if (Math.hypot(sp.sx - brushSx, sp.sy - brushSy) > brushR * 1.15 && !isHover) continue;
+          drawHLabel(sp.sx, sp.sy, label, isHover);
+        }
       }
     }
 
