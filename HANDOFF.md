@@ -13,8 +13,9 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第五十八轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
+## 当前状态（第五十九轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/CONSTRAINT_SEMANTICS_2026-10-06.md` 约束评估、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
   - **包 D 包内分析已出（写入手册，待拍板）**：三套词汇死活判定（活=defaultGenConfig/genStrategy；半死=LayerConfig：placement/style 活、**splitPolicy 事实全死**、gen/elementSource/workspace 零消费）；漂移两处（country coreSelector 死表 vs 活表、culture placement=any vs scope=landOnly）；派生能力现状=仅从层聚合（generateFromLayer），无值域谓词派生。**待拍板三条**：规则边界（preset+参数 推荐）／splitPolicy 处置（删词 推荐）／死字段删除范围。
+  - **包 E 评估已落（2026-10-06）：`docs/CONSTRAINT_SEMANTICS_2026-10-06.md`（约束语义与多归属评估快照）**：统一语言（空间受限=集合判定+Min/Max+反受限）↔ 现状逐字段映射（Min=0 已符合 / Max=1 硬编码 / 反受限恒开 / PlacementRule=谓词读数值应改「单向地形门槛」且目标层=包 D 派生层 / require* 仅校验无闸）；冲突点四条（父≡∪子 vs 北极星「父可直接持有地块」· 每层≤1子 vs 多子图层 · 全局重算 vs 定向失效红线（已裁定）· 谓词式 placement）；**多归属影响面=parentId 82 处/17 文件**逐面改造方案（渲染侧不受影响）。**待拍板五项**：①多归属（建议 v1 不做）②父自持两案（建议 A 维持≡∪子）③单向地形门槛改造（建议做——受限概念首个真落地）④require* 前移（建议暂不）⑤多子图层（建议登记不做）。
   - **✓ 第五十八轮（2026-10-06 北极星对齐·包 D：规则显式化 + 派生层——用户拍板「A/1/删」）**：①词汇收编：`SplitPolicy` 类型/`DrawActor.splitPolicy`/`applySplitPolicy`（唯一实现只认 newElement 而全表无层声明=事实恒保留）/`DrawResult.elementSplit` 全删；`LayerConfig` 的 `gen`（零读取者，country coreSelector 与活表漂移）/`elementSource`/`workspace` + `LayerGenParams`/`ElementSource` 类型 + 七层条目同步清；`core/layer.ts` 再导出收窄。②**派生层**：`GenStrategy += derived`（复用策略词汇，不立第二套 flag）+ `LayerDef.derivation: DerivationSpec{preset:'heightThreshold', params:{threshold, aname?, bname?}}` + 新 `core/generate/derive.ts`（PRESETS 表 + runDerivation：id 稳定 `${layerId}-a/-b`、重跑幂等、产物=普通 Region）；运行=regenLayer 的 derived 分支（主线程直跑、无跨层清除、运行即 visible=true）；**不做自动跟随重算**（红线）。③入口：图层创建行 🧭（CreateRow.onCreateDerived → addLayer(name,{derived})）+ 生成面板第四分支（规则描述/高度界/两侧名 → setDerivationParam=LayerFieldsCommand 可撤销 →「运行派生」）。
   - **验收（浏览器 API+真实点击双路）**：建层 11→12、运行后陆地 21034=暴力统计 / 海洋 78966 / mism=0（完备互斥）→ 幂等（重跑逐位同、恒 2 元素）→ 参数生效（t=20 → 1814；名字改「大陆/大洋」）→ 参数撤销回 0 → 存档回环（genStrategy/derivation/cells 全保留）→ 面板六要素渲染 ✓；测试层已删，用户世界保留一个「陆海」演示层（可右键删）。**已知边界**：撤销建层不清理已产元素（与其它层"生成不可撤销"同现状）；派生层不进整世界生成。
   - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=包 E（约束概念化 + 多归属评估，待拍板：多归属做不做）**。
@@ -139,7 +140,7 @@
 
 ## 下一轮候选
 
-- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓ B ✓ C ✓ D ✓，下一包=E（约束概念化+多归属评估，含一项待拍板：多归属做不做）**；随后 F/G（支撑）/H（使用侧）。
+- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓ B ✓ C ✓ D ✓、E 评估已落**，E 后续实现待拍板五项（见 `docs/CONSTRAINT_SEMANTICS_2026-10-06.md` §6）；随后 F/G（支撑）/H（使用侧）。
 - **新议题（2026-10-04，未开工）：元素名称注记与核心符号**——调研+需求细化已落 `docs/LABEL_DESIGN_2026-10-04.md`（现状盘点带 file:line / 外部调研带来源 / R1–R21 / **待拍板 P1–P12** / 分期五包），等用户拍板 P1–P12 再动代码。
 - **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓、手感批+金钮 ✓）**；**下一阶段重心 = 用户使用**——选题与排序见 `docs/OPTIMIZE_REVIEW_2026-10-04.md` §7（第一梯队=搜索/测距/吞并/校验 toast 四个半成品入口），点名即做；并行技术线=存档镜像离线程/死码甲档/存档字段清洗/测试固化（同文档 §3-§5）。路径生成 R7 用户已定先不做；路网 paths=0 待点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。
