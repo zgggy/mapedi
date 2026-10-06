@@ -35,6 +35,65 @@ export interface RefineOpts {
 const SMOOTH_ITERS = 40;
 
 /**
+ * 海岸碎渣清理（2026-10-06 用户「海岸边上还有一些零碎的海岸，消除一下」）：
+ * 细化新产生的**碎块**（护岸关一层翻转 + 整数取整的边缘抖动）——对最终整数高度场
+ * 做连通域过滤：**不含任何手绘原格**的孤立小块（陆 <K 格 → 归海 −1；海 <K 格 →
+ * 归陆 +1）。含手绘格的域一律保留（用户故意画的小岛/湖泊不误伤）。确定性。
+ */
+function cleanCoastFragments(
+  cells: World['cells'],
+  handLand: Uint8Array,
+  K: number,
+): number {
+  const n = cells.length;
+  const land = new Uint8Array(n);
+  for (const c of cells) land[c.id] = c.height >= 1 ? 1 : 0;
+  let fixed = 0;
+  // 陆侧：非手绘来源的小陆块 → 海
+  const seen = new Uint8Array(n);
+  for (const c of cells) {
+    if (!land[c.id] || seen[c.id]) continue;
+    const comp: number[] = [];
+    let hasHand = false;
+    const stack = [c.id];
+    seen[c.id] = 1;
+    while (stack.length) {
+      const i = stack.pop()!;
+      comp.push(i);
+      if (handLand[i]) hasHand = true;
+      for (const j of cells[i].neighbors) {
+        if (land[j] && !seen[j]) { seen[j] = 1; stack.push(j); }
+      }
+    }
+    if (!hasHand && comp.length < K) {
+      for (const i of comp) { cells[i].height = -1; cells[i].isOcean = true; fixed++; }
+    }
+  }
+  // 海侧：非手绘来源的小水洼 → 陆（视觉=陆地中的空洞碎渣）
+  for (const c of cells) land[c.id] = c.height >= 1 ? 1 : 0;
+  const seen2 = new Uint8Array(n);
+  for (const c of cells) {
+    if (land[c.id] || seen2[c.id]) continue;
+    const comp: number[] = [];
+    let hasHand = false;
+    const stack = [c.id];
+    seen2[c.id] = 1;
+    while (stack.length) {
+      const i = stack.pop()!;
+      comp.push(i);
+      if (!handLand[i]) hasHand = true; // 手绘海格
+      for (const j of cells[i].neighbors) {
+        if (!land[j] && !seen2[j]) { seen2[j] = 1; stack.push(j); }
+      }
+    }
+    if (!hasHand && comp.length < K) {
+      for (const i of comp) { cells[i].height = 1; cells[i].isOcean = false; fixed++; }
+    }
+  }
+  return fixed;
+}
+
+/**
  * 直接写 cells.height / isOcean；返回变更格数（0 = 无可依据骨架）。
  * 调用方负责快照 → HeightCellsCommand 入栈 → flushHeightRegions。
  */
@@ -163,6 +222,11 @@ export function refineHeight(world: World, opts: RefineOpts): number {
     if (c.height !== v) { c.height = v; changed++; }
     c.isOcean = isOcean({ height: v });
   }
-  void h0;
+
+  // ⑥ 海岸碎渣清理（不含手绘原格的 <4 格连通碎块归并）
+  const handLand = new Uint8Array(n);
+  for (const c of cells) handLand[c.id] = h0[c.id] >= 1 ? 1 : 0;
+  changed += cleanCoastFragments(cells, handLand, 4);
+
   return changed;
 }
