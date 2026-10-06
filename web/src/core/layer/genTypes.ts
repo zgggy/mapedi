@@ -31,8 +31,12 @@ export interface WorldShape {
   landRatio: number;
   /** 落差：生成后 max − min（20–127） */
   relief: number;
-  /** 平整率 0–1：越大越多 cell 贴海平面 */
+  /** 平整率 0–1（v8 语义，2026-10-06 设计稿 P1）：分布集中度——0=均匀比例、
+   *  1=近 0 高度 ≥95%（正态+2%宽尾混合；顶峰/深海仍每次出现） */
   flatness: number;
+  /** 贴近原始 0–1（2026-10-06 设计稿 P2/P3）：手绘锚点（h0≠0 格）的锁定强度
+   *  ——0=现状（不考虑原始）、1=锚点高度变化 ≈0（其余自由发挥） */
+  anchorFit?: number;
   /** 大陆尺度 0–1：越大越少越大（噪声频率越低） */
   continentScale: number;
   /** 海岸破碎度 0–1（域扭曲强度） */
@@ -53,6 +57,7 @@ export const DEFAULT_WORLD_SHAPE: WorldShape = {
   landRatio: 0.15,
   relief: 127,
   flatness: 0,
+  anchorFit: 0,
   continentScale: 0.5,
   coastBreak: 0.55,
   mountain: 0.7,

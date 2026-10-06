@@ -34,6 +34,107 @@ export interface RefineOpts {
  */
 const SMOOTH_ITERS = 40;
 
+/** 锚定影响半径（格；设计稿 P3 的 R≈12） */
+const ANCHOR_R = 12;
+
+/**
+ * 分布集中度（2026-10-06 设计稿 P1：「0=均匀、1=近 0 占比 95%+，顶峰深海仍出现」）：
+ * 目标分布 = (1−m)·截断正态(峰在区间端=近 0 侧) + m·均匀宽尾（保证顶峰/深海每次出现）；
+ * 落地 = 分位反演（归一 [0,1] 上构造 CDF 表，二分反演）。t≤0 → 恒等（现状逐位）。
+ * 区间跨度两侧都是 63 档 → 通用一张表（x 归一到 [0,1]，σ 以档为单位）。
+ */
+const TAIL_M = 0.02;
+const SIGMA0 = 37; // t=0：≈均匀的等效宽度（观感=均匀比例）
+const SIGMA1 = 4.5; // t=1：P(|h|≤8 档)≈95%+
+const cdfCache = new Map<number, Float64Array>();
+function cdfTable(t: number): Float64Array {
+  const key = Math.round(t * 200);
+  let tbl = cdfCache.get(key);
+  if (tbl) return tbl;
+  const tt = key / 200;
+  const sigma = SIGMA0 * Math.pow(SIGMA1 / SIGMA0, tt);
+  const N = 1024;
+  tbl = new Float64Array(N + 1);
+  let acc = 0;
+  for (let i = 0; i <= N; i++) {
+    const x = i / N;
+    const hh = x * 63;
+    const dens = (1 - TAIL_M) * Math.exp(-(hh * hh) / (2 * sigma * sigma)) + TAIL_M;
+    tbl[i] = acc;
+    acc += dens;
+  }
+  for (let i = 0; i <= N; i++) tbl[i] /= acc;
+  cdfCache.set(key, tbl);
+  return tbl;
+}
+function concentrateQuantile(u: number, t: number): number {
+  if (t <= 0 || u <= 0) return u;
+  if (u >= 1) return 1;
+  const tbl = cdfTable(t);
+  const N = tbl.length - 1;
+  let lo = 0;
+  let hi = N;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (tbl[mid] < u) lo = mid + 1;
+    else hi = mid;
+  }
+  const i = Math.max(1, lo);
+  const f0 = tbl[i - 1];
+  const f1 = tbl[i];
+  const frac = f1 > f0 ? (u - f0) / (f1 - f0) : 0;
+  return (i - 1 + frac) / N;
+}
+
+/**
+ * 低频延拓（v7 的 u 构造抽共用；岸线修正与锚定修正同构只换源）：
+ * 多源 BFS 取最近源值 + 同域均值平滑 SMOOTH_ITERS 轮。
+ */
+function lowfreqExtend(
+  world: World,
+  sameSide: Uint8Array,
+  isSrc: Uint8Array,
+  srcVal: Float64Array,
+): { u: Float64Array; dist: Int32Array } {
+  const cells = world.cells;
+  const n = cells.length;
+  const u = new Float64Array(n);
+  const dist = new Int32Array(n).fill(-1);
+  const seen = new Uint8Array(n);
+  const q: number[] = [];
+  for (const c of cells) {
+    const i = c.id;
+    if (isSrc[i]) { u[i] = srcVal[i]; seen[i] = 1; dist[i] = 0; q.push(i); }
+  }
+  for (let head = 0; head < q.length; head++) {
+    const i = q[head];
+    for (const j of cells[i].neighbors) {
+      if (sameSide[j] !== sameSide[i] || seen[j]) continue;
+      seen[j] = 1;
+      u[j] = u[i];
+      dist[j] = dist[i] + 1;
+      q.push(j);
+    }
+  }
+  const uNext = new Float64Array(n);
+  for (let t = 0; t < SMOOTH_ITERS; t++) {
+    for (const c of cells) {
+      const i = c.id;
+      if (isSrc[i]) { uNext[i] = u[i]; continue; }
+      let sum = 0;
+      let cnt = 0;
+      for (const j of c.neighbors) {
+        if (sameSide[j] !== sameSide[i]) continue;
+        sum += u[j];
+        cnt++;
+      }
+      uNext[i] = cnt ? sum / cnt : u[i];
+    }
+    u.set(uNext);
+  }
+  return { u, dist };
+}
+
 /**
  * 海岸碎渣清理（2026-10-06 用户「海岸边上还有一些零碎的海岸，消除一下」；
  * v2 同日「还是碎」修正）：对最终整数高度场做连通域过滤——**不含「手绘未翻格」**
@@ -138,6 +239,8 @@ export function refineHeight(world: World, opts: RefineOpts): number {
 
   // ② 同源完整形态场（与 buildTerrain 同链：含热侵蚀/去尖刺）
   const f = terrainFieldFor(cells, opts.seed, opts.shape);
+  // 分布集中度参数（设计稿 P1：平整旋钮新语义）
+  const shapeFlat = Math.max(0, Math.min(1, opts.shape.flatness));
 
   // ③ 护岸关（默认）：岸线按形态场在 ±1 格内微调——逐岸格与**最近异侧岸格**比 f：
   //    陆格低于对岸（对岸地形更高）→ 让给海；海格高于对岸 → 并给陆。
@@ -188,49 +291,15 @@ export function refineHeight(world: World, opts: RefineOpts): number {
     }
   }
 
-  // ④ 边界值延拓 u：BFS 最近岸值+同域距离 d（同域）→ 同域均值平滑若干轮
-  //    （u|岸 = f|岸 ⇒ h|岸 = 0；u 低频 ⇒ h 保留 f 的全部中高频细节）
-  const u = new Float64Array(n);
-  const uNext = new Float64Array(n);
+  // ④ 边界值延拓 u（= lowfreqExtend：岸格为源、值=f|岸 → 同域低频延拓；
+  //    u|岸 = f|岸 ⇒ h|岸 = 0；u 低频 ⇒ h 保留 f 全部中高频细节）
   const isBoundary = new Uint8Array(n);
-  const dist = new Int32Array(n).fill(-1);
   for (const c of cells) {
     for (const j of c.neighbors) {
       if (land[j] !== land[c.id]) { isBoundary[c.id] = 1; break; }
     }
   }
-  {
-    const seen = new Uint8Array(n);
-    const q: number[] = [];
-    for (const c of cells) {
-      if (isBoundary[c.id]) { u[c.id] = f[c.id]; seen[c.id] = 1; dist[c.id] = 0; q.push(c.id); }
-    }
-    for (let head = 0; head < q.length; head++) {
-      const i = q[head];
-      for (const j of cells[i].neighbors) {
-        if (land[j] !== land[i] || seen[j]) continue;
-        seen[j] = 1;
-        u[j] = u[i];
-        dist[j] = dist[i] + 1;
-        q.push(j);
-      }
-    }
-  }
-  for (let t = 0; t < SMOOTH_ITERS; t++) {
-    for (const c of cells) {
-      const i = c.id;
-      if (isBoundary[i]) { uNext[i] = u[i]; continue; }
-      let sum = 0;
-      let cnt = 0;
-      for (const j of c.neighbors) {
-        if (land[j] !== land[i]) continue;
-        sum += u[j];
-        cnt++;
-      }
-      uNext[i] = cnt ? sum / cnt : u[i];
-    }
-    u.set(uNext);
-  }
+  const { u, dist } = lowfreqExtend(world, land, isBoundary, f);
 
   // ⑤ h = f − u·w(d)：修正只在近岸带内（w 在 W 格外归零）→ **内陆逐点 = 同源场
   //    原样**（「效果和不基于已有一样」的硬保证）；岸格 w=1 ⇒ h=f−u=0 精确贴岸。
@@ -258,20 +327,76 @@ export function refineHeight(world: World, opts: RefineOpts): number {
     const d = dist[i] < 0 ? W : dist[i];
     const w = d >= W ? 0 : 1 - (d / W) * (d / W) * (3 - 2 * (d / W));
     const hv = f[i] - u[i] * w;
+    // 分布集中度（设计稿 P1）：0=恒等（现状）；1=近 0 侧 ≥95%（正态+2% 宽尾，
+    // 顶峰/深海仍出现）——陆 u=0=海岸(近 0 侧) 直接进表；海 u=1=贴岸 → 1−u 进表
     let v: number;
     if (land[i]) {
-      v = Math.max(1, Math.min(64, Math.round(1 + ((hv - lMin) / lSpan) * 63)));
+      const uL = Math.max(0, Math.min(1, (hv - lMin) / lSpan));
+      v = Math.max(1, Math.min(64, Math.round(1 + concentrateQuantile(uL, shapeFlat) * 63)));
     } else {
-      v = Math.max(-63, Math.min(0, Math.round(-63 + ((hv - sMin) / sSpan) * 63)));
+      const uS = Math.max(0, Math.min(1, (hv - sMin) / sSpan));
+      const q = 1 - concentrateQuantile(1 - uS, shapeFlat);
+      v = Math.max(-63, Math.min(0, Math.round(-63 + q * 63)));
     }
     if (c.height !== v) { c.height = v; changed++; }
     c.isOcean = isOcean({ height: v });
   }
 
-  // ⑥ 海岸碎渣清理（不含手绘原格的 <4 格连通碎块归并）
+  // ⑥ 锚定修正（设计稿 P2/P3：贴近原始——锚=手绘非 0 格；0=现状逐位、
+  //    1=锚点 |Δh|≤1 且其余自由发挥）。与岸线修正同构只换源（lowfreqExtend 复用）；
+  //    在分布刻度**之后**收尾 ⇒ t₀=1 时锚点被精确锁回 h0（分布集中度不会破锚）。
+  const t0 = Math.max(0, Math.min(1, opts.shape.anchorFit ?? 0));
+  if (t0 > 0) {
+    const isAnchor = new Uint8Array(n);
+    const errSrc = new Float64Array(n);
+    let anyAnchor = false;
+    for (const c of cells) {
+      const i = c.id;
+      if (h0[i] !== 0) { isAnchor[i] = 1; errSrc[i] = c.height - h0[i]; anyAnchor = true; }
+    }
+    if (anyAnchor) {
+      const ext = lowfreqExtend(world, land, isAnchor, errSrc);
+      for (const c of cells) {
+        const i = c.id;
+        const dA = ext.dist[i] < 0 ? ANCHOR_R : ext.dist[i];
+        const wA = dA >= ANCHOR_R ? 0 : 1 - (dA / ANCHOR_R) * (dA / ANCHOR_R) * (3 - 2 * (dA / ANCHOR_R));
+        if (wA <= 0) continue;
+        const v = clampHeight(Math.round(c.height - ext.u[i] * t0 * wA));
+        if (v !== c.height) { c.height = v; c.isOcean = isOcean({ height: v }); }
+      }
+    }
+  }
+
+  // ⑦ 岸线值平滑（设计稿 P4 第三步：1 轮沿岸值平滑——动值不动 mask=破碎感形状保留；
+  //    护岸开时关闭）
+  if (!opts.protectCoast) {
+    const sm = new Float64Array(n);
+    for (const c of cells) {
+      const i = c.id;
+      if (!isBoundary[i]) continue;
+      let sum = 0;
+      let cnt = 0;
+      for (const j of c.neighbors) {
+        if (land[j] !== land[i]) continue;
+        sum += c.height;
+        cnt++;
+      }
+      if (cnt) sm[i] = 0.35 * (sum / cnt - c.height);
+    }
+    for (const c of cells) {
+      if (!sm[c.id]) continue;
+      c.height = clampHeight(Math.round(c.height + sm[c.id]));
+      c.isOcean = isOcean({ height: c.height });
+    }
+  }
+
+  // ⑧ 海岸碎渣清理 + 最小特征尺度（设计稿 P4：碎岛 K 由「海岸破碎」反向映射——
+  //    0=平滑海岸 K=220、1=碎但不零碎 K=40；碎湾收口=海侧同规则归并）
   const handLand = new Uint8Array(n);
   for (const c of cells) handLand[c.id] = h0[c.id] >= 1 ? 1 : 0;
-  changed += cleanCoastFragments(cells, handLand, 30);
+  const cb = Math.max(0, Math.min(1, opts.shape.coastBreak));
+  const Kmin = Math.round(220 * (1 - cb) + 40 * cb);
+  changed += cleanCoastFragments(cells, handLand, Kmin);
 
   return changed;
 }

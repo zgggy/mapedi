@@ -307,6 +307,7 @@ export class GenerationService {
       seaRugged: num('seaRugged', DEFAULT_WORLD_SHAPE.seaRugged),
       latBias: num('latBias', DEFAULT_WORLD_SHAPE.latBias),
       erosion: num('erosion', DEFAULT_WORLD_SHAPE.erosion),
+      anchorFit: num('anchorFit', DEFAULT_WORLD_SHAPE.anchorFit ?? 0),
     };
   }
 

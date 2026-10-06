@@ -214,7 +214,7 @@
             ? basedOn ? '⚠ 确认细化（清除其他图层）？' : '⚠ 确认（清除其他图层）？'
             : basedOn ? '⛰️ 基于已有细化' : '⛰️ 生成高度图'}</button>
         </div>
-        <div class="hint">{#if basedOn}手绘档位 = 骨架（平原保持平原、顶峰在哪哪起山），形态用与建地形同源的山川场（随机方向、弯曲、海沟有走向）；档界自动长出过渡层次；护岸默认关 = 海岸随形态场微调（开 = 逐格锁定）；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
+        <div class="hint">{#if basedOn}手绘档位 = 骨架，形态与建地形同源；【平整】0=均匀分布、1=近 0 高度 ≥95%（顶峰/深海仍出现）；【贴近原始】0=不考虑原始、1=手绘过的格高度基本不变（其余自由发挥）；【海岸破碎】0=平滑海岸、1=碎但不零碎（碎岛最小尺度反向映射）；护岸默认关 = 海岸随形态场微调；将清除地块与高度以外的全部图层内容——再次点击确认{:else}按下方地形参数重跑地形（同种子同参 = 同果，🎲 换种子即换地形）；将清除地块与高度以外的全部图层内容——再次点击确认{/if}</div>
         {#if shape}
           <!-- 地形 3×N 紧凑网格（2026-10-03 包3：两列长行滚动 → 网格；占比通栏） -->
           <div class="tgrid">
@@ -244,6 +244,10 @@
             <label class="tcell"><span>细节</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.detail} label="细节量" width={84} onInput={(v) => setShape('detail', v)} /></label>
             <label class="tcell"><span>海床</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.seaRugged} label="海底起伏" width={84} onInput={(v) => setShape('seaRugged', v)} /></label>
             <label class="tcell"><span>平整</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.flatness} label="平整率" width={84} onInput={(v) => setShape('flatness', v)} /></label>
+            {#if basedOn}
+              <!-- 贴近原始（2026-10-06 设计稿 P2/P3）：锚=手绘非 0 格；0=现状、1=锚点高度变化≈0 -->
+              <label class="tcell"><span>贴近原始</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.anchorFit ?? 0} label="贴近原始" width={84} onInput={(v) => setShape('anchorFit', v)} /></label>
+            {/if}
             {#if !basedOn}
             <label class="tcell"><span>低纬倾向</span><CapsuleSlider min={0} max={1} step={0.05} value={shape.latBias} label="中低纬倾向" width={84} onInput={(v) => setShape('latBias', v)} /></label>
             {/if}
