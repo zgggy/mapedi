@@ -18,6 +18,8 @@
     selected = false,
     hidden = false,
     badge = false,
+    badgeText = '',
+    badgeTitle = '',
     open = false,
     content,
     onClick,
@@ -39,6 +41,9 @@
     hidden?: boolean;
     /** 该行有显隐语义（图层/路径画 👁 徽章）——元素行已废除单体显隐（2026-10-04 用户定），不传 */
     badge?: boolean;
+    /** 行徽标文本（如「⧉2」多归属；空=不显示） */
+    badgeText?: string;
+    badgeTitle?: string;
     /** 本行展开态（选中/聚焦驱动；open 时原地长出 content） */
     open?: boolean;
     /** 展开内容（检查/生成/绘制/组织模式区；缺省 = 纯行不可展开） */
@@ -84,6 +89,9 @@
       {#if badge && !hidden}
         <span class="badge" title="显示中">👁</span>
       {/if}
+      {#if badgeText}
+        <span class="badge btext" title={badgeTitle || badgeText}>{badgeText}</span>
+      {/if}
       {#if content}
         <span class="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
       {/if}
@@ -125,6 +133,11 @@
   .ibtn.hidden .nm {
     opacity: 0.55;
   }
+  .badge.btext {
+    opacity: 0.85;
+    font-size: 10px;
+  }
+
   .badge {
     flex: 0 0 auto;
     font-size: 9px;

@@ -366,6 +366,7 @@ import { isRowOrControlClick } from './shell';
         depth: number,
         hidden = false,
         badge = false,
+        badgeText = '',
       )}
         <ItemButton
           logoColor={color}
@@ -374,6 +375,8 @@ import { isRowOrControlClick } from './shell';
           selected={selectedRegionId === id}
           {hidden}
           {badge}
+          {badgeText}
+          badgeTitle={badgeText ? '多归属（争议区）：同时属于多个父元素' : ''}
           {open}
           content={body ?? undefined}
           onClick={() => {
@@ -562,6 +565,9 @@ import { isRowOrControlClick } from './shell';
               selectedRegionId === id,
               selectedRegionId === id && modeBodyOf(id) ? rowBody : null,
               n.depth,
+              false,
+              false,
+              (n.region.parents?.length ?? 0) > 1 ? `⧉${n.region.parents!.length}` : '',
             )}
           {/if}
         </li>

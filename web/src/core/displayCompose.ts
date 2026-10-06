@@ -145,9 +145,11 @@ export function materializeBackPropagate(world: World): void {
       for (const k of kids ?? []) for (const id of k.cells) union.add(id);
       r.selfCells = r.cells.filter((id) => !union.has(id));
     }
-    if (!kids?.length) return; // 无子：cells 即自持，无需重写
+    // 无子：**仅在从未建立自持（非聚合形态）时不动**；已建立自持的目标必须重写——
+    // 否则移除最后一个子元素后 cells 残留旧并集（E2 实测踩到：争议区解绑后疆域不清）。
+    if (!kids?.length && r.selfCells === undefined) return;
     const set = new Set<CellId>(r.selfCells ?? []);
-    for (const k of kids) for (const id of k.cells) set.add(id);
+    for (const k of kids ?? []) for (const id of k.cells) set.add(id);
     const prev = new Set(r.cells);
     const added: CellId[] = [];
     const removed: CellId[] = [];

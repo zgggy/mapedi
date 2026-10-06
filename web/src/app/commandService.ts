@@ -34,7 +34,7 @@ function upsertContainment(
   if (!target) return rest.length ? rest : undefined;
   return [...rest, { of: target, set: 'contained', min: 0, max: 1, backPropagate: true }];
 }
-import { planIndent, planPromote, layerCopyAsRoot, bestParentFor, reparentElement } from '../core/hierarchy/ops';
+import { planIndent, planPromote, layerCopyAsRoot, bestParentFor, addParentElement, removeParentElement } from '../core/hierarchy/ops';
 import { tintOf } from '../core/layer/palette';
 import {
   defaultLayerVisible,
@@ -224,6 +224,9 @@ export class CommandService {
    * indent/unindent「只改 parent、不动数组序」推理的不变量。
    * O2（2026-10-03）：walk 收编 core/layer/tree 单源，本方法只做形状适配。
    */
+  /** 建层序号（同毫秒防撞，见 addLayer） */
+  private layerSeq = 0;
+
   private layerDisplayList(): { id: string; parentId: string | undefined }[] {
     return layerTreeOf(this.world).map((r) => ({
       id: r.id,
@@ -493,22 +496,22 @@ export class CommandService {
   }
 
   /**
-   * 手动挂靠（HIERARCHY D4，包4）：孤儿元素（无父且本层有父层）挂到
-   * 共享邻接最多的父层元素——打分单源 ops.bestParentFor；闸复核桥不变量；
-   * 一条 RegionFieldsCommand + touchRegions（物化父 cells）。
+   * 归属挂靠（受限架构 E2）：给元素**加一个父**——打分单源 ops.bestParentFor
+   * （遍历「被包含」目标层、取仍有余量者）；闸复核环/桥/Max；一条 RegionFieldsCommand。
+   * 游离元素可挂靠；已达上限（Max）的元素不出现入口。
    */
   attachElement(id: string): void {
     const w = this.world;
     if (!w) return;
     const best = bestParentFor(w, id);
     if (!best) {
-      this.status = '无可挂靠的父层元素（本层无父层或已有父）';
+      this.status = '无可挂靠的目标元素（本层无「被包含」约束，或已达归属上限）';
       return;
     }
     const el = w.regions.find((r) => r.id === id);
     if (!el) return;
-    const before = el.parents;
-    const err = reparentElement(w, id, best.id);
+    const before = el.parents ? [...el.parents] : undefined;
+    const err = addParentElement(w, id, best.id);
     if (err) {
       this.status = `挂靠失败：${err}`;
       return;
@@ -516,13 +519,38 @@ export class CommandService {
     history.run(
       w,
       new RegionFieldsCommand(
-        [{ id, before: { parents: before }, after: { parents: [best.id] } }],
+        [{ id, before: { parents: before }, after: { parents: el.parents ? [...el.parents] : undefined } }],
         '挂靠',
       ),
       { alreadyApplied: true },
     );
     this.touchRegions();
-    this.status = `已挂靠到「${best.name || best.id}」（Ctrl+Z 可撤销）`;
+    this.status = `已归属「${best.name || best.id}」（Ctrl+Z 可撤销）`;
+  }
+
+  /** 归属移除（受限架构 E2 · 检查区隶属行 ×）：过 Min 闸；空 = 游离（min=0 合法）。 */
+  removeParent(id: string, parentId: string): void {
+    const w = this.world;
+    if (!w) return;
+    const el = w.regions.find((r) => r.id === id);
+    if (!el) return;
+    const before = el.parents ? [...el.parents] : undefined;
+    const err = removeParentElement(w, id, parentId);
+    if (err) {
+      this.status = `移除归属失败：${err}`;
+      return;
+    }
+    history.run(
+      w,
+      new RegionFieldsCommand(
+        [{ id, before: { parents: before }, after: { parents: el.parents ? [...el.parents] : undefined } }],
+        '移除归属',
+      ),
+      { alreadyApplied: true },
+    );
+    this.touchRegions();
+    const p = w.regions.find((r) => r.id === parentId);
+    this.status = `已移除归属「${p?.name || parentId}」（Ctrl+Z 可撤销）`;
   }
 
   /**
@@ -615,7 +643,8 @@ export class CommandService {
   addLayer(name?: string, opts?: { derived?: boolean }) {
     if (!this.world) return;
     const n = this.world.layers.filter((l) => l.id.startsWith('custom-')).length + 1;
-    const id = `custom-${Date.now().toString(36)}`;
+    // id 单调化：Date.now 同毫秒连建会撞号（曾致 Svelte keyed each 重复键崩溃）
+    const id = `custom-${Date.now().toString(36)}-${(this.layerSeq = (this.layerSeq ?? 0) + 1).toString(36)}`;
     const label = (name ?? this.newName)?.trim() || `图层 ${n}`;
     const layer = {
       id,

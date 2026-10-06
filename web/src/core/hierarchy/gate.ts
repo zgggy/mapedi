@@ -69,27 +69,80 @@ export function checkElementReparent(
   elementId: string,
   newParentId: string | null,
 ): string | null {
+  // 换父（单父流程：父笔刷收编/挂靠/生成兜底）= 加父；清空 = 去全部父（过 Min）
+  if (newParentId === null) {
+    const child = world.regions.find((r) => r.id === elementId);
+    for (const p of child?.parents ?? []) {
+      const err = checkParentRemove(world, elementId, p);
+      if (err) return err;
+    }
+    return null;
+  }
+  const child = world.regions.find((r) => r.id === elementId);
+  if (child?.parents?.includes(newParentId)) return null; // 已归属 = 幂等通过
+  return checkParentAdd(world, elementId, newParentId);
+}
+
+/** 本层对某目标层的「被包含」约束（无 → undefined） */
+export function containmentConstraint(
+  world: Pick<World, 'layers'>,
+  layerId: string,
+  targetLayerId: string,
+) {
+  return (world.layers.find((l) => l.id === layerId)?.constraints ?? [])
+    .find((c) => c.set === 'contained' && c.of === targetLayerId);
+}
+
+/** 归属目标计数（同一目标层；多归属按目标层分别计） */
+function parentCountInLayer(world: World, child: { parents?: string[] }, targetLayerId: string): number {
+  return (child.parents ?? []).filter(
+    (p) => world.regions.find((r) => r.id === p)?.layerId === targetLayerId,
+  ).length;
+}
+
+/**
+ * 归属增删（受限架构 E2 · 多归属）：加父需过 环 / 桥 / **Max**；去父需过 **Min**。
+ * 数量按「同一目标层」计（每条 contained 约束各自一对 min/max）——Max=N 即争议区。
+ * 返回 null = 合法。
+ */
+export function checkParentAdd(world: World, elementId: string, parentId: string): string | null {
   const child = world.regions.find((r) => r.id === elementId);
   if (!child) return '元素不存在';
-  if (newParentId === null) return null;
-  if (newParentId === elementId) return '元素不能是自己的父';
-  const parent = world.regions.find((r) => r.id === newParentId);
+  if (parentId === elementId) return '元素不能是自己的父';
+  const parent = world.regions.find((r) => r.id === parentId);
   if (!parent) return '父元素不存在（悬空）';
+  if (child.parents?.includes(parentId)) return '已归属该元素';
   // 环：沿 parents DAG 上爬
   const seen = new Set<string>([elementId]);
-  const stack = [newParentId];
+  const stack = [parentId];
   while (stack.length) {
     const cur = stack.pop()!;
     if (cur === elementId) return '会成环';
     if (seen.has(cur)) continue;
     seen.add(cur);
-    const r = world.regions.find((x) => x.id === cur);
-    stack.push(...(r?.parents ?? []));
+    stack.push(...(world.regions.find((x) => x.id === cur)?.parents ?? []));
   }
-  // 桥不变量（受限架构）：父元素的层必须在本层「被包含」约束的目标层集合内
-  const targets = containmentTargets(world, child.layerId);
-  if (!targets.includes(parent.layerId)) {
-    return '桥不变量：父元素的层不在本层「被包含」约束的目标层内';
+  // 桥不变量 + Max
+  const c = containmentConstraint(world, child.layerId, parent.layerId);
+  if (!c) return '桥不变量：本层未声明对该层的「被包含」约束';
+  if (c.max !== null) {
+    const n = parentCountInLayer(world, child, parent.layerId);
+    if (n >= c.max) return `上限 ${c.max} 个「${parent.layerId}」元素（当前 ${n}）`;
+  }
+  return null;
+}
+
+export function checkParentRemove(world: World, elementId: string, parentId: string): string | null {
+  const child = world.regions.find((r) => r.id === elementId);
+  if (!child) return '元素不存在';
+  if (!child.parents?.includes(parentId)) return '未归属该元素';
+  const parent = world.regions.find((r) => r.id === parentId);
+  const parentLayerId = parent?.layerId;
+  if (!parentLayerId) return null;
+  const c = containmentConstraint(world, child.layerId, parentLayerId);
+  if (c && c.min > 0) {
+    const n = parentCountInLayer(world, child, parentLayerId);
+    if (n - 1 < c.min) return `至少需归属 ${c.min} 个「${parentLayerId}」元素`;
   }
   return null;
 }

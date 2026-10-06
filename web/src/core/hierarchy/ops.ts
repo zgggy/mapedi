@@ -9,7 +9,7 @@
  * 原 regionOps 收编）都在此；paths 序仍在 commandService.withPaths（路径编辑域）。
  */
 import type { LayerDef, Region, World } from '../types';
-import { checkElementReparent, checkLayerReparent } from './gate';
+import { checkElementReparent, checkLayerReparent, checkParentAdd, checkParentRemove, containmentConstraint } from './gate';
 import { siblingRegions, setParents, containmentTargets } from './derive';
 
 export interface ReparentPlan {
@@ -80,20 +80,26 @@ export function layerCopyAsRoot(layer: LayerDef, nid: string): LayerDef {
 }
 
 /**
- * 元素换父（生成兜底 / 吞并 / 未来手动挂靠入口共用）：
- * 闸校验 I3/I4 后就地写；调用方负责 history 与 touchRegions（物化）。
+ * 归属增删（受限架构 E2）：闸（环/桥/Min/Max）后就地写；调用方负责 history 与 touchRegions（物化）。
+ * - `addParentElement`：加一个父（幂等；Max 上限见 checkParentAdd）——目标态下「换父」即「加父」。
+ * - `removeParentElement`：去一个父（Min 下限见 checkParentRemove；空 = 游离，min=0 合法）。
  * 返回 null = 成功，否则为拒绝原因。
  */
-export function reparentElement(
-  world: World,
-  elementId: string,
-  newParentId: string | null,
-): string | null {
-  const err = checkElementReparent(world, elementId, newParentId);
+export function addParentElement(world: World, elementId: string, parentId: string): string | null {
+  const err = checkParentAdd(world, elementId, parentId);
   if (err) return err;
   const r = world.regions.find((x) => x.id === elementId);
   if (!r) return '元素不存在';
-  setParents(r, newParentId ? [newParentId] : undefined);
+  setParents(r, [...(r.parents ?? []), parentId]);
+  return null;
+}
+
+export function removeParentElement(world: World, elementId: string, parentId: string): string | null {
+  const err = checkParentRemove(world, elementId, parentId);
+  if (err) return err;
+  const r = world.regions.find((x) => x.id === elementId);
+  if (!r) return '元素不存在';
+  setParents(r, (r.parents ?? []).filter((p) => p !== parentId));
   return null;
 }
 
@@ -172,10 +178,23 @@ export function bestParentAmong(
  */
 export function bestParentFor(world: World, elementId: string): Region | null {
   const el = world.regions.find((r) => r.id === elementId);
-  if (!el || el.parents?.length) return null;
-  const parentLayer = containmentTargets(world, el.layerId)[0];
-  if (!parentLayer) return null;
-  const cands = world.regions.filter((r) => r.layerId === parentLayer);
-  if (!cands.length) return null;
-  return bestParentAmong(world, elementId, cands);
+  if (!el) return null;
+  // 受限架构 E2：遍历「被包含」目标层，取仍有余量（Max 未满）的第一个目标层里打分最高者——
+  // 游离元素可挂靠、已达上限的元素不再出现挂靠入口。
+  for (const parentLayer of containmentTargets(world, el.layerId)) {
+    const cap = containmentConstraint(world, el.layerId, parentLayer)?.max ?? null;
+    if (cap !== null) {
+      const n = (el.parents ?? []).filter(
+        (p) => world.regions.find((r) => r.id === p)?.layerId === parentLayer,
+      ).length;
+      if (n >= cap) continue;
+    }
+    // 排除已归属的候选（多归属下第二次挂靠必须换一个新目标，否则闸会以「已归属」拒）
+    const cands = world.regions.filter(
+      (r) => r.layerId === parentLayer && !el.parents?.includes(r.id),
+    );
+    if (!cands.length) continue;
+    return bestParentAmong(world, elementId, cands);
+  }
+  return null;
 }

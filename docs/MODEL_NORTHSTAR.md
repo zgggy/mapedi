@@ -311,6 +311,28 @@ E（依赖 D 词汇）→ F/G（支撑，可插任意间隙；F 的真 bug 可�
 
 ## 决策记录（倒序追加）
 
+### 包 E2 ✓（2026-10-06）：**多归属打开**（Max=N 争议区可用；挂靠/移除入口）
+- **闸**：`checkParentAdd`（环 / 桥 / **Max**）/ `checkParentRemove`（**Min**）——数量按「同一目标层」
+  计（每条 contained 约束各自一对 min/max）；`checkElementReparent` 改为「加父」语义的薄包装；
+  `reparentElement` → `addParentElement` / `removeParentElement`（ops，闸后就地写 + 调用方入栈）。
+- **挂靠**：`bestParentFor` 放宽为「遍历被包含目标层、取仍有余量（Max 未满）者，**排除已归属候选**」
+  （否则第二次挂靠会被闸以「已归属」拒——实测踩到）；命令名与文案改「归属」语义。
+- **UI**：检查区「隶属」行改为**多父列表**（每父一枚跳转胶囊 + `×` 移除按钮，过 Min 闸），
+  `parents.length > 1` 显示「多归属 N」徽标；元素行显示 `⧉N` 徽标（ItemButton 新增 badgeText 通用槽）；
+  挂靠入口不再限「无父」（有余额即出现）。
+- **两处真 bug（实测抓到并修）**：
+  ① `materializeBackPropagate` 早退条件——「无子即不动」在**已建立自持的目标**上错误：移除最后一个
+  子元素后 cells 残留旧并集（争议区解绑后疆域不清）。改为「无子且 selfCells 未建立才不动」（E1 语义
+  收紧，E2 必须）。
+  ② 建层 id 用 `custom-${Date.now().toString(36)}`——**同毫秒连建撞号** → Svelte keyed each
+  重复键崩溃（脚本连续 addLayer 实测暴露）。id 追加单调序号。
+- **验收（浏览器实测）**：max=1 第二次挂靠被拒（「上限 1 个…（当前 1）」）✓；max=2 挂靠成功 →
+  **两国疆域都含它**（争议区）✓；max=null 不限 ✓；min=1 时最后一个归属不可去 ✓；解绑 → 逐个回收
+  （t1/t2 都归 0，游离子元素保留自身地块）✓；环/桥/重复归属闸 ✓；真实 UI：2 枚隶属胶囊 + 2 个 × +
+  「多归属 2」徽标渲染、点 × 移除后徽标消失且疆域回收、撤销逐位还原 ✓；临时层清理干净。
+  tsc(app+node) + svelte-check 0 errors。
+
+
 ### 包 E1 ✓（2026-10-06）：**数据模型换底**（父子概念退场；受限架构落地，行为保持）
 - **模型**：`LayerDef.displayParent`（视图：叠放/切片/标签/显隐链；树=单父多子）+ `LayerDef.constraints[]`
   （语义：`{of,set,min,max,backPropagate}`，受约束侧声明）；`Region.parents[]`（多归属；游离=空）

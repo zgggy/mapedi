@@ -578,6 +578,11 @@ export class EditorStore {
     this.cmds.doAnnex(targetId);
   }
 
+  /** 归属移除（检查区隶属行 ×，受限架构 E2） */
+  removeParent(id: string, parentId: string): void {
+    this.cmds.removeParent(id, parentId);
+  }
+
   addLayer(name?: string, opts?: { derived?: boolean }) {
     this.cmds.addLayer(name, opts);
   }

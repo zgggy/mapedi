@@ -126,6 +126,12 @@
       styleName: world?.layers.find((x) => x.id === styleId)?.name ?? styleId,
       styleCfg: styleId ? editor.layerStyleConfig(styleId) : null,
       parentId: r?.parents?.[0] ?? null,
+      parents: r && world
+        ? (r.parents ?? []).map((pid) => ({
+            id: pid,
+            name: world.regions.find((x) => x.id === pid)?.name ?? pid,
+          }))
+        : [],
       parentName: r?.parents?.length
         ? (world?.regions.find((x) => x.id === r.parents![0])?.name ?? r.parents![0])
         : null,
@@ -155,9 +161,8 @@
   }
 
   /** 隶属跳转（2026-10-02 D8 拍板）：聚焦父层 + 选中父元素——父子导航第一跳 */
-  function jumpParent() {
-    const pid = view.parentId;
-    const p = pid && world ? world.regions.find((x) => x.id === pid) : null;
+  function jumpParentTo(pid: string) {
+    const p = world ? world.regions.find((x) => x.id === pid) : null;
     if (!p) return;
     editor.selectLayerTop(p.layerId);
     editor.selectedRegionId = p.id;
@@ -207,10 +212,23 @@
     {#if view.heightIv}
       <span class="ivb">区间 {view.heightIv.lo}–{view.heightIv.hi}</span>
     {/if}
-    {#if kind === 'element' && view.parentName}
-      <button type="button" class="jump" title="跳转到父元素" onclick={jumpParent}>
-        隶属 {view.parentName} ›
-      </button>
+    {#if kind === 'element' && view.parents.length}
+      {#if view.parents.length > 1}
+        <span class="ivb" title="多归属（争议区）：同时属于多个父元素">多归属 {view.parents.length}</span>
+      {/if}
+      {#each view.parents as p (p.id)}
+        <span class="ownpill">
+          <button type="button" class="jump" title="跳转到「{p.name}」" onclick={() => jumpParentTo(p.id)}>
+            隶属 {p.name} ›
+          </button>
+          <button
+            type="button"
+            class="ownx"
+            title="移除该归属（过 Min 闸；空 = 游离）"
+            onclick={() => view.regionId && editor.removeParent(view.regionId, p.id)}
+          >×</button>
+        </span>
+      {/each}
     {/if}
     {#if kind === 'element' && view.childItems.length}
       <button
@@ -222,9 +240,14 @@
         子元素 {view.childItems.length} ›
       </button>
     {/if}
-    {#if kind === 'element' && view.attachTo && !view.parentId}
-      <button type="button" class="jump attach" title="挂靠到共享邻接最多的父层元素" onclick={attach}>
-        挂靠「{view.attachTo.name}」
+    {#if kind === 'element' && view.attachTo}
+      <button
+        type="button"
+        class="jump attach"
+        title="归属到共享邻接最多的目标元素（已达上限则不再出现；撤销可退）"
+        onclick={attach}
+      >
+        归属「{view.attachTo.name}」
       </button>
     {/if}
   </div>
@@ -297,6 +320,27 @@
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
+  .ownpill {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .ownx {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: transparent;
+    color: inherit;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 5px;
+    cursor: pointer;
+    opacity: 0.75;
+  }
+  .ownx:hover {
+    opacity: 1;
+    border-color: rgba(255, 120, 120, 0.6);
+  }
+
   /* 隶属跳转胶囊（D8） */
   .jump {
     border: 1px solid var(--panel-border);

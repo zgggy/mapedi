@@ -39,7 +39,7 @@ import {
 import { queuePieceInvalidation } from '../render/patchQueues';
 import { getRegionIndex } from '../core/index/regionIndex';
 import { childLayerIdOf } from '../core/hierarchy/derive';
-import { reparentElement } from '../core/hierarchy/ops';
+import { addParentElement } from '../core/hierarchy/ops';
 
 /** 笔刷一次落点的结果：hits=半径内全部格；changed=**将要改变归属**的格（高亮预告用） */
 export interface PaintResult {
@@ -243,7 +243,7 @@ export class DrawController {
             if (!o) continue;
             if (!o.parents?.includes(parent.id)) {
               const before = o.parents;
-              if (reparentElement(world, oid, parent.id)) continue; // 闸拒绝
+              if (addParentElement(world, oid, parent.id)) continue; // 闸拒绝（环/桥/Max）
               (this.strokeParentFlips ??= new Map()).set(oid, { before, after: [parent.id] });
               // 换父 = 该子元素的全部地块「即将归属新元素」→ 全部纳入高亮预告
               const child = byId.get(oid);
