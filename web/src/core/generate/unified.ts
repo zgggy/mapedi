@@ -22,7 +22,7 @@ import { genStrategyOf } from '../layer/flags';
 import { rebuildHeightIntervalElements } from '../layer/heightElements';
 import { computeRelationships } from '../layer/relationships';
 import { selectCoreCell } from '../regionCenter';
-import { materializeParentCells } from '../displayCompose';
+import { materializeBackPropagate } from '../displayCompose';
 
 export { computeRelationships };
 
@@ -334,7 +334,7 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
     out.push(el);
 
     for (const g of group) {
-      g.parentId = el.id;
+      g.parents = [el.id];
       grouped.add(g.id);
     }
 
@@ -350,7 +350,7 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
       if (grouped.has(s.id)) continue;
       // 打分单源 = hierarchy/ops.bestParentAmong（D4 挂靠与生成兜底同一算法）
       const best = bestParentAmong(world, s.id, out);
-      if (best) s.parentId = best.id;
+      if (best) s.parents = [best.id];
     }
   }
   world.regions = world.regions.concat(out);
@@ -359,11 +359,11 @@ function generateFromLayer(world: World, layerId: LayerId, config: GenConfig): R
     const colorOf = new Map(out.map((el) => [el.id, el.color]));
     let ti = 0;
     for (const s of sources) {
-      const pc = s.parentId ? colorOf.get(s.parentId) : undefined;
+      const pc = s.parents?.[0] ? colorOf.get(s.parents[0]) : undefined;
       if (pc) s.color = tintOf(pc, ti++);
     }
   }
-  materializeParentCells(world);
+  materializeBackPropagate(world);
   return out;
 }
 

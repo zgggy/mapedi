@@ -10,7 +10,7 @@
  * **不做**（职责边界，写进契约）：
  * - 失效分发——绘制域失效时机在 commit（`DrawController.commitStroke` 快照-diff + 定向失效），
  *   写点顺带失效会回到「写一半就失效」的老坑；cause→touch 表化归包 F。
- * - 物化（父=子并集）——`materializeParentCells` 是**调用者**，自身也经本写入器。
+ * - 物化（父=子并集）——`materializeBackPropagate` 是**调用者**，自身也经本写入器。
  * - 校验拦截——`setOccupyGuard` 是包 E 预留的**拒名单**闸（返回非 null = 这些 added 不落写），
  *   默认 null 不拦截。
  *

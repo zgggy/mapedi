@@ -1,6 +1,6 @@
 import type { Cell, CellId, Region, World } from '../types';
 import { isLand } from '../types';
-import { childLayerIdOf } from '../hierarchy/derive';
+import { childLayerIdOf, hasContainingConstraint } from '../hierarchy/derive';
 import { getCellGrid } from '../index/cellGrid';
 import { getRegionIndex, invalidateRegionIndex } from '../index/regionIndex';
 import { writeCells } from '../occupy';
@@ -63,7 +63,7 @@ export function resolveDrawTarget(
   const region = world.regions.find((r) => r.id === session.targetRegionId);
   if (!region) return null;
   const layer = world.layers.find((l) => l.id === region.layerId);
-  if (layer?.parentLayerId) {
+  if (layer && hasContainingConstraint(world, layer.id)) {
     return { region };
   }
   // 有子层（国家 → 行省）：笔刷画子层
@@ -72,11 +72,11 @@ export function resolveDrawTarget(
 
   if (session.parentRegionId) {
     const child = world.regions.find(
-      (r) => r.id === session.parentRegionId && r.parentId === region.id,
+      (r) => r.id === session.parentRegionId && r.parents?.includes(region.id),
     );
     if (child) return { region: child, parent: region };
   }
-  const first = world.regions.find((r) => r.parentId === region.id);
+  const first = world.regions.find((r) => r.parents?.includes(region.id));
   if (first) return { region: first, parent: region };
 
   // 自动创建子 Region
@@ -85,7 +85,7 @@ export function resolveDrawTarget(
     layerId: childLayerId,
     name: `${region.name}·行省`,
     cells: [],
-    parentId: region.id,
+    parents: [region.id],
     color: region.color,
     attributes: {},
   };

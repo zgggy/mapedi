@@ -124,13 +124,32 @@ export interface DerivationSpec {
   };
 }
 
+/**
+ * 图层受限声明（2026-10-06 · 目标态 = 图层受限架构）：图层之间**唯一**的基础空间关系。
+ * 声明在**受约束侧**（单向引用）：本层元素受「目标层元素」约束。
+ * 「父子/游离/多归属（争议区）」都是这组参数的取值分支，不是并列概念。
+ */
+export interface LayerConstraint {
+  /** 目标图层 */
+  of: LayerId;
+  /** 集合判定：contained=被包含 | exclusive=互斥 | intersects=相交 | superset=超集 | equal=等价 */
+  set: 'contained' | 'exclusive' | 'intersects' | 'superset' | 'equal';
+  /** 数量范围：满足该集合关系的目标元素个数（min=0 ⇒ 允许游离；max=null ⇒ 不限） */
+  min: number;
+  max: number | null;
+  /** 反受限：开 ⇒ 目标元素占据 = 满足关系的本层元素占据并集 ∪ 自持；关 ⇒ 单向门槛（本层改动不动目标） */
+  backPropagate: boolean;
+}
+
 export interface LayerDef {
   id: LayerId;
   name: string;
   kind: LayerKind;
   modeDefault: LayerMode;
-  /** 显示父子（仅合成绘制，不做包含校验） */
-  parentLayerId?: LayerId;
+  /** 显示树父（**视图**：叠放序 / 件切片 / 标签归属；树 = 单父多子）。受限关系见 constraints */
+  displayParent?: LayerId;
+  /** 受限声明（**语义**：关系 / 校验 / 反受限聚合；一个图层可声明多条） */
+  constraints?: LayerConstraint[];
   /** 显示开关；缺省见 displayCompose.defaultLayerVisible */
   visible?: boolean;
   /** 叠加透明度 0–1；缺省 0.88（见 displayCompose） */
@@ -206,7 +225,16 @@ export interface Region {
   coreLabel?: string;
   /** 兼容旧字段 */
   centerLabel?: string;
-  parentId?: RegionId;
+  /**
+   * 归属目标（受限 `contained` 关系的目标元素；**多值 = 多归属/争议区**；空/缺 = 游离，
+   * min=0 的合法分支）。目标层由本层 `constraints` 声明。
+   */
+  parents?: RegionId[];
+  /**
+   * **直接绑定**地块（自持）——仅当本元素是反受限聚合目标（某层声明了 backPropagate 指向本层）时存在。
+   * 不变量：`cells == selfCells ∪ ⋃{a.cells | a.parents ∋ 本元素}`（物化产物）；无入边元素 `cells` 即直接绑定。
+   */
+  selfCells?: CellId[];
   /** 基本色 = 自身渲染色；子元素与所属父元素**同色系微调**（palette.tintOf，2026-10-04）；不得单独改 */
   color: string;
   attributes: Record<string, unknown>;

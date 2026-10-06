@@ -69,13 +69,14 @@ export class RegionIndex {
     // 收集本层 region 及其子层 region（行省→国家派生）
     const childOf = new Map<RegionId, Region[]>();
     for (const r of world.regions) {
-      if (!r.parentId) continue;
-      let arr = childOf.get(r.parentId);
-      if (!arr) {
-        arr = [];
-        childOf.set(r.parentId, arr);
+      for (const pid of r.parents ?? []) {
+        let arr = childOf.get(pid);
+        if (!arr) {
+          arr = [];
+          childOf.set(pid, arr);
+        }
+        arr.push(r);
       }
-      arr.push(r);
     }
     for (const r of world.regions) {
       if (r.layerId !== layerId) continue;

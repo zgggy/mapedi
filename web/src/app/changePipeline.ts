@@ -11,7 +11,7 @@ import type { World } from '../core/types';
 import { invalidateCellGrid } from '../core/index/cellGrid';
 import { invalidateRegionIndex } from '../core/index/regionIndex';
 import { bumpAllRev, bumpHeightRev, bumpRegionsRev } from '../core/rev';
-import { materializeParentCells } from '../core/displayCompose';
+import { materializeBackPropagate } from '../core/displayCompose';
 import {
   updateHeightIntervalElements,
   rebuildHeightIntervalElements,
@@ -56,7 +56,7 @@ export class ChangePipeline {
   touchRegions(): void {
     invalidateRegionIndex();
     bumpRegionsRev();
-    materializeParentCells(this.ctx.world!);
+    materializeBackPropagate(this.ctx.world!);
     this.swapIdentity();
     this.ctx.scheduleAutosave();
     this.ctx.notify();
@@ -71,7 +71,7 @@ export class ChangePipeline {
   touchRegionsIncremental(): void {
     invalidateRegionIndex();
     bumpRegionsRev();
-    materializeParentCells(this.ctx.world!);
+    materializeBackPropagate(this.ctx.world!);
     this.swapIdentity();
     this.ctx.scheduleAutosave();
     this.ctx.notify();

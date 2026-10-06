@@ -1,5 +1,6 @@
-import type { CellId, CellMark, Region, RegionId, World } from './types';
+import type { CellId, CellMark, LayerDef, Region, RegionId, World } from './types';
 import { childrenOnRegionDelete, childrenOnAnnex, planLayerDelete } from './hierarchy/policy';
+import { setParents } from './hierarchy/derive';
 import { writeCells } from './occupy';
 
 export interface EditCommand {
@@ -99,8 +100,9 @@ export class MultiRegionCommand implements EditCommand {
       patches: { id: string; added: number[]; removed: number[] }[];
       /** 笔画中新建的元素（split/自动建），region = 提交时刻终态 */
       created: { id: string; region: Region }[];
-      /** 笔画中的换父（父笔刷收编命中子元素，2026-10-04）——随笔画一条命令撤销 */
-      parentFlips?: { id: string; before: string | undefined; after: string | undefined }[];
+      /** 笔画中的换父（父笔刷收编命中子元素，2026-10-04）——随笔画一条命令撤销
+       *  受限架构（2026-10-06）：归属 = parents 数组快照 */
+      parentFlips?: { id: string; before: string[] | undefined; after: string[] | undefined }[];
     },
     public label = '绘制',
   ) {}
@@ -132,7 +134,7 @@ export class MultiRegionCommand implements EditCommand {
     }
     for (const f of this.spec.parentFlips ?? []) {
       const r = world.regions.find((x) => x.id === f.id);
-      if (r) r.parentId = f.after;
+      if (r) setParents(r, f.after);
     }
   }
 
@@ -143,7 +145,7 @@ export class MultiRegionCommand implements EditCommand {
     MultiRegionCommand.applyPatches(world, this.spec, -1);
     for (const f of this.spec.parentFlips ?? []) {
       const r = world.regions.find((x) => x.id === f.id);
-      if (r) r.parentId = f.before;
+      if (r) setParents(r, f.before);
     }
   }
 }
@@ -189,7 +191,7 @@ function restoreRegionCOW(snap: Region): Region {
 
 export class DeleteRegionCommand implements EditCommand {
   private snapshot: Region | null = null;
-  private childParents: { id: RegionId; parentId: RegionId | undefined }[] = [];
+  private childParents: { id: RegionId; parents: RegionId[] | undefined }[] = [];
 
   constructor(
     private regionId: RegionId,
@@ -205,7 +207,8 @@ export class DeleteRegionCommand implements EditCommand {
     this.childParents = childrenOnRegionDelete(world, this.regionId);
     for (const c of this.childParents) {
       const r = world.regions.find((x) => x.id === c.id);
-      if (r) r.parentId = undefined;
+      // 删元素（多归属语义：只摘掉这一条归属；空 = 游离，min=0 合法）
+      if (r) setParents(r, r.parents?.filter((p) => p !== this.regionId));
     }
     world.regions.splice(idx, 1);
   }
@@ -215,7 +218,7 @@ export class DeleteRegionCommand implements EditCommand {
     world.regions.push(restoreRegionCOW(this.snapshot));
     for (const c of this.childParents) {
       const r = findRegion(world, c.id);
-      if (r) r.parentId = c.parentId;
+      if (r) setParents(r, c.parents);
     }
     this.snapshot = null;
     this.childParents = [];
@@ -255,7 +258,7 @@ export class AnnexCommand implements EditCommand {
     this.childParents = childrenOnAnnex(world, this.targetId, this.attackerId);
     for (const c of this.childParents) {
       const r = world.regions.find((x) => x.id === c.id);
-      if (r) r.parentId = c.to;
+      if (r) setParents(r, r.parents?.map((p) => (p === c.from ? c.to : p)));
     }
     world.regions.splice(tIdx, 1);
   }
@@ -271,7 +274,7 @@ export class AnnexCommand implements EditCommand {
     }
     for (const c of this.childParents) {
       const r = findRegion(world, c.id);
-      if (r) r.parentId = c.from;
+      if (r) setParents(r, r.parents?.map((p) => (p === c.to ? c.from : p)));
     }
     world.regions.push(restoreRegionCOW(this.targetSnap));
     this.targetSnap = null;
@@ -401,9 +404,11 @@ export class AddLayerCommand implements EditCommand {
 export class DeleteLayerCommand implements EditCommand {
   private regions: Region[];
   private renderCfg: [string, NonNullable<World['layerRenderConfig']> extends Map<string, infer V> ? V : never][];
-  /** 包1（2026-10-03）：链拼接 + 失父元素清父的快照（policy 场景3，供 revert） */
+  /** 包1（2026-10-03）：链拼接 + 失父元素清父的快照（policy 场景3，供 revert）；
+   *  受限架构（2026-10-06）：显示边 + 受限声明双快照 */
   private layerFlip: { id: string; before: string | undefined; after: string | undefined } | null = null;
-  private regionFlips: { id: string; parentId: string | undefined }[] = [];
+  private constraintFlips: { id: string; before: LayerDef['constraints'] }[] = [];
+  private regionFlips: { id: string; parents: string[] | undefined }[] = [];
 
   constructor(private layer: World['layers'][number], world: World, public label = '删除图层') {
     this.regions = world.regions
@@ -426,22 +431,30 @@ export class DeleteLayerCommand implements EditCommand {
     world.layers = world.layers.filter((l) => l.id !== this.layer.id);
     world.regions = world.regions.filter((r) => r.layerId !== this.layer.id);
     world.layerRenderConfig?.delete(this.layer.id);
-    // ② 子层提升为被删层的父（链拼接，不留悬空 parentLayerId——修 P3）
+    // ② 显示子层链拼接（不留悬空 displayParent——修 P3）+ 受限声明改指（子层不再受限于被删层）
     this.layerFlip = null;
+    this.constraintFlips = [];
     if (plan.layerFlip) {
       const child = world.layers.find((l) => l.id === plan.layerFlip!.id);
       if (child) {
-        this.layerFlip = { id: child.id, before: child.parentLayerId, after: plan.layerFlip.parentId };
-        child.parentLayerId = plan.layerFlip.parentId;
+        const after = plan.layerFlip.parents?.[0];
+        this.layerFlip = { id: child.id, before: child.displayParent, after };
+        this.constraintFlips.push({
+          id: child.id,
+          before: child.constraints ? child.constraints.map((c) => ({ ...c })) : undefined,
+        });
+        child.displayParent = after;
+        child.constraints = rewiredContainment(child.constraints, this.layer.id, after);
       }
     }
-    // ③ 因①失去父的元素走「删元素」行（清父，快照供 revert）
+    // ③ 因①失去归属的元素走「删元素」行（移除该归属，快照供 revert）
     this.regionFlips = [];
+    const doomed = new Set(this.regions.map((r) => r.id));
     for (const f of plan.regionFlips) {
       const r = world.regions.find((x) => x.id === f.id);
       if (r) {
-        this.regionFlips.push({ id: f.id, parentId: r.parentId });
-        r.parentId = undefined;
+        this.regionFlips.push({ id: f.id, parents: r.parents });
+        setParents(r, r.parents?.filter((p) => !doomed.has(p)));
       }
     }
   }
@@ -463,11 +476,15 @@ export class DeleteLayerCommand implements EditCommand {
     // 包1：回滚链拼接与清父
     if (this.layerFlip) {
       const child = world.layers.find((l) => l.id === this.layerFlip!.id);
-      if (child) child.parentLayerId = this.layerFlip.before;
+      if (child) child.displayParent = this.layerFlip.before;
+    }
+    for (const f of this.constraintFlips) {
+      const child = world.layers.find((l) => l.id === f.id);
+      if (child) child.constraints = f.before;
     }
     for (const f of this.regionFlips) {
       const r = world.regions.find((x) => x.id === f.id);
-      if (r) r.parentId = f.parentId;
+      if (r) setParents(r, f.parents);
     }
   }
 }
@@ -646,3 +663,15 @@ export class History {
 }
 
 export const history = new History();
+
+/** 受限声明改写（删层链拼接）：把指向 `from` 的 contained 约束改指 `to`（null=删除）；返回新数组（COW） */
+function rewiredContainment(
+  list: LayerDef['constraints'],
+  from: string,
+  to: string | undefined,
+): LayerDef['constraints'] {
+  const out = (list ?? []).map((c) =>
+    c.set === 'contained' && c.of === from ? { ...c, of: to as string } : c,
+  ).filter((c) => !!c.of);
+  return out.length ? out : undefined;
+}

@@ -10,7 +10,7 @@
  */
 import type { LayerDef, Region, World } from '../types';
 import { checkElementReparent, checkLayerReparent } from './gate';
-import { siblingRegions } from './derive';
+import { siblingRegions, setParents, containmentTargets } from './derive';
 
 export interface ReparentPlan {
   id: string;
@@ -37,14 +37,14 @@ export function planIndent(
   if (!world.layers.some((x) => x.id === anchorId)) {
     return { ok: false, status: '缩进目标不存在（列表已变化）' };
   }
-  if ((l.parentLayerId ?? null) === anchorId) {
+  if ((l.displayParent ?? null) === anchorId) {
     return { ok: false, status: '已在上一个图层之下' };
   }
   const err = checkLayerReparent(world, id, anchorId);
   if (err) return { ok: false, status: `无法缩进：${err}` };
   return {
     ok: true,
-    plan: { id, before: l.parentLayerId, after: anchorId },
+    plan: { id, before: l.displayParent, after: anchorId },
     status: '已缩进（Ctrl+Z 可撤销）',
   };
 }
@@ -53,13 +53,13 @@ export function planIndent(
 export function planPromote(world: Pick<World, 'layers'>, id: string): PlanResult {
   const l = world.layers.find((x) => x.id === id);
   if (!l) return { ok: false, status: '提升只适用于图层' };
-  const hasParent = !!l.parentLayerId && world.layers.some((x) => x.id === l.parentLayerId);
+  const hasParent = !!l.displayParent && world.layers.some((x) => x.id === l.displayParent);
   if (!hasParent) return { ok: false, status: '已是顶层图层，无处提升' };
   const err = checkLayerReparent(world, id, null);
   if (err) return { ok: false, status: `无法提升：${err}` };
   return {
     ok: true,
-    plan: { id, before: l.parentLayerId, after: undefined },
+    plan: { id, before: l.displayParent, after: undefined },
     status: '已提升至顶层（Ctrl+Z 可撤销）',
   };
 }
@@ -69,7 +69,14 @@ export function planPromote(world: Pick<World, 'layers'>, id: string): PlanResul
  * 成根 + status 说明（元素/样式不随复制）。
  */
 export function layerCopyAsRoot(layer: LayerDef, nid: string): LayerDef {
-  return { ...layer, id: nid, name: `${layer.name || layer.id} 副本`, parentLayerId: undefined };
+  // 副本成根（D5 语义保持）：显示父与受限声明都不继承（新层自成体系）
+  return {
+    ...layer,
+    id: nid,
+    name: `${layer.name || layer.id} 副本`,
+    displayParent: undefined,
+    constraints: undefined,
+  };
 }
 
 /**
@@ -86,7 +93,7 @@ export function reparentElement(
   if (err) return err;
   const r = world.regions.find((x) => x.id === elementId);
   if (!r) return '元素不存在';
-  r.parentId = newParentId ?? undefined;
+  setParents(r, newParentId ? [newParentId] : undefined);
   return null;
 }
 
@@ -104,7 +111,7 @@ export function moveAmongSiblings(
   const from = world.regions.find((r) => r.id === regionId);
   if (!from) return false;
   const layerId = from.layerId;
-  const parentId = from.parentId ?? null;
+  const parentId = from.parents?.[0] ?? null;
 
   const siblings = siblingRegions(world, layerId, parentId);
   const others = siblings.filter((r) => r.id !== regionId);
@@ -122,7 +129,7 @@ export function moveAmongSiblings(
   let oi = 0;
   for (let i = 0; i < world.regions.length; i++) {
     const r = world.regions[i];
-    if (r.layerId === layerId && (r.parentId ?? null) === parentId) {
+    if (r.layerId === layerId && (r.parents?.[0] ?? null) === parentId) {
       world.regions[i] = ordered[oi++];
     }
   }
@@ -165,8 +172,8 @@ export function bestParentAmong(
  */
 export function bestParentFor(world: World, elementId: string): Region | null {
   const el = world.regions.find((r) => r.id === elementId);
-  if (!el || el.parentId) return null;
-  const parentLayer = world.layers.find((l) => l.id === el.layerId)?.parentLayerId;
+  if (!el || el.parents?.length) return null;
+  const parentLayer = containmentTargets(world, el.layerId)[0];
   if (!parentLayer) return null;
   const cands = world.regions.filter((r) => r.layerId === parentLayer);
   if (!cands.length) return null;

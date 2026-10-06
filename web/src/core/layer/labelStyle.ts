@@ -74,18 +74,18 @@ export interface LabelSpec extends LabelTierSpec {
 /** 档位 = 层显式 `labelTier` ?? **按层深度**（父层 primary、子层 secondary……与叠放/优先级同树） */
 export function tierOf(
   world: Pick<World, 'layers'>,
-  layer: Pick<LayerDef, 'id' | 'parentLayerId' | 'labelTier'>,
+  layer: Pick<LayerDef, 'id' | 'displayParent' | 'labelTier'>,
 ): LabelTier {
   if (layer.labelTier) return layer.labelTier;
   let depth = 0;
-  let cur = layer.parentLayerId;
+  let cur = layer.displayParent;
   const seen = new Set<string>([layer.id]);
   while (cur && !seen.has(cur)) {
     seen.add(cur);
     depth++;
     const p = world.layers.find((l) => l.id === cur);
     if (!p) break;
-    cur = p.parentLayerId;
+    cur = p.displayParent;
   }
   if (depth <= 0) return 'primary';
   if (depth === 1) return 'secondary';

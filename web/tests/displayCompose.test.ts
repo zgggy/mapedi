@@ -4,7 +4,7 @@ import {
   splitRegionForDisplay,
   visibleColorRoots,
   displayTree,
-  materializeParentCells,
+  materializeBackPropagate,
   isLayerShown,
   VIRTUAL_PARENT,
 } from '../src/core/displayCompose';
@@ -73,7 +73,7 @@ describe('displayCompose', () => {
       [layer('country', undefined, true), layer('province', 'country', true)],
       [A, B, p, q],
     );
-    materializeParentCells(w);
+    materializeBackPropagate(w);
     expect([...A.cells].sort()).toEqual([2, 3, 4, 7]);
     const pieces = composeShownPieces(w, 'province');
     const labels = pieces.map((x) => x.label);

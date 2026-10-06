@@ -1,6 +1,6 @@
 import type { Region, World } from './types';
 import { createRng, hashSeed } from './rng';
-import { materializeParentCells } from './displayCompose';
+import { materializeBackPropagate } from './displayCompose';
 import { writeCells } from './occupy';
 
 const PALETTE = [
@@ -108,7 +108,7 @@ export function generatePolitical(world: World, seed: number, countryCount = 8):
         name: `行省${i + 1}`,
         cells,
         centerCellId: pSeeds[i],
-        parentId: country.id,
+        parents: [country.id],
         color: country.color,
         attributes: {},
       });
@@ -117,7 +117,7 @@ export function generatePolitical(world: World, seed: number, countryCount = 8):
 
   world.regions.push(...countries, ...provinces);
   // 归属唯一真相：父 Region.cells = 子并集（不再运行时并集）
-  materializeParentCells(world);
+  materializeBackPropagate(world);
 }
 
 export function regionsOfLayer(world: World, layerId: string): Region[] {
@@ -125,5 +125,5 @@ export function regionsOfLayer(world: World, layerId: string): Region[] {
 }
 
 export function childrenOf(world: World, parentId: string): Region[] {
-  return world.regions.filter((r) => r.parentId === parentId);
+  return world.regions.filter((r) => r.parents?.includes(parentId));
 }

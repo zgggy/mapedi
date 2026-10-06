@@ -87,7 +87,7 @@
     const childItems =
       r && childLid && world
         ? world.regions
-            .filter((x) => x.layerId === childLid && x.parentId === r.id)
+            .filter((x) => x.layerId === childLid && x.parents?.includes(r.id))
             .map((x) => ({ id: x.id, name: x.name }))
         : [];
     const attach = r && world ? bestParentFor(world, r.id) : null;
@@ -100,7 +100,7 @@
       layerVisible: l ? !!(l.visible ?? defaultLayerVisible(l)) : null,
       name: r ? r.name : l ? l.name || meta?.name || id || '' : '',
       basicColor: basic,
-      basicEditable: r ? !r.parentId : true,
+      basicEditable: r ? !r.parents?.length : true,
       cellCount: r && world
         ? exactCountOfInterval(world, r) // 区间型=精确档现算（累积 cells.length 非精确档，2026-10-06 包 B）
         : l && world
@@ -114,7 +114,7 @@
           ? [
               {
                 label: '子层',
-                value: String(world ? world.layers.filter((x) => x.parentLayerId === id).length : 0),
+                value: String(world ? world.layers.filter((x) => x.displayParent === id).length : 0),
               },
               { label: '分类', value: catLabel(meta?.category ?? 'custom'), detail: true },
               { label: 'ID', value: id ?? '', detail: true },
@@ -125,9 +125,9 @@
       styleId,
       styleName: world?.layers.find((x) => x.id === styleId)?.name ?? styleId,
       styleCfg: styleId ? editor.layerStyleConfig(styleId) : null,
-      parentId: r?.parentId ?? null,
-      parentName: r?.parentId
-        ? (world?.regions.find((x) => x.id === r.parentId)?.name ?? r.parentId)
+      parentId: r?.parents?.[0] ?? null,
+      parentName: r?.parents?.length
+        ? (world?.regions.find((x) => x.id === r.parents![0])?.name ?? r.parents![0])
         : null,
       childItems,
       childLayerId: childLid,
@@ -147,7 +147,7 @@
       const reg = world.regions.find((x) => x.id === rid);
       if (!reg) return;
       if (patch.name) reg.name = patch.name;
-      if (patch.color && !reg.parentId) reg.color = patch.color;
+      if (patch.color && !reg.parents?.length) reg.color = patch.color;
       if (patch.description !== undefined)
         reg.attributes = { ...reg.attributes, description: patch.description };
     });

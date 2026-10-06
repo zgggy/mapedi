@@ -1,6 +1,6 @@
 /**
  * 显示层合成：仅影响绘制，不改 cell/Region 数据。
- * - 显示父子 = Layer.parentLayerId（禁环，无包含校验）
+ * - 显示树 = Layer.displayParent（禁环，无包含校验；受限关系见 constraints）
  * - 子 Region 被父 Region 切成碎片：标签 name(parent)；父外 name(—)
  * - 多级祖先：r(c(A))（子名在左，祖先自内向外）
  */
@@ -52,11 +52,11 @@ export function displayAncestors(world: World, layerId: string): string[] {
   const byId = new Map(world.layers.map((l) => [l.id, l]));
   const out: string[] = [];
   const seen = new Set<string>([layerId]);
-  let cur = byId.get(layerId)?.parentLayerId;
+  let cur = byId.get(layerId)?.displayParent;
   while (cur && !seen.has(cur)) {
     out.push(cur);
     seen.add(cur);
-    cur = byId.get(cur)?.parentLayerId;
+    cur = byId.get(cur)?.displayParent;
   }
   return out;
 }
@@ -68,7 +68,7 @@ export function displayTree(
   const byId = new Map(world.layers.map((l) => [l.id, l]));
   const kids = new Map<string, string[]>();
   for (const l of world.layers) {
-    const p = l.parentLayerId;
+    const p = l.displayParent;
     if (!p || !byId.has(p)) continue;
     let arr = kids.get(p);
     if (!arr) {
@@ -96,7 +96,7 @@ export function visibleColorRoots(world: World, maxRoots = 3): string[] {
   for (const l of world.layers) {
     if (isFreeLayer(l)) continue;
     if (!visibleSet.has(l.id)) continue;
-    const p = l.parentLayerId;
+    const p = l.displayParent;
     if (p && visibleSet.has(p)) continue;
     roots.push(l.id);
     if (roots.length >= maxRoots) break;
@@ -111,39 +111,48 @@ export function visibleColorRoots(world: World, maxRoots = 3): string[] {
  */
 /**
  * 归属唯一真相 = `region.cells`。
- * 父 Region 的 cells **必须已物化**为子并集（生成/改归属后调用 materializeParentCells）。
+ * 目标层元素的 cells **必须已物化**（自持 ∪ 聚合；生成/改归属后调用 materializeBackPropagate）。
  * 显示切分直接读 `region.cells`，不再现场并集。
  */
-export function materializeParentCells(world: World): void {
+export function materializeBackPropagate(world: World): void {
+  // 受限架构（2026-10-06 换底）：**反受限聚合** = 目标层元素.cells = 自持(selfCells) ∪ ⋃(被包含子元素.cells)。
+  // 子元素关系 = 元素级归属 `parents[]`（多归属天然支持：一个元素可进多个目标的并集）。
+  // 目标层 = 被某条 `contained + backPropagate` 约束指向的层（不再有"父子图层"概念）。
   const childrenOf = new Map<string, Region[]>();
   for (const r of world.regions) {
-    if (!r.parentId) continue;
-    let arr = childrenOf.get(r.parentId);
-    if (!arr) {
-      arr = [];
-      childrenOf.set(r.parentId, arr);
+    for (const pid of r.parents ?? []) {
+      let arr = childrenOf.get(pid);
+      if (!arr) childrenOf.set(pid, (arr = []));
+      arr.push(r);
     }
-    arr.push(r);
+  }
+  const targetLayers = new Set<string>();
+  for (const l of world.layers) {
+    for (const c of l.constraints ?? []) {
+      if (c.set === 'contained' && c.backPropagate) targetLayers.add(c.of);
+    }
   }
   const seen = new Set<string>();
   const write = (r: Region) => {
     if (seen.has(r.id)) return;
     seen.add(r.id);
     for (const k of childrenOf.get(r.id) ?? []) write(k);
+    if (!targetLayers.has(r.layerId)) return;
     const kids = childrenOf.get(r.id);
-    if (!kids?.length) return;
-    // 精确派生：父 ≡ ∪子（AGENTS §3「父 cells 必须已物化子并集」字面语义）。
-    // 旧实现从父现有 cells 起并 = **只加不减** → 撤销回滚子层后父层残留（步骤7 修复；
-    // 2026-10-01 实测 7 对父子中 6 对恒等，唯一 extra 全为历史残留本身 → 从空重建自愈）。
-    const set = new Set<number>();
+    // 首次物化：把「直接绑定的格」固化为自持输入（幂等；迁移与新建约束同一路径）
+    if (r.selfCells === undefined) {
+      const union = new Set<CellId>();
+      for (const k of kids ?? []) for (const id of k.cells) union.add(id);
+      r.selfCells = r.cells.filter((id) => !union.has(id));
+    }
+    if (!kids?.length) return; // 无子：cells 即自持，无需重写
+    const set = new Set<CellId>(r.selfCells ?? []);
+    for (const k of kids) for (const id of k.cells) set.add(id);
     const prev = new Set(r.cells);
     const added: CellId[] = [];
-    for (const k of kids) for (const id of k.cells) {
-      if (set.has(id)) continue;
-      set.add(id);
-      if (!prev.has(id)) added.push(id);
-    }
-    const removed = r.cells.filter((id) => !set.has(id));
+    const removed: CellId[] = [];
+    for (const id of set) if (!prev.has(id)) added.push(id);
+    for (const id of prev) if (!set.has(id)) removed.push(id);
     writeCells(r, [...set], 'materialize', { delta: { added, removed } });
   };
   for (const r of world.regions) write(r);

@@ -11,7 +11,7 @@
   import type { Region, World } from '../../core/types';
   import { editsHeightAt } from '../../core/layer/flags';
   import { isFreeLayerId } from '../../core/displayCompose';
-  import { childLayerIdOf } from '../../core/hierarchy/derive';
+  import { childLayerIdOf, hasContainingConstraint } from '../../core/hierarchy/derive';
   import ItemButton from './ItemButton.svelte';
   import StateCapsule from './StateCapsule.svelte';
   import ModeCapsule from './ModeCapsule.svelte';
@@ -106,8 +106,8 @@ import { isRowOrControlClick } from './shell';
     // （2026-10-06 包 B：懒建收敛，原组件 effect+regionsBump 散补丁退役）。
     const all = world.regions.filter((r) => r.layerId === focusLayer);
     const tops = all.filter((r) => {
-      if (!r.parentId) return true;
-      const p = world.regions.find((x) => x.id === r.parentId);
+      if (!r.parents?.length) return true;
+      const p = world.regions.find((x) => x.id === r.parents![0]);
       return !p || p.layerId !== focusLayer;
     });
     // 2026-10-01 用户拍板：子元素显示与子级创建先删（之后重新设计）→ 节点不再嵌套
@@ -136,9 +136,9 @@ import { isRowOrControlClick } from './shell';
   });
 
   /** 同父分组（2026-10-06 用户定）：焦点层为子图层 → 同父元素聚拢 + 组头（父名小字居左）
-   *  + 组间横分割线；顶层图层（无 parentLayerId）平铺不变。 */
+   *  + 组间横分割线；无「被包含」约束的图层平铺不变。 */
   const groupedByParent = $derived(
-    !!focusLayer && !!world?.layers.find((l) => l.id === focusLayer)?.parentLayerId,
+    !!focusLayer && hasContainingConstraint(world!, focusLayer),
   );
 
   /** 单列网格的全部格：行（ItemButton）+ 选中行后的模式展开区（panel）+ 分组头/分隔线。
@@ -154,7 +154,7 @@ import { isRowOrControlClick } from './shell';
     const order: string[] = [];
     const buckets = new Map<string, { node: Node }[]>();
     for (const v of visibleFlat) {
-      const pid = v.node.region.parentId ?? '';
+      const pid = v.node.region.parents?.[0] ?? '';
       let b = buckets.get(pid);
       if (!b) {
         b = [];
@@ -313,7 +313,7 @@ import { isRowOrControlClick } from './shell';
     const first = !visibleFlat.slice(0, idx).some((v) => v.node.parentId === pid);
     const last = !visibleFlat.slice(idx + 1).some((v) => v.node.parentId === pid);
     const r = world?.regions.find((x) => x.id === id);
-    return { first, last, top: !r?.parentId };
+    return { first, last, top: !r?.parents?.length };
   }
 
   /** 该行模式展开区是否非空（第十一轮：展开后为空 → 直接不能展开）。

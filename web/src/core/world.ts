@@ -63,7 +63,9 @@ export function builtinLayers(): LayerDef[] {
       // 空心星 ☆ = 其他首府（省会）——CIA 图例实测；实心星 ★ 留给国家首都
       coreSymbol: 'hollowStar',
       labelMode: 'name',
-      parentLayerId: 'country',
+      displayParent: 'country',
+      // 受限声明（2026-10-06 换底：父子 = contained/0/1/反受限开 的特例）
+      constraints: [{ of: 'country', set: 'contained', min: 0, max: 1, backPropagate: true }],
       allowOverlap: false,
       requireAdjacency: true,
       requireCenter: true,
@@ -268,6 +270,9 @@ export function ensureBuiltinLayers(world: World): World {
       if (b.genStrategy !== undefined && cur.genStrategy !== b.genStrategy) { cur.genStrategy = b.genStrategy; changed = true; }
       if (b.focusAfterGen !== undefined && cur.focusAfterGen !== b.focusAfterGen) { cur.focusAfterGen = b.focusAfterGen; changed = true; }
       if (b.editsHeight !== undefined && cur.editsHeight !== b.editsHeight) { cur.editsHeight = b.editsHeight; changed = true; }
+      // 受限架构字段（2026-10-06 换底）：旧档缺 → 回填内置声明（displayParent/constraints 同策略）
+      if (b.displayParent !== undefined && cur.displayParent !== b.displayParent) { cur.displayParent = b.displayParent; changed = true; }
+      if (b.constraints !== undefined && !cur.constraints) { cur.constraints = b.constraints.map((c) => ({ ...c })); changed = true; }
     }
   }
   // 内置层**相对顺序**自愈（叠放契约：数组序 = 后画在上 = builtinLayers() 声明序）：
@@ -366,7 +371,7 @@ export function serializeWorld(
 ): string {
   const strip = opts?.stripSharedEdges ?? false;
   return JSON.stringify({
-    meta: { ...world.meta, formatVersion: 2 },
+    meta: { ...world.meta, formatVersion: 3 },
     cells: world.cells,
     rivers: [...world.rivers.entries()],
     layers: world.layers,
@@ -413,8 +418,33 @@ export function deserializeWorld(json: string): World {
   if (!raw.meta || !Array.isArray(raw.cells) || !Array.isArray(raw.regions) || !Array.isArray(raw.layers)) {
     throw new Error('项目文件缺少必要的世界数据');
   }
+
+  // ── 旧档迁移（≤v2 → v3，2026-10-06 受限架构换底；只做一次、幂等）──
+  // 旧 parentLayerId（父子概念）→ displayParent（视图） + constraints（语义：contained/0/1/反受限开）
+  // 旧 parentId（单父）→ parents[]（多归属数组）
+  {
+    const legacyLayers = raw.layers as (LayerDef & { parentLayerId?: string })[];
+    for (const l of legacyLayers) {
+      if (l.parentLayerId === undefined) continue;
+      const p = l.parentLayerId;
+      delete l.parentLayerId;
+      if (!p) continue;
+      l.displayParent = l.displayParent ?? p;
+      const list = (l.constraints ??= []);
+      if (!list.some((c) => c.of === p && c.set === 'contained')) {
+        list.push({ of: p, set: 'contained', min: 0, max: 1, backPropagate: true });
+      }
+    }
+    const legacyRegions = raw.regions as (typeof raw.regions[number] & { parentId?: string })[];
+    for (const r of legacyRegions) {
+      if (r.parentId === undefined) continue;
+      const p = r.parentId;
+      delete r.parentId;
+      if (p && !r.parents?.length) r.parents = [p];
+    }
+  }
   const version = raw.meta.formatVersion ?? 1;
-  if (version < 1 || version > 2) throw new Error(`不支持的项目版本：${version}`);
+  if (version < 1 || version > 3) throw new Error(`不支持的项目版本：${version}`);
   // 结构断言（2026-10-01 还债步骤 3）：坏档必须**明确报错、不进渲染**（throw →
   // tryRestore/runWorker 捕获 → 启动错误条；旧档不被覆盖——autosave 只写成功序列化的结果）。
   {

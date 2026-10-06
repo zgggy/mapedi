@@ -1,14 +1,14 @@
 /**
- * 层级派生层——**读取侧唯一入口**（HIERARCHY 设计 §4，2026-10-03 包1）。
+ * 层级派生层——**读取侧唯一入口**（HIERARCHY 设计 §4；2026-10-06 受限架构换底）。
  *
- * 全库（compose / 面板 / 命令 / 校验）只准从这里取树形派生物；
- * 原 core/layer/tree.ts 并入此处（O2 单源再收敛，避免第二入口）。
+ * 两套结构，**概念不同、都从这里取**：
+ * - **显示树**（`displayParent`，视图：叠放序/件切片/标签归属/显隐链）——必须是树，**可多子**；
+ * - **受限声明**（`LayerDef.constraints`，语义：集合判定+数量范围+反受限）——可为菱形/DAG；
+ *   元素级归属 = `Region.parents[]`（多值）。「父子/游离/多归属」都只是受限参数的取值分支。
  *
- * 不变量（写入闸 gate 强制，读侧护栏降级为便宜防御）：
- * - 层森林：parent 指针指向存在的层；无环；**每层 ≤1 子（链）**；
- * - 元素森林：parentId 指向存在的元素；无环；桥不变量 I-bridge
- *   （元素父边恰好跨到层的父层）；
- * - 兄弟序 = 数组序（层顶=数组首、元素顶=数组末，方向差只在消费端换算）。
+ * 全库（compose / 面板 / 命令 / 校验）只准从这里取树形派生物。
+ * 不变量（写入闸 gate 强制，读侧护栏降级为便宜防御）：指针指向存在的对象；无环；
+ * 兄弟序 = 数组序（层顶=数组首、元素顶=数组末，方向差只在消费端换算）。
  *
  * 为何不加 rev 记忆化缓存：所有写入都**原地改 parent 指针不换数组**，
  * 数组身份失效判据不成立；树规模 15~60，纯函数 O(n) 即可，
@@ -35,7 +35,7 @@ export function layerTreeOf(
   const exists = new Set<string>(layers.map((l) => l.id));
   const children = new Map<string | null, LayerDef[]>();
   for (const l of layers) {
-    const key = l.parentLayerId && exists.has(l.parentLayerId) ? l.parentLayerId : null;
+    const key = l.displayParent && exists.has(l.displayParent) ? l.displayParent : null;
     let arr = children.get(key);
     if (!arr) children.set(key, (arr = []));
     arr.push(l);
@@ -53,12 +53,60 @@ export function layerTreeOf(
   return out;
 }
 
-/** 该层的第一个子层（数组序；无 → null）。链约束下至多一个。原 regionOps.childLayerIdOf 收编。 */
+/** 显示子层（数组序，**可多子**） */
+export function childrenOf(world: Pick<World, 'layers'>, layerId: string): string[] {
+  return world.layers.filter((l) => l.displayParent === layerId).map((l) => l.id);
+}
+
+/** 该层的第一个显示子层（数组序；无 → null）。**单源便利**：生成/清壳等按链语义消费；
+ *  多子语义待需要时另行定义（受限架构下多子层是合法形态）。 */
 export function childLayerIdOf(
   world: Pick<World, 'layers'>,
   layerId: string,
 ): string | null {
-  return world.layers.find((l) => l.parentLayerId === layerId)?.id ?? null;
+  return world.layers.find((l) => l.displayParent === layerId)?.id ?? null;
+}
+
+// ── 受限声明（语义）────────────────────────────────────────────────────
+
+/** 满足「集合判定 = contained」的约束目标层（元素级归属 parents 的合法目标层集合） */
+export function containmentTargets(
+  world: Pick<World, 'layers'>,
+  layerId: string,
+): string[] {
+  return (world.layers.find((l) => l.id === layerId)?.constraints ?? [])
+    .filter((c) => c.set === 'contained')
+    .map((c) => c.of);
+}
+
+/** 本层是否声明了「被包含」受限（= 旧语义「是子层」；绘制目标解析用） */
+export function hasContainingConstraint(
+  world: Pick<World, 'layers'>,
+  layerId: string,
+): boolean {
+  return containmentTargets(world, layerId).length > 0;
+}
+
+/** 哪些层以 backPropagate 反受限指向 targetLayerId（= 聚合来源层） */
+export function backPropSourcesOf(
+  world: Pick<World, 'layers'>,
+  targetLayerId: string,
+): string[] {
+  return world.layers
+    .filter((l) => (l.constraints ?? []).some(
+      (c) => c.of === targetLayerId && c.set === 'contained' && c.backPropagate,
+    ))
+    .map((l) => l.id);
+}
+
+/** 元素级归属读取（多归属=数组；缺省空数组） */
+export function parentsOf(r: Pick<Region, 'parents'>): string[] {
+  return r.parents ?? [];
+}
+
+/** 元素级归属写入（COW：换新数组；空 → 清字段） */
+export function setParents(r: Region, ids: string[] | undefined): void {
+  r.parents = ids && ids.length ? [...new Set(ids)] : undefined;
 }
 
 /** 祖先链（近→远，不含自身；悬空/环由 seen 终止——写入闸后为便宜防御） */
@@ -66,11 +114,11 @@ export function layerAncestors(world: Pick<World, 'layers'>, layerId: string): s
   const byId = new Map(world.layers.map((l) => [l.id, l]));
   const out: string[] = [];
   const seen = new Set<string>([layerId]);
-  let cur = byId.get(layerId)?.parentLayerId;
+  let cur = byId.get(layerId)?.displayParent;
   while (cur && !seen.has(cur)) {
     out.push(cur);
     seen.add(cur);
-    cur = byId.get(cur)?.parentLayerId;
+    cur = byId.get(cur)?.displayParent;
   }
   return out;
 }
@@ -88,7 +136,7 @@ export function effectiveVisible(
     if (!l) return false; // 悬空（读档已修，防御）
     if (!(l.visible ?? false)) return false;
     seen.add(cur);
-    cur = l.parentLayerId;
+    cur = l.displayParent;
   }
   return true;
 }
@@ -105,10 +153,10 @@ export function isAncestor(
 /** 爬根（写入闸已禁环；byId 由调用方持有，避免重复建表） */
 function rootOfIn(byId: Map<string, LayerDef>, id: string): string {
   let cur = id;
-  let p = byId.get(cur)?.parentLayerId;
+  let p = byId.get(cur)?.displayParent;
   while (p && byId.has(p)) {
     cur = p;
-    p = byId.get(cur)?.parentLayerId;
+    p = byId.get(cur)?.displayParent;
   }
   return cur;
 }
@@ -117,11 +165,11 @@ function rootOfIn(byId: Map<string, LayerDef>, id: string): string {
 function depthOfIn(byId: Map<string, LayerDef>, id: string): number {
   let d = 0;
   let cur = id;
-  let p = byId.get(cur)?.parentLayerId;
+  let p = byId.get(cur)?.displayParent;
   while (p && byId.has(p)) {
     cur = p;
     d++;
-    p = byId.get(cur)?.parentLayerId;
+    p = byId.get(cur)?.displayParent;
   }
   return d;
 }
@@ -172,7 +220,8 @@ export function layerStackComparator(
 
 // ── 元素森林 ────────────────────────────────────────────────────────────
 
-/** 有序兄弟：同 layerId + 同 parentId（null/undefined 视为顶层）。原 regionOps.siblingRegions 收编。 */
+/** 有序兄弟：同 layerId + 同归属目标（null/undefined 视为游离/顶层）。原 regionOps.siblingRegions 收编。
+ *  多归属语义：父 id 在 `parents` 中即算该父的兄弟（同一元素可出现在多组）。 */
 export function siblingRegions(
   world: Pick<World, 'regions'>,
   layerId: string,
@@ -180,6 +229,6 @@ export function siblingRegions(
 ): Region[] {
   const pid = parentId ?? null;
   return world.regions.filter(
-    (r) => r.layerId === layerId && (r.parentId ?? null) === pid,
+    (r) => r.layerId === layerId && (pid === null ? !r.parents?.length : !!r.parents?.includes(pid)),
   );
 }

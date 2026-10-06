@@ -311,6 +311,30 @@ E（依赖 D 词汇）→ F/G（支撑，可插任意间隙；F 的真 bug 可�
 
 ## 决策记录（倒序追加）
 
+### 包 E1 ✓（2026-10-06）：**数据模型换底**（父子概念退场；受限架构落地，行为保持）
+- **模型**：`LayerDef.displayParent`（视图：叠放/切片/标签/显隐链；树=单父多子）+ `LayerDef.constraints[]`
+  （语义：`{of,set,min,max,backPropagate}`，受约束侧声明）；`Region.parents[]`（多归属；游离=空）
+  + `Region.selfCells`（自持：**仅聚合目标**，物化首次运行时从 `cells \ 子并集` 捕获，幂等）。
+  旧字段 `parentLayerId`/`parentId` **物理删除**（全库 0 残留）。
+- **迁移**（formatVersion ≤2 → 3，读档一次、幂等）：旧 `parentLayerId` → `displayParent` + 约束
+  `{of,contained,0,1,backPropagate:true}`；旧 `parentId` → `parents:[p]`。读档修复升级 DAG 语义
+  （悬空归属逐条移除、环断开、桥=目标层集合校验、约束悬空/循环受限修复），「每层≤1子」限制取消。
+- **物化**：`materializeParentCells` → `materializeBackPropagate`（目标层 = 被 contained+反受限约束
+  指向的层；`cells = selfCells ∪ ⋃(parents ∋ 本元素).cells`；无子且无自持不动 → 行为等价）。
+- **消费面**：显示读 `displayParent`（derive/labelStyle/displayCompose/命令）；语义读 `constraints`
+  （gate 闸+修复、resolveDrawTarget、清除父链、缩进/提升=显示边+约束同写一条命令）；
+  元素归属读 `parents[]`（policy 四场景数组化、history 快照/回放、validate、regionIndex、UI 邻属/分组）。
+- **验收（浏览器实测）**：①**旧档迁移逐位**——同存档经新反序列化后 regions/layers/cellHeight 三哈希
+  与迁移前**完全相同**（909a86ef/699a0b36/f26da326），旧字段零残留；②实机加载同哈希 + 0 console 错；
+  ③聚合：父=∪子、**菱形多归属**（一省属两国→两国疆域都含它）、游离合法、**旧档自持残留捕获**
+  （父自有格→selfCells 保留、幂等）；④`resolveDrawTarget` 经约束路由（国层→行省子）；
+  ⑤缩进/提升写 displayParent+constraints 且撤销逐位还原；⑥存档回环 v3（约束/显示边/自持全保留）；
+  ⑦高度涂改 25→47 + 撤销回 25。tsc(app+node) + svelte-check 0 errors。
+- **已知延后（诚实记录）**：E1 下「直接绑定写入聚合目标」仍写 `cells`——当前**不可达**（绘制经
+  `resolveDrawTarget` 恒路由到显示子；所有可达写点都落在叶层），写入路由（`writeCells` 感知
+  selfCells + undo 快照覆盖该字段）**按设计属 E3**，随自持端到端一并落地。
+
+
 ### 包 E 拍板（2026-10-06）：**目标态＝图层受限架构**（用户裁定，推翻本会话初版「v1 不做」建议）
 - 用户原话要点：多归属不是独立概念、只是受限架构的一种表现形式；受限架构下**不存在子图层/父图层**，
   一切＝「某图层被另一图层以某种受限参数限制」；元素可同时拥有其他图层的元素或地块；

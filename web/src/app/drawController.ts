@@ -69,7 +69,7 @@ export class DrawController {
   /** 笔画前快照：regionId → cells 数组引用（写入全为 COW 换数组 → 引用比对即得副作用集） */
   private strokeSnap: Map<string, number[]> | null = null;
   /** 笔画内的换父翻转（父笔刷收编）：id → {before, after}，随笔画一条命令撤销 */
-  private strokeParentFlips: Map<string, { before: string | undefined; after: string | undefined }> | null = null;
+  private strokeParentFlips: Map<string, { before: string[] | undefined; after: string[] | undefined }> | null = null;
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
   heightIntervalId = 'h6';
@@ -241,10 +241,10 @@ export class DrawController {
           for (const [oid] of order) {
             const o = byId.get(oid);
             if (!o) continue;
-            if ((o.parentId ?? null) !== parent.id) {
-              const before = o.parentId;
+            if (!o.parents?.includes(parent.id)) {
+              const before = o.parents;
               if (reparentElement(world, oid, parent.id)) continue; // 闸拒绝
-              (this.strokeParentFlips ??= new Map()).set(oid, { before, after: parent.id });
+              (this.strokeParentFlips ??= new Map()).set(oid, { before, after: [parent.id] });
               // 换父 = 该子元素的全部地块「即将归属新元素」→ 全部纳入高亮预告
               const child = byId.get(oid);
               if (child) for (const c of child.cells) changed.add(c);

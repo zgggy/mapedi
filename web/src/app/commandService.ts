@@ -10,7 +10,9 @@ import { defaultPathColor } from '../core/paths';
 import { ensureBuiltinLayers } from '../core/world';
 import { emptyDrawSession, type DrawSession } from '../core/draw/brush';
 import { DEFAULT_DERIVATION } from '../core/generate/derive';
-import { siblingRegions } from '../core/hierarchy/derive';
+import { containmentTargets, siblingRegions } from '../core/hierarchy/derive';
+import type { LayerDef } from '../core/types';
+import { checkConstraintRewire } from '../core/hierarchy/gate';
 import { moveAmongSiblings } from '../core/hierarchy/ops';
 import {
   patchElementStyle,
@@ -22,12 +24,22 @@ import { resolveLayerStyle } from '../core/layer/config';
 import { styleById } from '../core/styles';
 import { defaultFocusLayerId } from '../core/layer/flags';
 import { layerTreeOf } from '../core/hierarchy/derive';
+
+/** 受限声明 upsert：把本层「被包含」约束改指 target（null=删除）；返回新数组（COW） */
+function upsertContainment(
+  list: LayerDef['constraints'],
+  target: string | null,
+): LayerDef['constraints'] {
+  const rest = (list ?? []).filter((c) => !(c.set === 'contained' && c.backPropagate));
+  if (!target) return rest.length ? rest : undefined;
+  return [...rest, { of: target, set: 'contained', min: 0, max: 1, backPropagate: true }];
+}
 import { planIndent, planPromote, layerCopyAsRoot, bestParentFor, reparentElement } from '../core/hierarchy/ops';
 import { tintOf } from '../core/layer/palette';
 import {
   defaultLayerVisible,
   isFreeLayer as isFreeLayerDef,
-  materializeParentCells,
+  materializeBackPropagate,
   visibleColorRoots,
 } from '../core/displayCompose';
 import {
@@ -146,7 +158,7 @@ export class CommandService {
     if (cmd) {
       this.historyEffect(cmd, 'revert');
       // 撤销后父层并集重派生（步骤7：父 cells=子并集，touchWorld 不物化 → 父残留）
-      materializeParentCells(this.world);
+      materializeBackPropagate(this.world);
       this.touchWorld();
       // 不清空选中：多步撤销时保持上下文
       this.status = `已撤销（剩余 ${history.depth} 步可撤销）`;
@@ -158,7 +170,7 @@ export class CommandService {
     const cmd = history.redo(this.world);
     if (cmd) {
       this.historyEffect(cmd, 'apply');
-      materializeParentCells(this.world);
+      materializeBackPropagate(this.world);
       this.touchWorld();
       this.status = '已重做';
     }
@@ -239,24 +251,38 @@ export class CommandService {
       return;
     }
     const { plan } = res;
-    w.layers.find((x) => x.id === plan.id)!.parentLayerId = plan.after;
+    const layer = w.layers.find((x) => x.id === plan.id)!;
+    // 受限架构（2026-10-06）：缩进 = 显示边（displayParent） + 受限声明（contained/0/1/反受限开）
+    const cerr = checkConstraintRewire(w, plan.id, plan.after ?? null);
+    if (cerr) {
+      this.status = `无法缩进：${cerr}`;
+      return;
+    }
+    const cBefore = layer.constraints ? layer.constraints.map((c) => ({ ...c })) : undefined;
+    const cAfter = upsertContainment(layer.constraints, plan.after ?? null);
+    layer.displayParent = plan.after;
+    layer.constraints = cAfter;
     // ④（2026-10-04 用户定）：缩进成子层 → 本层元素按**所属父元素**同色系微调
-    // （palette.tintOf，与生成聚合同规则）；与 parentLayerId 同一条 Composite 入栈。
+    // （palette.tintOf，与生成聚合同规则）；与显示边/约束同一条 Composite 入栈。
     const colorPatches: { id: string; before: Partial<Region>; after: Partial<Region> }[] = [];
     let ti = 0;
     for (const r of w.regions) {
-      if (r.layerId !== plan.id || !r.parentId) continue;
-      const p = w.regions.find((x) => x.id === r.parentId);
+      if (r.layerId !== plan.id || !r.parents?.length) continue;
+      const p = w.regions.find((x) => x.id === r.parents?.[0]);
       if (!p) continue;
       const next = tintOf(p.color, ti++);
       if (next !== r.color) {
         colorPatches.push({ id: r.id, before: { color: r.color }, after: { color: next } });
-        r.color = next; // alreadyApplied：与 parentLayerId 同步落地，栈内已是新值
+        r.color = next; // alreadyApplied：与显示边同步落地，栈内已是新值
       }
     }
     const cmds: EditCommand[] = [
       new LayerFieldsCommand(
-        [{ id: plan.id, before: { parentLayerId: plan.before }, after: { parentLayerId: plan.after } }],
+        [{
+          id: plan.id,
+          before: { displayParent: plan.before, constraints: cBefore },
+          after: { displayParent: plan.after, constraints: cAfter },
+        }],
         '缩进',
       ),
     ];
@@ -284,11 +310,19 @@ export class CommandService {
       return;
     }
     const { plan } = res;
-    w.layers.find((x) => x.id === plan.id)!.parentLayerId = plan.after;
+    const layer = w.layers.find((x) => x.id === plan.id)!;
+    const cBefore = layer.constraints ? layer.constraints.map((c) => ({ ...c })) : undefined;
+    const cAfter = upsertContainment(layer.constraints, null);
+    layer.displayParent = plan.after;
+    layer.constraints = cAfter;
     history.run(
       w,
       new LayerFieldsCommand(
-        [{ id: plan.id, before: { parentLayerId: plan.before }, after: { parentLayerId: plan.after } }],
+        [{
+          id: plan.id,
+          before: { displayParent: plan.before, constraints: cBefore },
+          after: { displayParent: plan.after, constraints: cAfter },
+        }],
         '提升',
       ),
       { alreadyApplied: true },
@@ -338,7 +372,7 @@ export class CommandService {
     // 图层：同父兄弟在 layers 数组中的顺序
     const layer = this.world.layers.find((l) => l.id === id);
     if (layer) {
-      const sibs = this.world.layers.filter((l) => (l.parentLayerId ?? null) === (layer.parentLayerId ?? null));
+      const sibs = this.world.layers.filter((l) => (l.displayParent ?? null) === (layer.displayParent ?? null));
       const i = sibs.findIndex((l) => l.id === id);
       const j = i + dir;
       if (i < 0 || j < 0 || j >= sibs.length) return;
@@ -353,7 +387,7 @@ export class CommandService {
     }
     const r = this.world.regions.find((x) => x.id === id);
     if (r) {
-      const sibs = siblingRegions(this.world, r.layerId, r.parentId);
+      const sibs = siblingRegions(this.world, r.layerId, r.parents?.[0] ?? null);
       const i = sibs.findIndex((x) => x.id === id);
       const j = i + dir;
       if (i < 0 || j < 0 || j >= sibs.length) return;
@@ -473,7 +507,7 @@ export class CommandService {
     }
     const el = w.regions.find((r) => r.id === id);
     if (!el) return;
-    const before = el.parentId;
+    const before = el.parents;
     const err = reparentElement(w, id, best.id);
     if (err) {
       this.status = `挂靠失败：${err}`;
@@ -482,7 +516,7 @@ export class CommandService {
     history.run(
       w,
       new RegionFieldsCommand(
-        [{ id, before: { parentId: before }, after: { parentId: best.id } }],
+        [{ id, before: { parents: before }, after: { parents: [best.id] } }],
         '挂靠',
       ),
       { alreadyApplied: true },
@@ -536,7 +570,7 @@ export class CommandService {
     const r = w.regions.find((x) => x.id === regionId);
     const child = w.regions.find((x) => x.id === coreRegionId);
     if (!r || !child) return;
-    if (child.parentId !== r.id) {
+    if (!child.parents?.includes(r.id)) {
       this.status = '核心子元素必须是本元素的直接子元素，未设置';
       return;
     }
@@ -712,11 +746,11 @@ export class CommandService {
 
     if (next) {
       // 点亮子层时父链一并点亮（子随父显示）
-      let p = layer.parentLayerId;
+      let p = layer.displayParent;
       const chain: string[] = [];
       while (p && byId.has(p)) {
         chain.push(p);
-        p = byId.get(p)!.parentLayerId;
+        p = byId.get(p)!.displayParent;
       }
       for (const pid of chain) {
         const pl = byId.get(pid)!;
@@ -736,7 +770,7 @@ export class CommandService {
         for (const l of layers) {
           if (isFreeLayerDef(l)) continue;
           if (!visibleSet.has(l.id)) continue;
-          const par = l.parentLayerId;
+          const par = l.displayParent;
           if (par && visibleSet.has(par)) continue;
           rootCount++;
         }
@@ -916,7 +950,7 @@ export class CommandService {
         layerId,
         name,
         cells: [],
-        parentId: parent?.id,
+        parents: parent ? [parent.id] : undefined,
         color: parent?.color ?? colors[this.world.regions.filter((r) => r.layerId === layerId).length % colors.length],
         attributes: {},
       }),

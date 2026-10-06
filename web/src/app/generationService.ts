@@ -9,6 +9,12 @@
 import type { World } from '../core/types';
 import { createWorld, HARD_MAX_DENSITY, builtinLayers } from '../core/world';
 import { genStrategyOf, heightmapLayerId } from '../core/layer/flags';
+
+/** 本层的「父层链」单跳（受限架构：含反受限的 contained 约束目标；一个层可多目标 → 取首个，链语义） */
+function backPropTargetsOf(world: World, layerId: string): string | undefined {
+  const l = world.layers.find((x) => x.id === layerId);
+  return (l?.constraints ?? []).find((c) => c.set === 'contained' && c.backPropagate)?.of;
+}
 import { runCascade, generatorFor } from '../core/generate/registry';
 import { childLayerIdOf } from '../core/hierarchy/derive';
 import { generateWorldAsync } from '../core/generate/runGenerate';
@@ -244,12 +250,12 @@ export class GenerationService {
         if (l.id !== 'cells' && l.id !== layerId) clearIds.add(l.id);
       }
     } else {
-      let pid = world.layers.find((l) => l.id === layerId)?.parentLayerId;
+      let pid = backPropTargetsOf(world, layerId);
       const seen = new Set<string>([layerId]);
       while (pid && !seen.has(pid)) {
         seen.add(pid);
         clearIds.add(pid);
-        pid = world.layers.find((l) => l.id === pid)?.parentLayerId;
+        pid = backPropTargetsOf(world, pid);
       }
     }
     let clearedRegions = 0;

@@ -46,7 +46,7 @@ export function validateWorld(world: World): ValidateIssue[] {
           message: `「${r.name}」缺少${layer.centerLabel ?? '中心'}`,
           regionId: r.id,
         });
-      } else if (r.coreRegionId && (world.regions.find((x) => x.id === r.coreRegionId)?.parentId ?? null) !== r.id) {
+      } else if (r.coreRegionId && !world.regions.find((x) => x.id === r.coreRegionId)?.parents?.includes(r.id)) {
         // 核心第二形态（选项1）：指向的必须是**本元素的子元素**（悬空/跨层 → 视同缺核心）
         issues.push({
           kind: 'center_missing',
@@ -78,10 +78,10 @@ export function validateWorld(world: World): ValidateIssue[] {
     }
 
     if (r.layerId === 'province') {
-      const parent = r.parentId
-        ? world.regions.find((x) => x.id === r.parentId)
+      const parent = r.parents?.[0]
+        ? world.regions.find((x) => x.id === r.parents![0])
         : undefined;
-      if (!r.parentId) {
+      if (!r.parents?.length) {
         issues.push({
           kind: 'orphan_province',
           severity: 'warn',
@@ -169,7 +169,7 @@ export function fixIssue(world: World, issue: ValidateIssue): boolean {
         }
       }
       if (best) {
-        prov.parentId = best;
+        prov.parents = [best];
         return true;
       }
       return false;

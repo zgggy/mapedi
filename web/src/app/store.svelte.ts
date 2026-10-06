@@ -667,7 +667,7 @@ export class EditorStore {
     const owners = getRegionIndex(w).owners(w, childLid, cellId);
     const child = owners
       .map((oid) => w.regions.find((x) => x.id === oid))
-      .find((x) => x && x.parentId === rid);
+      .find((x) => x && x.parents?.includes(rid));
     if (!child) {
       this.status = '该格不属于任何子元素，未设置核心（Esc 取消点选）';
       this.centerPickId = rid; // 没选中 → 保持模态继续点
@@ -972,7 +972,7 @@ export class EditorStore {
     if (!region) return '';
     const childLayer = childLayerIdOf(this.world, region.layerId);
     if (childLayer) {
-      const kids = this.world.regions.filter((r) => r.parentId === region.id);
+      const kids = this.world.regions.filter((r) => r.parents?.includes(region.id));
       const kid = kids.find((k) => k.id === this.draw.parentRegionId) ?? kids[0];
       return kid ? `${region.name} · ${kid.name}` : `${region.name} · （将新建行省）`;
     }
