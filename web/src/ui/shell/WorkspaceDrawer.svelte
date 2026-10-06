@@ -99,7 +99,12 @@ import { isRowOrControlClick } from './shell';
   function canExpand(r: Region): boolean {
     return !!childLayerFor(r);
   }
+  /** 补建触碰计数（2026-10-06 用户「点高度图层后元素面板不直接出现 12 个」）：
+   *  rebuildHeightIntervalElements **原地写 world.regions** 不触发响应链 →
+   *  roots 不重算、列表停在旧值（关开面板=组件重挂才刷新）。effect 补建后 bump。 */
+  let regionsBump = $state(0);
   const roots = $derived.by(() => {
+    void regionsBump;
     if (!world) return [] as Node[];
     // 高度元素恒在（2026-10-06 用户澄清「我要求的所有高度元素一直在」——澄清句
     // 推翻了此前按抱怨句式的空档隐藏）：**所有区间元素（含空档）始终显示**；
@@ -204,6 +209,7 @@ import { isRowOrControlClick } from './shell';
     // 12 个元素，条件随即为假，不会无限触发；仅空档不动 cells）
     if (world && isHeight && heightIntervalRegions(world).length !== 12) {
       rebuildHeightIntervalElements(world);
+      regionsBump++;
     }
   });
 
