@@ -19,7 +19,6 @@
     type HoverInfo,
   } from '../render/map2d';
   import { getProjCache } from '../render/projCache';
-  import { worldCopyKs } from '../render/space';
   import { frameLayer, pathsLayer } from '../render/layers';
   import {
     screenToContentLonLat,
@@ -498,8 +497,7 @@
      * 跨线绘制时副本上也出高亮，与本体的无缝相接。
      */
     const pcFB = getProjCache(world, projection, projParamsOr());
-    const kView = worldCopyKs(contentOffsetX, viewCam, rect.width, projection, pcFB.worldBBox);
-    /** 逐 k 投影（与件渲染同源位移） */
+    /** 逐 k 投影（与件渲染同源位移；这里 k 只用于**跨 180° 格自补**——见高亮段） */
     const toScreenK = (q: { x: number; y: number }, k: number) => {
       const off = contentOffsetAt(projection, q.y, contentOffsetX + k * Math.PI * 2);
       return {
@@ -507,27 +505,6 @@
         sy: worldToScreenY(q.y, viewCam, rect.height),
       };
     };
-    /**
-     * 反馈层副本 k*（2026-10-06 三修定稿，用户两轮「还是有！」）：
-     * **整场拖动固定用光标所在的那一份副本**（k* 由光标点解算）——高亮=操作反馈，
-     * 永远贴在编辑现场：光标在哪个副本上画，整条轨迹就显示在那个副本上。
-     * 反面教训：v1 全副本展开=屏上循环（错）；v2 逐格选最近=长线会跳到远端实例
-     * （错）；定稿=全局单一 k*、只画 k*（跨 180° 的连续性由本体自身在屏上的连续性
-     * 保证——±180 两侧同属本体）。（周期世界多份显示是**件渲染**的语义，不是反馈层。）
-     */
-    const kStarOf = (): number => {
-      const q0 = project({ lon: brushLon, lat: brushLat }, projection, projParamsOr());
-      let best = kView.includes(0) ? 0 : kView[0] ?? 0;
-      let bestD = Infinity;
-      for (const k of kView) {
-        const sp = toScreenK(q0, k);
-        const d = Math.abs(sp.sx - brushSx);
-        if (d < bestD) { bestD = d; best = k; }
-      }
-      return best;
-    };
-
-    const kStar = kStarOf();
 
     // —— 【绘制模型】cell 色块高亮：拖动中即时反馈，松手后真实重算落地即清 ——
     if (paintPreview.size) {
@@ -541,17 +518,30 @@
         const cell = world.cells[id];
         const poly = cell?.polygon;
         if (!poly?.length) continue;
-        const qs = poly.map((ll) => project(ll, projection, ppp));
-        const p = new Path2D();
-        const k = kStar;
-        for (let i = 0; i < qs.length; i++) {
-          const s = toScreenK(qs[i], k);
-          if (i === 0) p.moveTo(s.sx, s.sy);
-          else p.lineTo(s.sx, s.sy);
+        // **逐格绘制**（2026-10-06 用户「难道就不能一个一个地块的绘制吗？」=正解）：
+        // 顶点先 unwrap 连续化——跨 180° 的格其顶点本在 ±180 两侧，不连续化会投影成
+        // 一条横贯屏幕的长条（前几轮「拉长/横线穿屏」的真正根因，与副本选择无关）。
+        const qs: { x: number; y: number }[] = [];
+        let prevX: number | null = null;
+        for (const ll of poly) {
+          const q = project(ll, projection, ppp);
+          const x: number = prevX === null ? q.x : unwrapXAgainst(prevX, q.x);
+          qs.push({ x, y: q.y });
+          prevX = x;
         }
-        p.closePath();
-        ctx.fill(p);
-        ctx.stroke(p);
+        // 连续化后 x 可能越出 ±π（跨线格）：补画平移 ±2π 的同一格（=180° 线另一侧的
+        // 那一半、无缝相接）；非跨线格的平移份落在屏外不出现
+        for (const k of [-1, 0, 1]) {
+          const p = new Path2D();
+          for (let i = 0; i < qs.length; i++) {
+            const s = toScreenK(qs[i], k);
+            if (i === 0) p.moveTo(s.sx, s.sy);
+            else p.lineTo(s.sx, s.sy);
+          }
+          p.closePath();
+          ctx.fill(p);
+          ctx.stroke(p);
+        }
       }
     }
 
@@ -586,8 +576,8 @@
         const y = pc.centers[cell.id * 2 + 1];
         if (!Number.isFinite(x)) continue;
         const label = cell.height.toFixed(2);
-        // 与高亮同一副本 k*（光标现场）；圈外兜底（投影/半径近似误差）保留
-        const sp = toScreenK({ x, y }, kStar);
+        // 单点本体投影（逐格；中心越界时自然落在 180° 线另一侧）；圈外兜底保留
+        const sp = toScreenK({ x, y }, 0);
         if (
           sp.sx < -8 ||
           sp.sy < -8 ||
