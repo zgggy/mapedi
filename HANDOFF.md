@@ -13,8 +13,10 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第六十二轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/CONSTRAINT_ARCH_DESIGN_2026-10-06.md` 受限架构设计（E1–E5）、`docs/CONSTRAINT_SEMANTICS_2026-10-06.md` 评估证据、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
+## 当前状态（第六十三轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/CONSTRAINT_ARCH_DESIGN_2026-10-06.md` 受限架构设计（E1–E5）、`docs/CONSTRAINT_SEMANTICS_2026-10-06.md` 评估证据、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
   - **包 D 包内分析已出（写入手册，待拍板）**：三套词汇死活判定（活=defaultGenConfig/genStrategy；半死=LayerConfig：placement/style 活、**splitPolicy 事实全死**、gen/elementSource/workspace 零消费）；漂移两处（country coreSelector 死表 vs 活表、culture placement=any vs scope=landOnly）；派生能力现状=仅从层聚合（generateFromLayer），无值域谓词派生。**待拍板三条**：规则边界（preset+参数 推荐）／splitPolicy 处置（删词 推荐）／死字段删除范围。
+  - **✓ 第六十三轮（2026-10-06 包 E3：自持地块——元素可直接持有，北极星 §9 兑现）**：`occupy.writeSelfCells`（写 selfCells→局部重算 cells，公式单源 `occupancySetOf`/`childUnionOf`，物化同源改造）；手势 **Alt+左键=直接持有**（跳过父笔刷子路由）、Shift+Alt=擦自持（右键平移不动），绘制面板条件提示；撤销=`MultiRegionCommand.selfCellsFlips`（patches 只管 cells——selfCells 不恢复=undo 长回来）+ 快照 COW 覆盖 selfCells。**边界实测**：冗余自持（自持∩子）零净增；「自持里但子也有的格」擦除后 cells 保留（子覆盖）；擦净后 cells=∪子；物化幂等。验收：合成五案 + 真实 C1 会话 Alt 三笔 selfCells 落 50 格/撤销逐位/Shift+Alt 擦净/存档回环保留 selfCells；tsc+svelte-check 0 errors。
+  - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=E4（单向地形门槛：placement 谓词退场→「contained/Min≥1/反受限关」约束，目标层=高度或包 D 派生层）**。
   - **✓ 第六十二轮（2026-10-06 包 E2：多归属打开——Max=N 争议区可用）**：闸 `checkParentAdd`（环/桥/Max）/`checkParentRemove`（Min，按同一目标层计数）；`reparentElement` → `addParentElement`/`removeParentElement`；`bestParentFor` 放宽为「有余量的目标层 + 排除已归属候选」（否则第二次挂靠被「已归属」拒）；UI=检查区隶属**多父列表**（跳转胶囊 + × 移除）+「多归属 N」徽标 + 元素行 `⧉N` 徽标（ItemButton 新增 badgeText 槽）+ 挂靠入口不限无父。**两处实测抓到的真 bug 已修**：①物化早退条件在「已建立自持的目标」上错误（清空子元素后疆域不回收）；②建层 id 同毫秒撞号 → Svelte keyed each 崩溃（id 加单调序号）。验收：max1 拒/max2 争议区双国疆域/min1 拒删/解绑逐个回收/环桥重复闸/真实 UI（2 胶囊+2×+徽标、点 × 实时回收、撤销逐位）；tsc+svelte-check 0 errors。
   - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=E3（自持地块：画到聚合目标写 selfCells + undo 快照覆盖；旧档残留已由物化捕获承接）**。
   - **✓ 第六十一轮（2026-10-06 包 E1：数据模型换底——父子概念退场，受限架构落地，行为保持）**：`LayerDef.displayParent`（视图）+ `LayerDef.constraints[]{of,set,min,max,backPropagate}`（语义，受约束侧声明）+ `Region.parents[]`（多归属）+ `Region.selfCells`（自持，物化首跑从 `cells\子并集` 幂等捕获）；旧 `parentLayerId`/`parentId` **物理删除**（src+tests 零残留）。读档迁移 ≤v2→v3（旧父子 = contained/0/1/反受限开的特例，幂等）；修复升级 DAG（悬空逐条移除/环断开/桥=目标层集合/循环受限断开）；「每层≤1子」限制取消（多子层合法）；物化 → `materializeBackPropagate`。**验收**：旧档迁移**三哈希与迁移前完全相同**（regions/layers/cellHeight）、实机加载同哈希+0 console 错、聚合∪、**菱形多归属**（一省属两国）、游离合法、自持残留捕获+幂等、resolveDrawTarget 经约束路由、缩进/提升写双字段且撤销逐位、存档回环 v3、高度涂改+撤销；tsc+svelte-check 0 errors。**延后**：写聚合目标直写 selfCells 的路由（当前不可达）=E3。
@@ -144,6 +146,6 @@
 
 ## 下一轮候选
 
-- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓ B ✓ C ✓ D ✓；E 受限架构：E1 换底 ✓、**E2 多归属打开 ✓（Max=N 争议区可用）**，**下一包 E3 自持地块**；随后 E4 单向地形门槛→E5 判定扩展+配置面，F/G（支撑）/H（使用侧）。
+- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓ B ✓ C ✓ D ✓；E 受限架构：E1 换底 ✓、E2 多归属 ✓、**E3 自持地块 ✓（Alt 直接持有）**，**下一包 E4 单向地形门槛**；随后 E5 判定扩展+配置面，F/G（支撑）/H（使用侧）。
 - **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓、手感批+金钮 ✓）**；**下一阶段重心 = 用户使用**——选题与排序见 `docs/OPTIMIZE_REVIEW_2026-10-04.md` §7（第一梯队=搜索/测距/吞并/校验 toast 四个半成品入口），点名即做；并行技术线=存档镜像离线程/死码甲档/存档字段清洗/测试固化（同文档 §3-§5）。路径生成 R7 用户已定先不做；路网 paths=0 待点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

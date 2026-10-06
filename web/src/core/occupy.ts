@@ -17,8 +17,12 @@
  * 不变量：① 集合无增无减（仅顺序变）→ 仍写、但 Δ 记账返回 null；
  * ② `next === region.cells`（同引用）→ 完全无操作；
  * ③ 生成器的「创建字面量」不经此（对象构造，不是对既有归属的改写）。
+ *
+ * **自持（E3，2026-10-06）**：聚合目标的直接绑定输入 = `Region.selfCells`，其编辑入口
+ * 也是这里（`writeSelfCells`）——写 selfCells 后**局部重算**该元素的 cells =
+ * selfCells ∪ ⋃(被包含子元素.cells)（与物化同一公式，单源 = `occupancySetOf`）。
  */
-import type { CellId, Region } from './types';
+import type { CellId, Region, World } from './types';
 
 export type OccupyCause = 'paint' | 'height' | 'materialize' | 'generate' | 'undo' | 'repair';
 
@@ -81,4 +85,55 @@ export function writeCells(
   const delta: CellsDelta = { regionId: region.id, layerId: region.layerId, added, removed };
   observer?.(delta, cause);
   return delta;
+}
+
+// ── 自持（E3）───────────────────────────────────────────────────────────
+
+/** 子并集（单源公式：被包含子元素 = parents 含本元素 id） */
+export function childUnionOf(world: Pick<World, 'regions'>, region: Pick<Region, 'id'>): Set<CellId> {
+  const u = new Set<CellId>();
+  for (const r of world.regions) {
+    if (r.parents?.includes(region.id)) for (const id of r.cells) u.add(id);
+  }
+  return u;
+}
+
+/** 占据单源公式：cells = selfCells ∪ ⋃(被包含子元素.cells)（物化与自持写入共用） */
+export function occupancySetOf(world: Pick<World, 'regions'>, region: Region): Set<CellId> {
+  const set = new Set<CellId>(region.selfCells ?? []);
+  for (const r of world.regions) {
+    if (r.parents?.includes(region.id)) for (const id of r.cells) set.add(id);
+  }
+  return set;
+}
+
+/**
+ * 直接绑定写入（自持；**聚合目标**才有 selfCells——非聚合目标写 cells 即自持）。
+ * 写 selfCells（COW）→ 局部重算 cells（经 writeCells，cause 同传）→ 返回 cells Δ。
+ * `next` 调用方独占；无净变化时 selfCells 不换引用、返回 null。
+ */
+export function writeSelfCells(
+  world: Pick<World, 'regions'>,
+  region: Region,
+  next: CellId[],
+  cause: OccupyCause,
+  opts?: { delta?: { added: CellId[]; removed: CellId[] } },
+): CellsDelta | null {
+  const prevSelf = region.selfCells ?? [];
+  if (next === prevSelf) return null;
+  let selfAdded: CellId[];
+  let selfRemoved: CellId[];
+  if (opts?.delta) {
+    selfAdded = opts.delta.added;
+    selfRemoved = opts.delta.removed;
+  } else {
+    const oldSet = new Set(prevSelf);
+    const newSet = new Set(next);
+    selfAdded = [...newSet].filter((id) => !oldSet.has(id));
+    selfRemoved = [...oldSet].filter((id) => !newSet.has(id));
+  }
+  if (!selfAdded.length && !selfRemoved.length) return null;
+  region.selfCells = next.length ? next : undefined;
+  // 局部重算（与物化同公式；cells 侧仍经 writeCells 单源记账）
+  return writeCells(region, [...occupancySetOf(world, region)], cause);
 }

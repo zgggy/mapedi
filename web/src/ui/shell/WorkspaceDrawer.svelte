@@ -11,7 +11,7 @@
   import type { Region, World } from '../../core/types';
   import { editsHeightAt } from '../../core/layer/flags';
   import { isFreeLayerId } from '../../core/displayCompose';
-  import { childLayerIdOf, hasContainingConstraint } from '../../core/hierarchy/derive';
+  import { backPropSourcesOf, childLayerIdOf, hasContainingConstraint } from '../../core/hierarchy/derive';
   import ItemButton from './ItemButton.svelte';
   import StateCapsule from './StateCapsule.svelte';
   import ModeCapsule from './ModeCapsule.svelte';
@@ -425,6 +425,9 @@ import { isRowOrControlClick } from './shell';
                 <!-- 2026-10-01：去框去说明——只留控件（状态栏已有操作指引） -->
                 {@const ia = intervalAttrs(n.region)}
                 <div class="mpanel">
+                  {#if world && backPropSourcesOf(world, n.region.layerId).length}
+                    <div class="dim" style="font-size:10px">Alt+左键 = 直接持有（画进本元素，不经子元素）；Shift+Alt = 擦自持</div>
+                  {/if}
                   {#if ia}
                     <label class="field inline">
                       <span>高度</span>

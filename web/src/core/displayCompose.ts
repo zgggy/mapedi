@@ -6,7 +6,7 @@
  */
 import type { CellId, LayerDef, Region, World } from './types';
 import { dataRev } from './rev';
-import { writeCells } from './occupy';
+import { childUnionOf, occupancySetOf, writeCells } from './occupy';
 import { effectiveVisible, layerRootOf, layerStackComparator } from './hierarchy/derive';
 
 export const VIRTUAL_PARENT = '—';
@@ -139,17 +139,16 @@ export function materializeBackPropagate(world: World): void {
     for (const k of childrenOf.get(r.id) ?? []) write(k);
     if (!targetLayers.has(r.layerId)) return;
     const kids = childrenOf.get(r.id);
-    // 首次物化：把「直接绑定的格」固化为自持输入（幂等；迁移与新建约束同一路径）
+    // 首次物化：把「直接绑定的格」固化为自持输入（幂等；迁移与新建约束同一路径）。
+    // 公式单源 = occupy.childUnionOf / occupancySetOf（E3 起与自持写入共用）
     if (r.selfCells === undefined) {
-      const union = new Set<CellId>();
-      for (const k of kids ?? []) for (const id of k.cells) union.add(id);
+      const union = childUnionOf(world, r);
       r.selfCells = r.cells.filter((id) => !union.has(id));
     }
     // 无子：**仅在从未建立自持（非聚合形态）时不动**；已建立自持的目标必须重写——
     // 否则移除最后一个子元素后 cells 残留旧并集（E2 实测踩到：争议区解绑后疆域不清）。
     if (!kids?.length && r.selfCells === undefined) return;
-    const set = new Set<CellId>(r.selfCells ?? []);
-    for (const k of kids ?? []) for (const id of k.cells) set.add(id);
+    const set = occupancySetOf(world, r);
     const prev = new Set(r.cells);
     const added: CellId[] = [];
     const removed: CellId[] = [];

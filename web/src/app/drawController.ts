@@ -9,7 +9,7 @@
  * - 高度样本 = 每 cell 首次触碰记原高（拖涂撤销完整性）
  * - 归属提交逐件定向失效（「全清/补丁」二选一在多元素语义下逐件兑现）
  */
-import type { Region, World } from '../core/types';
+import type { CellId, Region, World } from '../core/types';
 import {
   addCellsToRegion,
   cellAtPoint,
@@ -30,6 +30,8 @@ import {
 import { defaultLayerConfig } from '../core/layer/config';
 import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
 import { setHeightStroke, smoothHeightBrush } from '../core/draw/heightDraw';
+import { writeSelfCells } from '../core/occupy';
+import { backPropSourcesOf } from '../core/hierarchy/derive';
 import { buildRoadSegments, dragRoadEndpoint } from '../core/draw/roads';
 import {
   HeightCellsCommand,
@@ -70,6 +72,8 @@ export class DrawController {
   private strokeSnap: Map<string, number[]> | null = null;
   /** 笔画内的换父翻转（父笔刷收编）：id → {before, after}，随笔画一条命令撤销 */
   private strokeParentFlips: Map<string, { before: string[] | undefined; after: string[] | undefined }> | null = null;
+  /** 自持快照（E3）：元素 id → selfCells 引用（含原本 undefined） */
+  private strokeSelfSnap: Map<string, CellId[] | undefined> | null = null;
   private heightStroke: { id: number; h: number }[] | null = null;
   private heightTouched: Set<number> | null = null;
   heightIntervalId = 'h6';
@@ -195,6 +199,15 @@ export class DrawController {
     if (!hits.length) return null;
     if (!this.paintDirty) {
       this.paintDirty = true;
+    }
+    // ── E3 自持（2026-10-06，Alt = 直接持有）：写聚合目标的 selfCells（不经父笔刷子路由）。
+    //    手势：Alt+左键 = 加自持；Shift+Alt+左键 = 擦自持（右键=内容平移，A′契约）。
+    //    非聚合目标层（叶子元素）的 Alt 与普通绘制同效（cells 本就是自持）。
+    if (alt) {
+      const direct = resolved.parent ?? resolved.region;
+      if (backPropSourcesOf(world, direct.layerId).length) {
+        return this.paintSelfCells(world, direct, hits, pointer === 'right');
+      }
     }
     // ── 父笔刷命中子元素（2026-10-04 用户需求）：加笔时——
     // ① 命中的子元素若不在本父之下（孤儿/他国）→ **纳入**本父（闸复核；flip 随笔画一条命令撤销）；
@@ -371,10 +384,32 @@ export class DrawController {
     }
   }
 
-  /** 笔画开始：全量 Region.cells 引用快照（写入皆 COW 换数组 → 引用比对即得副作用集） */
+  /** 直接持有笔画（E3）：写聚合目标 selfCells 并局部重算 cells（经 occupy.writeSelfCells 单源）。
+   *  返回 changed = 真正改变的格（高亮预告同语义）。 */
+  private paintSelfCells(world: World, region: Region, hits: number[], erase: boolean): PaintResult {
+    const set = new Set(region.selfCells ?? []);
+    const changed: number[] = [];
+    for (const id of hits) {
+      if (erase) {
+        if (set.delete(id)) changed.push(id);
+      } else if (!set.has(id)) {
+        set.add(id);
+        changed.push(id);
+      }
+    }
+    if (changed.length) {
+      writeSelfCells(world, region, [...set], 'paint', {
+        delta: erase ? { added: [], removed: changed } : { added: changed, removed: [] },
+      });
+    }
+    return { hits, changed };
+  }
+
+  /** 笔画开始：全量 Region.cells + selfCells 引用快照（写入皆 COW 换数组 → 引用比对即得副作用集） */
   private beginStrokeSnap(): void {
     const w = this.ctx.world;
     this.strokeSnap = w ? new Map(w.regions.map((r) => [r.id, r.cells])) : null;
+    this.strokeSelfSnap = w ? new Map(w.regions.map((r) => [r.id, r.selfCells])) : null;
     this.strokeParentFlips = new Map();
   }
 
@@ -413,10 +448,23 @@ export class DrawController {
       after: v.after,
     }));
     this.strokeParentFlips = null;
-    if (patches.length || created.length || parentFlips.length) {
-      history.run(world, new MultiRegionCommand({ patches, created, parentFlips }, label), {
-        alreadyApplied: true,
-      });
+    // 自持笔画（E3）：selfCells 引用变化入栈（patches 只管 cells——selfCells 不恢复 =
+    // undo 后自持长回来；key 存在即比对，值可为 undefined=原本无自持）
+    const selfCellsFlips: { id: string; before: CellId[] | undefined; after: CellId[] | undefined }[] = [];
+    const selfSnap = this.strokeSelfSnap;
+    this.strokeSelfSnap = null;
+    if (selfSnap) {
+      for (const [id, b4] of selfSnap) {
+        const r = world.regions.find((x) => x.id === id);
+        if (r && r.selfCells !== b4) selfCellsFlips.push({ id, before: b4, after: r.selfCells });
+      }
+    }
+    if (patches.length || created.length || parentFlips.length || selfCellsFlips.length) {
+      history.run(
+        world,
+        new MultiRegionCommand({ patches, created, parentFlips, selfCellsFlips }, label),
+        { alreadyApplied: true },
+      );
     }
     return modified;
   }

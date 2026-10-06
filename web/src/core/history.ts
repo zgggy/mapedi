@@ -103,6 +103,9 @@ export class MultiRegionCommand implements EditCommand {
       /** 笔画中的换父（父笔刷收编命中子元素，2026-10-04）——随笔画一条命令撤销
        *  受限架构（2026-10-06）：归属 = parents 数组快照 */
       parentFlips?: { id: string; before: string[] | undefined; after: string[] | undefined }[];
+      /** 自持笔画（E3，2026-10-06）：直接绑定 selfCells 的快照（patches 只管 cells，
+       *  selfCells 不恢复 = undo 后自持长回来） */
+      selfCellsFlips?: { id: string; before: CellId[] | undefined; after: CellId[] | undefined }[];
     },
     public label = '绘制',
   ) {}
@@ -136,6 +139,10 @@ export class MultiRegionCommand implements EditCommand {
       const r = world.regions.find((x) => x.id === f.id);
       if (r) setParents(r, f.after);
     }
+    for (const f of this.spec.selfCellsFlips ?? []) {
+      const r = world.regions.find((x) => x.id === f.id);
+      if (r) r.selfCells = f.after;
+    }
   }
 
   revert(world: World): void {
@@ -146,6 +153,10 @@ export class MultiRegionCommand implements EditCommand {
     for (const f of this.spec.parentFlips ?? []) {
       const r = world.regions.find((x) => x.id === f.id);
       if (r) setParents(r, f.before);
+    }
+    for (const f of this.spec.selfCellsFlips ?? []) {
+      const r = world.regions.find((x) => x.id === f.id);
+      if (r) r.selfCells = f.before;
     }
   }
 }
@@ -173,6 +184,7 @@ function snapshotRegionCOW(r: Region): Region {
     ...r,
     // region 已从 world 摘除 → 引用转移；后续编辑会替换 cells/map 引用，不污染本快照
     cells: r.cells,
+    selfCells: r.selfCells, // E3 自持：与 cells 同 COW 契约（覆盖该字段=撤销后自持不长回来）
     weights: r.weights,
     endpointOverrides: r.endpointOverrides,
     attributes: { ...r.attributes },
@@ -183,6 +195,7 @@ function restoreRegionCOW(snap: Region): Region {
   return {
     ...snap,
     cells: snap.cells,
+    selfCells: snap.selfCells,
     weights: snap.weights,
     endpointOverrides: snap.endpointOverrides,
     attributes: { ...snap.attributes },

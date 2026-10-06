@@ -311,6 +311,25 @@ E（依赖 D 词汇）→ F/G（支撑，可插任意间隙；F 的真 bug 可�
 
 ## 决策记录（倒序追加）
 
+### 包 E3 ✓（2026-10-06）：**自持地块**（元素可直接持有地块；北极星 §9「父可直接持有」兑现）
+- **写入器**：`occupy.writeSelfCells(world, region, next, cause)`——写 selfCells（COW）→ **局部重算**
+  cells（经 writeCells 单源记账）；公式单源 = `occupancySetOf`（cells = selfCells ∪ ⋃(被包含子元素.cells)），
+  `childUnionOf`（∪子）供物化首捕与重算共用（物化改造为调用同一公式，行为不变）。
+- **手势**：Alt+左键 = 直接持有（写聚合目标 selfCells，**跳过父笔刷子路由**）；Shift+Alt+左键 = 擦自持
+  （右键=内容平移 A′契约不动）。非聚合目标层（叶子）的 Alt 与普通绘制同效。
+  绘制面板在目标为聚合目标时显示手势提示。
+- **撤销**：`MultiRegionCommand` 增 `selfCellsFlips`（before/after 引用快照；patches 只管 cells——
+  selfCells 不恢复 = undo 后自持长回来）；`snapshotRegionCOW/restoreRegionCOW` 覆盖 selfCells；
+  undo 后既有 materializeBackPropagate 与之自洽（恢复的 selfCells 重算出同一 cells）。
+- **边界（实测逐项过）**：①自持格与子元素重叠（冗余自持）→ cells 并集去重、零净增；②擦除
+  「自持里但子元素也有的格」→ cells **保留**（子覆盖，delta=null）；③擦净自持后 cells=∪子；
+  ④物化幂等。
+- **验收（浏览器实测）**：合成世界公式五案（画 5 格净增 3/擦 2 回收 1/冗余自持零净增/子覆盖擦不掉/幂等）
+  + 存档回环保留 selfCells；真实绘制链（C1 会话→Alt 三笔→commit）selfCells 落 50 格（笔刷半径全量）、
+  cells=∪子∪自持、Ctrl+Z **selfCells 与 cells 逐位还原**、Shift+Alt 擦净、存档回环保留；
+  临时层清理干净。tsc(app+node) + svelte-check 0 errors。
+
+
 ### 包 E2 ✓（2026-10-06）：**多归属打开**（Max=N 争议区可用；挂靠/移除入口）
 - **闸**：`checkParentAdd`（环 / 桥 / **Max**）/ `checkParentRemove`（**Min**）——数量按「同一目标层」
   计（每条 contained 约束各自一对 min/max）；`checkElementReparent` 改为「加父」语义的薄包装；
