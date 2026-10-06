@@ -499,7 +499,7 @@
      */
     const pcFB = getProjCache(world, projection, projParamsOr());
     const kView = worldCopyKs(contentOffsetX, viewCam, rect.width, projection, pcFB.worldBBox);
-    /** 逐 k 投影（与件渲染同源位移；定义须在 kStarOf 之前——TDZ） */
+    /** 逐 k 投影（与件渲染同源位移） */
     const toScreenK = (q: { x: number; y: number }, k: number) => {
       const off = contentOffsetAt(projection, q.y, contentOffsetX + k * Math.PI * 2);
       return {
@@ -507,24 +507,27 @@
         sy: worldToScreenY(q.y, viewCam, rect.height),
       };
     };
-    /** 光标所在副本 k*（2026-10-06 二修：高亮是**操作反馈**，只跟随光标所在副本——
-     *  全副本展开会在屏上循环高亮（周期世界是件渲染的语义，不是反馈层的语义） */
+    /**
+     * 反馈层副本 k*（2026-10-06 三修定稿，用户两轮「还是有！」）：
+     * **整场拖动固定用光标所在的那一份副本**（k* 由光标点解算）——高亮=操作反馈，
+     * 永远贴在编辑现场：光标在哪个副本上画，整条轨迹就显示在那个副本上。
+     * 反面教训：v1 全副本展开=屏上循环（错）；v2 逐格选最近=长线会跳到远端实例
+     * （错）；定稿=全局单一 k*、只画 k*（跨 180° 的连续性由本体自身在屏上的连续性
+     * 保证——±180 两侧同属本体）。（周期世界多份显示是**件渲染**的语义，不是反馈层。）
+     */
     const kStarOf = (): number => {
-      const first = paintPreview.values().next().value as number | undefined;
-      if (first === undefined) return kView.includes(0) ? 0 : kView[0] ?? 0;
-      const q = { x: pcFB.centers[first * 2], y: pcFB.centers[first * 2 + 1] };
-      let best = kView[0] ?? 0;
+      const q0 = project({ lon: brushLon, lat: brushLat }, projection, projParamsOr());
+      let best = kView.includes(0) ? 0 : kView[0] ?? 0;
       let bestD = Infinity;
       for (const k of kView) {
-        const sp = toScreenK(q, k);
+        const sp = toScreenK(q0, k);
         const d = Math.abs(sp.sx - brushSx);
         if (d < bestD) { bestD = d; best = k; }
       }
       return best;
     };
+
     const kStar = kStarOf();
-    /** 只画 k* ±1：轨迹跨 180° 时两端分别落在光标副本与邻副本（接缝连续） */
-    const copyKsFB = [kStar - 1, kStar, kStar + 1];
 
     // —— 【绘制模型】cell 色块高亮：拖动中即时反馈，松手后真实重算落地即清 ——
     if (paintPreview.size) {
@@ -539,17 +542,16 @@
         const poly = cell?.polygon;
         if (!poly?.length) continue;
         const qs = poly.map((ll) => project(ll, projection, ppp));
-        for (const k of copyKsFB) {
-          const p = new Path2D();
-          for (let i = 0; i < qs.length; i++) {
-            const s = toScreenK(qs[i], k);
-            if (i === 0) p.moveTo(s.sx, s.sy);
-            else p.lineTo(s.sx, s.sy);
-          }
-          p.closePath();
-          ctx.fill(p);
-          ctx.stroke(p);
+        const p = new Path2D();
+        const k = kStar;
+        for (let i = 0; i < qs.length; i++) {
+          const s = toScreenK(qs[i], k);
+          if (i === 0) p.moveTo(s.sx, s.sy);
+          else p.lineTo(s.sx, s.sy);
         }
+        p.closePath();
+        ctx.fill(p);
+        ctx.stroke(p);
       }
     }
 
@@ -584,19 +586,17 @@
         const y = pc.centers[cell.id * 2 + 1];
         if (!Number.isFinite(x)) continue;
         const label = cell.height.toFixed(2);
-        for (const k of copyKsFB) {
-          const sp = toScreenK({ x, y }, k);
-          if (
-            sp.sx < -8 ||
-            sp.sy < -8 ||
-            sp.sx > rect.width + 8 ||
-            sp.sy > rect.height + 8
-          )
-            continue;
-          // 圈外兜底（投影/半径近似误差）：副本实例离光标远则跳过——只显光标处副本的值
-          if (Math.hypot(sp.sx - brushSx, sp.sy - brushSy) > brushR * 1.15 && !isHover) continue;
-          drawHLabel(sp.sx, sp.sy, label, isHover);
-        }
+        // 与高亮同一副本 k*（光标现场）；圈外兜底（投影/半径近似误差）保留
+        const sp = toScreenK({ x, y }, kStar);
+        if (
+          sp.sx < -8 ||
+          sp.sy < -8 ||
+          sp.sx > rect.width + 8 ||
+          sp.sy > rect.height + 8
+        )
+          continue;
+        if (Math.hypot(sp.sx - brushSx, sp.sy - brushSy) > brushR * 1.15 && !isHover) continue;
+        drawHLabel(sp.sx, sp.sy, label, isHover);
       }
     }
 
