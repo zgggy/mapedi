@@ -14,6 +14,7 @@
  */
 import type { CellId, Region, World } from '../types';
 import { heightRev } from '../rev';
+import { writeCells } from '../occupy';
 import { HEIGHT_INTERVALS, heightToIntervalIndex } from './heightIntervals';
 
 /** cell 是否落在区间元素集内（累积：h ≥ lo，不看 hi） */
@@ -131,7 +132,7 @@ export function normalizeHeightIntervalElements(world: World): void {
   HEIGHT_INTERVALS.forEach((iv, i) => {
     const el = byLo.get(iv.lo);
     if (!el) return;
-    el.cells = next[i];
+    writeCells(el, next[i], 'height');
     // 累积后各档互相嵌套包含（非「重叠」语义）；overlaps 是生成期快照字段，不填
     el.overlaps = [];
     el.name = iv.name; // 名称随表单源（见上）
@@ -179,6 +180,7 @@ export function updateHeightIntervalElements(
   }
   const out: HeightIntervalDelta[] = els.map((r) => ({ layerId: r.layerId, regionId: r.id, added: [], removed: [] }));
   const outOf = (r: Region) => out[els.indexOf(r)];
+  // 先按谓词分类（同一 cell 每批只出现一次、记净迁移），后逐档一次经写入器落写
   for (const s of samples) {
     const h0 = Math.round(s.h0);
     const h1 = Math.round(s.h1);
@@ -188,14 +190,20 @@ export function updateHeightIntervalElements(
       const el = byLo.get(iv.lo);
       if (!el) continue;
       const o = outOf(el);
-      // 累积谓词：进入 = h1 ≥ lo > h0（此前必不在集内，push 无重复）；离开反之
+      // 累积谓词：进入 = h1 ≥ lo > h0（此前必不在集内）；离开反之
       const inOld = cellInInterval(h0, iv.lo, iv.hi);
       const inNew = cellInInterval(h1, iv.lo, iv.hi);
       if (inOld === inNew) continue;
-      if (inNew) el.cells.push(s.id);
-      else el.cells = el.cells.filter((id) => id !== s.id);
       (inNew ? o.added : o.removed).push(s.id);
     }
+  }
+  for (const el of els) {
+    const o = outOf(el);
+    if (!o.added.length && !o.removed.length) continue;
+    const drop = o.removed.length ? new Set(o.removed) : null;
+    const next = drop ? el.cells.filter((id) => !drop.has(id)) : el.cells.slice();
+    for (const id of o.added) next.push(id);
+    writeCells(el, next, 'height', { delta: { added: o.added, removed: o.removed } });
   }
   return out.filter((d) => d.added.length || d.removed.length);
 }

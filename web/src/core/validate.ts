@@ -2,6 +2,7 @@ import type { CellId, World } from './types';
 import { coreCellOf } from './regionCenter';
 import { isLand } from './types';
 import { roadComponentCount } from './draw/roads';
+import { writeCells } from './occupy';
 
 export type IssueKind =
   | 'orphan_province'
@@ -184,7 +185,7 @@ export function fixIssue(world: World, issue: ValidateIssue): boolean {
       if (!issue.regionId || issue.cellId === undefined) return false;
       const r = world.regions.find((x) => x.id === issue.regionId);
       if (!r) return false;
-      r.cells = r.cells.filter((c) => c !== issue.cellId);
+      writeCells(r, r.cells.filter((c) => c !== issue.cellId), 'repair');
       r.weights?.delete(issue.cellId);
       return true;
     }

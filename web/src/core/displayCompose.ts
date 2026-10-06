@@ -6,6 +6,7 @@
  */
 import type { CellId, LayerDef, Region, World } from './types';
 import { dataRev } from './rev';
+import { writeCells } from './occupy';
 import { effectiveVisible, layerRootOf, layerStackComparator } from './hierarchy/derive';
 
 export const VIRTUAL_PARENT = '—';
@@ -135,8 +136,15 @@ export function materializeParentCells(world: World): void {
     // 旧实现从父现有 cells 起并 = **只加不减** → 撤销回滚子层后父层残留（步骤7 修复；
     // 2026-10-01 实测 7 对父子中 6 对恒等，唯一 extra 全为历史残留本身 → 从空重建自愈）。
     const set = new Set<number>();
-    for (const k of kids) for (const id of k.cells) set.add(id);
-    r.cells = [...set];
+    const prev = new Set(r.cells);
+    const added: CellId[] = [];
+    for (const k of kids) for (const id of k.cells) {
+      if (set.has(id)) continue;
+      set.add(id);
+      if (!prev.has(id)) added.push(id);
+    }
+    const removed = r.cells.filter((id) => !set.has(id));
+    writeCells(r, [...set], 'materialize', { delta: { added, removed } });
   };
   for (const r of world.regions) write(r);
 }

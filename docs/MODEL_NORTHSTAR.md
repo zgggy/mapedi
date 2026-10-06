@@ -127,7 +127,7 @@ removeCellsFromRegion`（brush.ts，仅测试引用）。
 - **反例清单（A 案）**：涂改跨两档（h 5→30 低档各 +1）/ 擦除回 0 / 细化批量 / undo 回环 / 旧档两代载入 /
   用户拖动改档序后拾取（不依赖数组序）/ hover 高峰只出 1 个高度元素 / 隐藏低档拼缝语义不变 / 100k 存档体量。
 
-### 包 C · 占据写入单一入口（"占据写入器"）
+### 包 C ✓ · 占据写入单一入口（"占据写入器"，2026-10-06 形态 1 落地）
 - **现状事实**：改 `Region.cells` 的全部路径=绘制（membershipDraw.ts:113/106/158、stealFromSiblings
   brush:142、flood:427、endpoint drawController:446-469）、生成（unified.ts 各生成器、political.ts:112）、
   物化（materializeParentCells displayCompose:126-152）、高度重算（heightElements 三函数）；失效调用散在
@@ -265,6 +265,30 @@ E（依赖 D 词汇）→ F/G（支撑，可插任意间隙；F 的真 bug 可�
 ---
 
 ## 决策记录（倒序追加）
+
+### 包 C ✓（2026-10-06）：**形态 1（瘦写入器）落地**——按手册思考方向"最小可用（COW/patch/审计）"执行
+- 新 `core/occupy.ts`：`writeCells(region, next, cause, { delta? })`——COW 写 + Δ 记账（已知差直用、
+  否则自算 diff）+ 审计钩子；`setOccupyObserver`（探针）/`setOccupyGuard`（包 E 预留拒名单闸，
+  默认 null 不拦截、已单测）。**不做**失效分发（绘制域=commit 后统一；cause→touch 表化归包 F）、
+  物化、校验拦截。不变量：同引用=完全无操作；集合等价仍换引用但 Δ 返回 null。
+- **15 处写点全部迁移**（写点表见包内分析）：绘制 7（brush×2 / membershipDraw×4 / roads×1，
+  Δ 借 commitStrokeDiff 现有快照差或现场算）、物化 1（delta 在并集循环里顺手收集）、高度 2
+  （normalize 全量 / update 分类后逐档一次落写，Δ 与返回给件环的 Δ 同源）、生成 1
+  （political 逐格 push → 收集后每国一次写）、命令回放 5（PaintCells/MultiRegion/Annex，
+  cause='undo'、Δ 直用命令载荷）、修复 1（validate，cause='repair'）。grep 复核：`Region.cells`
+  的赋值只剩 `occupy.ts` 内部（生成器的创建字面量按契约不经写入器）。
+- **验收实测**（浏览器，真实世界 + 合成世界）：
+  ① 绘制域：membershipDraw 加/删笔、stealFromSiblings 抢格——观察者各 1 条 cause='paint'、
+  Δ 数正确（加 1/删 1/剥 1）；无净变化 → 0 条；
+  ② 高度域：真实 100k 世界涂改 h25→h47（cause='height'）+ undo 逐位还原；
+  ③ 物化：父≡∪子 0 违例、零变化 0 记账、100k 世界 matMs≈0；
+  ④ 生成域：**12 组合（4 seed × 3 国家数）新旧实现逐位对照 0 差异**（国家+行省 cells 数组
+  逐位置比对；对照法=git 旧文件临时挂载，验毕即删）；
+  ⑤ 写入器单测：同引用 no-op / 集合等价 null / 已知差 / 拒名单闸过滤同时修正 Δ 报告 /
+  observer 触发；
+  ⑥ 热路径：同格涂改 p50=0ms p95=0.1ms（40 次采样，真实 100k 世界）；tsc/svelte-check 0 errors。
+- **与后续包的关系**：包 F 在此加 cause→touch 表（写入器已带 cause）；包 E 在此接
+  allowOverlap/require*/placement 闸（Guard 已留位、语义=拒名单）。
 
 ### 包 B ✓（2026-10-06，**用户拍板 A**：精确档彻底退役、需要时现算）
 - **形态落地（单真相）**：`Region.cells` 本身即累积（h ≥ lo）；三路同谓词 `cellInInterval`

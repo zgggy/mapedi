@@ -1,5 +1,6 @@
 import type { CellId, CellMark, Region, RegionId, World } from './types';
 import { childrenOnRegionDelete, childrenOnAnnex, planLayerDelete } from './hierarchy/policy';
+import { writeCells } from './occupy';
 
 export interface EditCommand {
   label: string;
@@ -71,7 +72,7 @@ export class PaintCellsCommand implements EditCommand {
     const set = new Set(r.cells);
     for (const c of this.added) set.add(c);
     for (const c of this.removed) set.delete(c);
-    r.cells = [...set];
+    writeCells(r, [...set], 'undo', { delta: { added: this.added, removed: this.removed } });
   }
 
   revert(world: World): void {
@@ -80,7 +81,7 @@ export class PaintCellsCommand implements EditCommand {
     const set = new Set(r.cells);
     for (const c of this.added) set.delete(c);
     for (const c of this.removed) set.add(c);
-    r.cells = [...set];
+    writeCells(r, [...set], 'undo', { delta: { added: this.removed, removed: this.added } });
   }
 }
 
@@ -117,7 +118,9 @@ export class MultiRegionCommand implements EditCommand {
         for (const c of p.added) set.delete(c);
         for (const c of p.removed) set.add(c);
       }
-      r.cells = [...set];
+      writeCells(r, [...set], 'undo', {
+        delta: dir === 1 ? { added: p.added, removed: p.removed } : { added: p.removed, removed: p.added },
+      });
     }
   }
 
@@ -247,7 +250,7 @@ export class AnnexCommand implements EditCommand {
         this.attackerAdded.push(c);
       }
     }
-    attacker.cells = merged;
+    writeCells(attacker, merged, 'undo', { delta: { added: this.attackerAdded, removed: [] } });
     // 删除策略表单源（policy 场景2：子 → 攻击方）
     this.childParents = childrenOnAnnex(world, this.targetId, this.attackerId);
     for (const c of this.childParents) {
@@ -262,7 +265,9 @@ export class AnnexCommand implements EditCommand {
     const attacker = findRegion(world, this.attackerId);
     if (attacker) {
       const drop = new Set(this.attackerAdded);
-      attacker.cells = attacker.cells.filter((c) => !drop.has(c));
+      writeCells(attacker, attacker.cells.filter((c) => !drop.has(c)), 'undo', {
+        delta: { added: [], removed: this.attackerAdded },
+      });
     }
     for (const c of this.childParents) {
       const r = findRegion(world, c.id);

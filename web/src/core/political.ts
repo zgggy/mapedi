@@ -1,6 +1,7 @@
 import type { Region, World } from './types';
 import { createRng, hashSeed } from './rng';
 import { materializeParentCells } from './displayCompose';
+import { writeCells } from './occupy';
 
 const PALETTE = [
   '#c45c5c',
@@ -58,9 +59,16 @@ export function generatePolitical(world: World, seed: number, countryCount = 8):
     color: PALETTE[i % PALETTE.length],
     attributes: {},
   }));
-  for (const cell of land) {
-    const o = owner[cell.id];
-    if (o >= 0) countries[o].cells.push(cell.id);
+  {
+    // 归属批量落写（顺序 = land 序 → 输出逐位不变；2026-10-06 包 C：经占据写入器）
+    const lists: number[][] = countries.map(() => []);
+    for (const cell of land) {
+      const o = owner[cell.id];
+      if (o >= 0) lists[o].push(cell.id);
+    }
+    countries.forEach((c, i) => {
+      if (lists[i].length) writeCells(c, lists[i], 'generate');
+    });
   }
 
   const provinces: Region[] = [];

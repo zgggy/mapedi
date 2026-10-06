@@ -3,6 +3,7 @@ import { isLand } from '../types';
 import { childLayerIdOf } from '../hierarchy/derive';
 import { getCellGrid } from '../index/cellGrid';
 import { getRegionIndex, invalidateRegionIndex } from '../index/regionIndex';
+import { writeCells } from '../occupy';
 
 /**
  * 工具集（C3 清算 2026-09-30；2026-10-06 包 A 死物清账）：
@@ -117,15 +118,15 @@ export function cellsInBrush(
 
 export function addCellsToRegion(region: Region, cells: CellId[]): number {
   const set = new Set(region.cells);
-  let n = 0;
+  const added: CellId[] = [];
   for (const id of cells) {
     if (!set.has(id)) {
       set.add(id);
-      n++;
+      added.push(id);
     }
   }
-  if (n) region.cells = [...set];
-  return n;
+  if (added.length) writeCells(region, [...set], 'paint', { delta: { added, removed: [] } });
+  return added.length;
 }
 
 /** 同层互斥：把 cell 从同层其它 Region 移除（非重叠层） */
@@ -137,14 +138,27 @@ export function stealFromSiblings(
   const layer = world.layers.find((l) => l.id === region.layerId);
   if (layer?.allowOverlap) return;
   const index = getRegionIndex(world);
+  // owners() 读的是 index 缓存（worldKey 键控、循环内不受本次写入影响）→ 先收集后落写，
+  // 与「边循环边 filter」终态一致（2026-10-06 包 C：经占据写入器）
+  const drop = new Map<string, Set<CellId>>();
   for (const cid of cells) {
     const owners = index.owners(world, region.layerId, cid);
     for (const oid of owners) {
       if (oid === region.id) continue;
-      const other = world.regions.find((r) => r.id === oid);
-      if (!other) continue;
-      other.cells = other.cells.filter((c) => c !== cid);
+      let s = drop.get(oid);
+      if (!s) {
+        s = new Set();
+        drop.set(oid, s);
+      }
+      s.add(cid);
     }
+  }
+  for (const [oid, s] of drop) {
+    const other = world.regions.find((r) => r.id === oid);
+    if (!other) continue;
+    const removed = other.cells.filter((c) => s.has(c));
+    if (!removed.length) continue;
+    writeCells(other, other.cells.filter((c) => !s.has(c)), 'paint', { delta: { added: [], removed } });
   }
   invalidateRegionIndex();
 }

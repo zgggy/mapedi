@@ -13,7 +13,9 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第五十六轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
+## 当前状态（第五十七轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
+  - **✓ 第五十七轮（2026-10-06 北极星对齐·包 C：占据写入单一入口——形态 1 瘦写入器）**：新 `core/occupy.ts`（COW 写 + Δ 记账 + 审计钩子；`setOccupyObserver` 探针、`setOccupyGuard` 包 E 预留拒名单闸；**不做**失效分发/物化/校验拦截=记账点非管家）；**15 处 `Region.cells` 写点全部迁移**（绘制 brush×2/membershipDraw×4/roads×1、物化 1、高度 normalize+update、生成 political 逐格 push→每国一次写、命令回放 5（cause=undo）、validate 修复 1）；grep 复核赋值只剩写入器内部。验收：绘制域观察者 cause=paint Δ 数正确、真实世界高度涂改+undo 逐位还原、物化父≡∪子 0 违例且零变化不记账、**生成域 12 组合（4 seed×3 国家数）新旧逐位对照 0 差异**（git 旧文件临时挂载对照法）、写入器单测（同引用 no-op/集合等价 null/拒名单闸）、热路径 p50=0ms p95=0.1ms；tsc/svelte-check 0 errors。
+  - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=包 D（规则显式化 + 派生层，待拍板：规则参数集边界）**。
   - **✓ 第五十六轮（2026-10-06 北极星对齐·包 B：高度域平凡化——用户拍板 A 案，单真相落地）**：`Region.cells` 本身即**累积**（h≥lo，规则在重算期落成占据；原「数据=精确档/显示=累积」双真相退役）；**精确档=现算**（`exactIntervalElementOf` 拾取/悬停、`exactCountOfInterval` 检查区计数，heightRev+world 键控缓存）；删 `displayCellsOfInterval/displayCellsOfRegion`（件直接用 reg.cells）；**`reconcilePieceMembership` 对账补丁退役**（成员变化=高度 Δ 经 patchQueues + 成员笔画经 queuePieceInvalidation 两路）；`store.regionIdsOfCell` 跳过 interval 入图+现算档位追加（★旧「同层末位命中」依赖数组序、已弃）；懒建收敛=store.replaceWorld 安装时 `ensureHeightIntervalElements`（撒点新世界也即刻 12 档）+ update/rebuild `!==12` 兜底，删 WorkspaceDrawer effect+`regionsBump`；契约=AGENTS §3/RENDER_LOGIC/记忆已改（语义 2026-09-30 不变，仅形态）。**成本（诚实）**：序列化/clone ≈6×（100k 世界 +~500k id）；子项 A2（区间 cells 不落盘）未做，实测后定。反例九项见手册包 B 段。
   - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=包 C（占据写入单一入口，接口形态待拍板）**。
   - **✓ 第五十五轮（2026-10-06 北极星对齐·包 A：台账落地 + 死物清账，零行为变更）**：执行手册全文落盘 `docs/MODEL_NORTHSTAR.md`（§1 北极星条目 / §2 差距总表 / §3 包 A–H 详表：每包「必读参考+思考方向+验收+待拍板」/ §4 统一验收口径 / §5 顺序与依赖 / 决策记录回滚机制）；指针已入 AGENTS §11 与 ROADMAP_REFACTOR 新章「北极星对齐（A–H）」。
@@ -133,7 +135,7 @@
 
 ## 下一轮候选
 
-- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓、包 B ✓，下一包=C（占据写入单一入口，含一项待拍板：接口形态）**；随后 D（规则显式化+派生层）→ E（约束概念化）/F/G（支撑）/H（使用侧）。
+- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓、包 B ✓、包 C ✓，下一包=D（规则显式化+派生层，含一项待拍板：规则参数集边界）**；随后 E（约束概念化）/F/G（支撑）/H（使用侧）。
 - **新议题（2026-10-04，未开工）：元素名称注记与核心符号**——调研+需求细化已落 `docs/LABEL_DESIGN_2026-10-04.md`（现状盘点带 file:line / 外部调研带来源 / R1–R21 / **待拍板 P1–P12** / 分期五包），等用户拍板 P1–P12 再动代码。
 - **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓、手感批+金钮 ✓）**；**下一阶段重心 = 用户使用**——选题与排序见 `docs/OPTIMIZE_REVIEW_2026-10-04.md` §7（第一梯队=搜索/测距/吞并/校验 toast 四个半成品入口），点名即做；并行技术线=存档镜像离线程/死码甲档/存档字段清洗/测试固化（同文档 §3-§5）。路径生成 R7 用户已定先不做；路网 paths=0 待点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

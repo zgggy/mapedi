@@ -5,6 +5,7 @@
 import type { CellId, Region, World } from '../types';
 import type { PlacementRule, SplitPolicy } from '../layer/config';
 import { placementAllows } from '../layer/config';
+import { writeCells } from '../occupy';
 
 export type OverwriteMode = 'emptyOnly' | 'replace';
 
@@ -93,10 +94,12 @@ export function membershipDrawStroke(
   const set = new Set(target.cells);
 
   if (addMode) {
+    const addedToTarget: CellId[] = [];
     for (const id of gate.allowed) {
       const prevOwners = ownersOnLayer(world, actor.layerId, id).filter((r) => r.id !== target.id);
       if (!set.has(id)) {
         set.add(id);
+        addedToTarget.push(id);
         changes.push({
           cellId: id,
           fromElementId: prevOwners[0]?.id ?? null,
@@ -105,20 +108,23 @@ export function membershipDrawStroke(
       }
       if (actor.overwrite === 'replace') {
         for (const o of prevOwners) {
-          o.cells = o.cells.filter((c) => c !== id);
+          const removed: CellId[] = o.cells.includes(id) ? [id] : [];
+          writeCells(o, o.cells.filter((c) => c !== id), 'paint', { delta: { added: [], removed } });
           changes.push({ cellId: id, fromElementId: o.id, toElementId: target.id });
         }
       }
     }
-    target.cells = [...set];
+    writeCells(target, [...set], 'paint', { delta: { added: addedToTarget, removed: [] } });
   } else if (removeMode) {
+    const removedFromTarget: CellId[] = [];
     for (const id of input.cellIds) {
       if (set.has(id)) {
         set.delete(id);
+        removedFromTarget.push(id);
         changes.push({ cellId: id, fromElementId: target.id, toElementId: null });
         }
     }
-    target.cells = [...set];
+    writeCells(target, [...set], 'paint', { delta: { added: [], removed: removedFromTarget } });
   }
 
   const split = applySplitPolicy(world, actor, target);
@@ -155,7 +161,7 @@ export function applySplitPolicy(
   }
   if (comps.length <= 1) return [];
   comps.sort((a, b) => b.length - a.length);
-  target.cells = comps[0];
+  writeCells(target, comps[0], 'paint');
   const toIds = [target.id];
   for (let i = 1; i < comps.length; i++) {
     const id = `${target.id}-split${i}`;

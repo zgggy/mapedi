@@ -1,4 +1,5 @@
 import type { CellId, LonLat, Region, World } from '../types';
+import { writeCells } from '../occupy';
 
 export interface RoadSegment {
   a: CellId;
@@ -67,9 +68,12 @@ export function dragRoadEndpoint(
     return 'override';
   }
   if (hitCell !== null && hitCell !== fromCell && world.cells[hitCell]) {
-    region.cells = region.cells.filter((c) => c !== fromCell);
+    const added: CellId[] = region.cells.includes(hitCell) ? [] : [hitCell];
+    const removed: CellId[] = region.cells.includes(fromCell) ? [fromCell] : [];
+    const next = region.cells.filter((c) => c !== fromCell);
+    if (!next.includes(hitCell)) next.push(hitCell);
+    writeCells(region, next, 'paint', { delta: { added, removed } });
     setEndpointOverride(region, fromCell, null);
-    if (!region.cells.includes(hitCell)) region.cells.push(hitCell);
     // 目标默认中心端点，可再拖
     return 'transfer';
   }
