@@ -101,7 +101,13 @@ import { isRowOrControlClick } from './shell';
   }
   const roots = $derived.by(() => {
     if (!world) return [] as Node[];
-    const all = world.regions.filter((r) => r.layerId === focusLayer);
+    // 空档隐藏（2026-10-06 用户「总是显示所有高度元素，即使图中没有这个高度的
+    // 地块存在」=不合理）：**区间型空档**（cells 为空）不进列表——数据层 12 档
+    // 恒在（涂改/反算/重建不受影响），只是不占列表行；普通元素的空 cells（新建
+    // 未刷）照常显示。
+    const all = world.regions.filter(
+      (r) => r.layerId === focusLayer && !(r.attributes?.kind === 'interval' && r.cells.length === 0),
+    );
     const tops = all.filter((r) => {
       if (!r.parentId) return true;
       const p = world.regions.find((x) => x.id === r.parentId);
