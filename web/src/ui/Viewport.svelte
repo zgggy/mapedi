@@ -498,13 +498,8 @@
      * 跨线绘制时副本上也出高亮，与本体的无缝相接。
      */
     const pcFB = getProjCache(world, projection, projParamsOr());
-    const kAcc = new Set<number>();
-    for (const k of worldCopyKs(contentOffsetX, viewCam, rect.width, projection, pcFB.worldBBox)) {
-      kAcc.add(k - 1);
-      kAcc.add(k);
-      kAcc.add(k + 1);
-    }
-    const copyKsFB = [...kAcc].sort((a, b) => a - b);
+    const kView = worldCopyKs(contentOffsetX, viewCam, rect.width, projection, pcFB.worldBBox);
+    /** 逐 k 投影（与件渲染同源位移；定义须在 kStarOf 之前——TDZ） */
     const toScreenK = (q: { x: number; y: number }, k: number) => {
       const off = contentOffsetAt(projection, q.y, contentOffsetX + k * Math.PI * 2);
       return {
@@ -512,6 +507,24 @@
         sy: worldToScreenY(q.y, viewCam, rect.height),
       };
     };
+    /** 光标所在副本 k*（2026-10-06 二修：高亮是**操作反馈**，只跟随光标所在副本——
+     *  全副本展开会在屏上循环高亮（周期世界是件渲染的语义，不是反馈层的语义） */
+    const kStarOf = (): number => {
+      const first = paintPreview.values().next().value as number | undefined;
+      if (first === undefined) return kView.includes(0) ? 0 : kView[0] ?? 0;
+      const q = { x: pcFB.centers[first * 2], y: pcFB.centers[first * 2 + 1] };
+      let best = kView[0] ?? 0;
+      let bestD = Infinity;
+      for (const k of kView) {
+        const sp = toScreenK(q, k);
+        const d = Math.abs(sp.sx - brushSx);
+        if (d < bestD) { bestD = d; best = k; }
+      }
+      return best;
+    };
+    const kStar = kStarOf();
+    /** 只画 k* ±1：轨迹跨 180° 时两端分别落在光标副本与邻副本（接缝连续） */
+    const copyKsFB = [kStar - 1, kStar, kStar + 1];
 
     // —— 【绘制模型】cell 色块高亮：拖动中即时反馈，松手后真实重算落地即清 ——
     if (paintPreview.size) {
