@@ -43,7 +43,8 @@ export class ChangePipeline {
     invalidateRegionIndex();
     invalidateCellGrid();
     // 手感批（2026-10-04）：不再全清投影/件环缓存——投影键含 seed/count/参数
-    // 自失效（撒点才换）；成员 Δ 由渲染前 reconcilePieceMembership 自动补丁。
+    // 自失效（撒点才换）；成员变化走增量：高度 Δ 经 patchQueues、成员笔画经
+    // queuePieceInvalidation（2026-10-06 包 B：cells 即显示集单真相，渲染前对账退役）。
     // 全清曾导致下一帧数百毫秒重建 = 用户报的「整个界面闪一下」。
     bumpAllRev();
     this.swapIdentity();
@@ -89,7 +90,7 @@ export class ChangePipeline {
    * forward：tick 已增量维护高度件；undo：区间归属被反向套用而未打补丁 →
    * 走 flushHeightRegions 的 Δ 队列补丁。
    */
-  touchHeight(_full = false): void {
+  touchHeight(): void {
     invalidateRegionIndex();
     invalidateCellGrid();
     // 件环**不删缓存**（删 = 内容消失 + 重暖风暴）：区间成员增减以 Δ 补丁

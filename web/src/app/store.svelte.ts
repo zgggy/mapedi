@@ -12,7 +12,7 @@ import { DrawController, type PaintResult } from './drawController';
 import { CommandService } from './commandService';
 import { createRng } from '../core/rng';
 import { emptyDrawSession, type DrawSession, type DrawTool } from '../core/draw/brush';
-import { normalizeHeightIntervalElements } from '../core/layer/heightElements';
+import { exactIntervalElementOf, ensureHeightIntervalElements, normalizeHeightIntervalElements } from '../core/layer/heightElements';
 import { defaultFocusLayerId, DEFAULT_FOCUS_LAYER_ID, editsHeightAt } from '../core/layer/flags';
 import { childLayerIdOf } from '../core/hierarchy/derive';
 import { visualCoreCell } from '../core/regionCenter';
@@ -128,7 +128,11 @@ export class EditorStore {
   // 松手重建放大 50-70×（2.2s/次）；响应性 = 身份变更 + notify（本设计的驱动方式）
   get world() { return worldRaw; }
   set world(v: World | null) { worldRaw = v; }
-  /** 鼠标格 → 所属元素 id 列表（Region.cells 反查；仅 regions 域 rev 失效，height 绘制不触发重建） */
+  /**
+   * 鼠标格 → 所属元素 id 列表（存储归属反查；仅 regions 域 rev 失效，height 绘制不触发重建）。
+   * 区间型（高度档）cells = **累积**（h ≥ lo）→ 一个格会命中全部低档，**不入图**；
+   * 需要时按高度**现算精确档**追加（拾取/悬停的单元素语义；2026-10-06 包 B）。
+   */
   private cellRegions: Map<number, string[]> | null = null;
   private cellRegionsRev = -1;
   regionIdsOfCell(cellId: number): string[] {
@@ -138,6 +142,7 @@ export class EditorStore {
       const w = worldRaw;
       if (w) {
         for (const r of w.regions) {
+          if (r.attributes?.kind === 'interval') continue; // 累积集不入图（见上）
           for (const id of r.cells) {
             let l = m.get(id);
             if (!l) { l = []; m.set(id, l); }
@@ -148,7 +153,11 @@ export class EditorStore {
       this.cellRegions = m;
       this.cellRegionsRev = rev;
     }
-    return this.cellRegions.get(cellId) ?? [];
+    const out = this.cellRegions.get(cellId) ?? [];
+    const w = worldRaw;
+    if (!w) return out;
+    const iv = exactIntervalElementOf(w, cellId);
+    return iv ? [...out, iv.id] : out;
   }
   get status() { return ui.status; }
   set status(v: string) { ui.status = v; }
@@ -399,7 +408,7 @@ export class EditorStore {
     touchWorld: () => this.touchWorld(),
     touchRegions: () => this.touchRegions(),
     touchLayerView: () => this.touchLayerView(),
-    touchHeight: (full) => this.touchHeight(full),
+    touchHeight: () => this.touchHeight(),
     flushHeightRegions: (samples) => this.flushHeightRegions(samples),
   });
 
@@ -412,6 +421,9 @@ export class EditorStore {
   private replaceWorld(world: World) {
     this.autosave.invalidate();
     history.clear();
+    // 高度层 12 档元素恒在（2026-10-06 包 B：新世界安装的唯一兜底——生成/载入后即刻可拾取；
+    // 撒点分支不产高度元素，在此补齐空档，面板/拾取不依赖聚焦时机）
+    ensureHeightIntervalElements(world);
     this.world = world;
     ui.projectEpoch++;
     this.focusLayer = defaultFocusLayerId(world);
@@ -445,8 +457,8 @@ export class EditorStore {
   }
 
   /** 高度失效/派生（实现体在 ChangePipeline——高度件永不全清环缓存、Δ 补丁落盘） */
-  touchHeight(full = false) {
-    this.pipeline.touchHeight(full);
+  touchHeight() {
+    this.pipeline.touchHeight();
   }
 
   /** commit 后：区间归属派生重算 + Δ 补丁入队（门面） */

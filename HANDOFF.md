@@ -13,7 +13,13 @@
 `docs/_archive/`、`docs/history/`（59 轮旧日志）**禁止当实现依据**。**注意**：投影动画/模式切换有并发会话线，接手前先 `git log`。
 
 
-## 当前状态（第四十四轮完成；在案：`docs/OPTIMIZE_REVIEW_2026-10-04.md`）
+## 当前状态（第五十六轮完成；在案：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H 手册、`docs/OPTIMIZE_REVIEW_2026-10-04.md`；`docs/ARCH_REVIEW_2026-10-06.md`）
+  - **✓ 第五十六轮（2026-10-06 北极星对齐·包 B：高度域平凡化——用户拍板 A 案，单真相落地）**：`Region.cells` 本身即**累积**（h≥lo，规则在重算期落成占据；原「数据=精确档/显示=累积」双真相退役）；**精确档=现算**（`exactIntervalElementOf` 拾取/悬停、`exactCountOfInterval` 检查区计数，heightRev+world 键控缓存）；删 `displayCellsOfInterval/displayCellsOfRegion`（件直接用 reg.cells）；**`reconcilePieceMembership` 对账补丁退役**（成员变化=高度 Δ 经 patchQueues + 成员笔画经 queuePieceInvalidation 两路）；`store.regionIdsOfCell` 跳过 interval 入图+现算档位追加（★旧「同层末位命中」依赖数组序、已弃）；懒建收敛=store.replaceWorld 安装时 `ensureHeightIntervalElements`（撒点新世界也即刻 12 档）+ update/rebuild `!==12` 兜底，删 WorkspaceDrawer effect+`regionsBump`；契约=AGENTS §3/RENDER_LOGIC/记忆已改（语义 2026-09-30 不变，仅形态）。**成本（诚实）**：序列化/clone ≈6×（100k 世界 +~500k id）；子项 A2（区间 cells 不落盘）未做，实测后定。反例九项见手册包 B 段。
+  - 基线：tsc(app+node) 0 / svelte-check 0 errors（9 warning 存量）；**下一步=包 C（占据写入单一入口，接口形态待拍板）**。
+  - **✓ 第五十五轮（2026-10-06 北极星对齐·包 A：台账落地 + 死物清账，零行为变更）**：执行手册全文落盘 `docs/MODEL_NORTHSTAR.md`（§1 北极星条目 / §2 差距总表 / §3 包 A–H 详表：每包「必读参考+思考方向+验收+待拍板」/ §4 统一验收口径 / §5 顺序与依赖 / 决策记录回滚机制）；指针已入 AGENTS §11 与 ROADMAP_REFACTOR 新章「北极星对齐（A–H）」。
+  - **死物删除（删前 src+tests 双向 grep 取证，删后归零）**：`resetDataRev`（rev.ts 零调用）；`touchHeight` 的 `_full` 参（changePipeline→store→commandService 全链移除，参数本被忽略）；`drawController` 的 `void placementAllows` 残句（+import 清理）；brush 四函数 `removeCellsFromRegion/adjustWeights/regionWeight/shareCellsWithOthers`（weight 词汇最后遗物）+ `DrawSession.weightStep/weightDir`（零读者）+ 测试残骸两处：draw.test 的 `setCenter`（生产函数早删、测试文件当时已悬空）、roads.test 的 weight 用例。**顺带发现**：`Region.weights` 字段现零写入者（读=regionIndex 平局取权/validate/序列化）→ 观察项；绘制会话死参数链（`DrawInput.alt`、paintHeight 的 shift/ctrl/alt、paint 的 ctrl、零调用的 `store.paintHeight` 门面）→ 留包 C/F（会话链），两条已入 ROADMAP_REFACTOR §三。
+  - 基线：tsc(app) 0 / svelte-check 0 errors（9 warning 存量，全为 UI 类型提示类：ContextMenu/TopBar/GenerateSection/DisplayStylePanel/LayersPanel/WorkspaceDrawer）。
+  - **下一步**：包 B（高度域平凡化：显示累积实体化、reconcile 退役、懒建收敛四→一、契约改写；待拍板=精确档去留二选一，包内分析先出结论）。
   - **✓ 第五十四轮之四（2026-10-06 v8 手绘档位骨架接回——用户「生成还是效果太差，方向错了吗」的架构诊断）**：根因=**v7 为满足「效果同常规生成」把管线改成同源场+只锁海岸 → 第六轮手绘档位语义被覆盖丢失**（平原块内部自由长山、顶峰块不再对应顶峰）+「贴近原始」默认0 → 手绘山峰默认不保 →「基于已有」名存实亡（责任在方案演进不在需求）。v8=⑤b 档骨架段（放⑦⑧前=最后档收口）：**h0≠0 且侧未 flip 的格**带外 clamp 本档 [lo,hi]、档界带（同侧异档+膨胀2）clamp **同侧相接档联合区间**（13..60 山脚过渡）、h0=0 未画格自由、同侧 clamp 值不跨侧 mask 无扰。验收四点：平原中心1680格∈[4,12]✓顶峰中心268格∈[61,64]✓过渡22格✓未画区 min=-63（自由）✓maskBreak=0✓。
   - **✓ 第五十四轮之三（2026-10-06 点高度层元素面板不直接出现 12 个）**：根因=高度区间元素**懒补建**（撒点新世界等场景缺失）时 `rebuildHeightIntervalElements` **原地写 world.regions 不触发响应链**→roots 不重算、列表停旧值（关开面板=组件重挂才刷新）→ WorkspaceDrawer 加 `regionsBump`（effect 补建后 ++、roots 依赖它）。复现=手删12区间（模拟撒点世界）点高度行 rows=0；修后 rows=**12** + 数据自愈 ✓。
   - **✓ 第五十四轮之二（2026-10-06 羊皮纸高度色卡按用户参考重定稿）**：用户给 7 锚色卡（深海#345473/近海#466b8c/滩涂#e2c9a4/低地平原#ddb887/平缓高地#d99e6b/丘陵#c97c50/高山主峰#a84434）+ 效果图（**图片模型不可读→像素聚类识别**：蓝水~35% #406080/#407090 族、黄橙陆~28% #d0b070/#d0a060/#d09050、无青绿紫，与表同族）→ parchment.heightBands 12 档=锚点精确+中间插值+浅滩按图校正为亮蓝 #5d88a3+顶峰主峰加深 #8f3a2c；ocean 清屏改 #345473（深海底）。验收：7 锚全 OK、渲染色板 12 档全出现且 top#385878=43.9% 与参考图同族。坑：被 cancel 的 Bash 不落盘要 grep 确认后重写。
@@ -82,31 +88,7 @@
   - **坑**：跨码像素对拍必须**同码序列收敛到稳定帧再比**（渐现/暖机瞬态6-9s 跳变89%曾两度误判）；broker 不吃跨进程大字节数组（页内 diff 直接炸——改文件序列+node 端比）。
   - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）/ vitest 29 文件 152 用例绿。
 
-（第三十九轮视图居中对准记录见下）；在案链：
-
-- **✓ 第三十九轮（2026-10-04 用户需求：面板展开→视图对准剩余空间中心，双收起回屏幕中心）**：
-  - 实现 = **几何内缩而非相机搬家**：App `mapInset`（图层|元素任一展开 ? 栏右缘317 : 0）→ `--map-inset-l` 挂 `.view`（left 内缩）——平面/球面共用；相机不动 → 世界中心自动落在剩余空间中心；rect 相对坐标（llAt/zoom/拾取全链 `clientX-rect.left`）零改动自适配。LeftRail onState 改回传 `right`（fixed left8+实测宽）。
-  - GlobeView 渲染循环加**逐帧尺寸自校**（缓冲≠容器 → 同步纵横比+缓冲）：**本环境 ResizeObserver 实测零回调**（失焦页渲染步停摆——连自建元素自改宽度都不触发；平面靠既有 syncBackingStore 兜底、球面原来没有），RO 保留为正常环境冗余。
-  - 验收：平面三态几何 317/0/317 往返；**精确中心开合同格 #10407@0.0°**（早先"不同格"= 整数取整半像素差、scale180 下放大成0.2°——教训：居中类断言用浮点精确中心）；球面/平面缓冲泵帧自愈 1410↔1093；tsc/svelte-check 0。
-
-（第三十八轮用户四件反馈记录见下）；在案链：
-
-- **✓ 第三十八轮（2026-10-04 用户四件反馈，一次交付）**：
-  - ① **「子层」药丸撤销**（8ef38d6 引入当日即撤）；② **元素单体显隐退役**（用户定：图层显示下元素恒显示、个体显隐无意义）——检查区元素胶囊删、元素行 👁 徽章停发（ItemButton badge 改显式开关，图层/路径保留）、toggleItemHidden 命令链整删、检查区元素基本色改**自身渲染色**（微调后父色≠自色，面板与地图同真值）。
-  - ③ **彩虹配色 `core/layer/palette.ts`**（≥20：RAINBOW 24 色相均分+colorAt 单源）——九层旧色池全删（实测唯一色仅 4–5）；④ **父子同色系 tintOf**（父色 ±16°/±7% 按兄弟序）：generateFromLayer 聚合后 + 组织缩进（与 parentLayerId 同一条 Composite 入栈）双路径。
-  - 验收：scratch 每层 unique==n、15 省贴父 ≤16.1°；真实缩进 15 变色/15 贴父/状态回显 → 撤销×2 逐位还原；行内 kidp=0/元素徽章0/元素胶囊0、图层侧全保留；tsc/svelte-check 0。
-  - **坑**：① alreadyApplied 模式下新字段必须**手动写入世界**（只建 patches 忘写 r.color → 状态报「15 个随父配色」但颜色未变——探针 changedOnIndent=0 抓住）；② 检查区有两个 .ins 实例（图层在前），断言元素区必须按行作用域。
-  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
-
-（第三十七轮 HIERARCHY 四包/EXPAND 包4/5-c/海陆案 A 记录见下）；在案链：`c4ba324` HIERARCHY 包1 → `1980fdc` 包2 → `268b307` 包3 → `b01c906` 包4 → `8ef38d6` EXPAND 包4 → `716e03f` 5-c 全量 → `fc8664e` 海陆案 A）
-
-- **✓ 第三十七轮（2026-10-03 用户委托「把我没拍的全部做完」——四件全清）**：
-  - **HIERARCHY 包1–4（D1–D8 全按推荐拍板并落地）**：包1 `c4ba324` hierarchy/{derive,gate,ops,policy} 四件+读档修复+DeleteLayer 链拼接+copy 成根+D3 锚点同源+**regionOps 整体溶解**（死路径删、测试迁 history/ops/gate 规则面）；包2 `1980fdc` 焦点整段叠放（derive.layerStackComparator 单源）+I6 effective 显隐+**D8 关=只写自身**（stash 像素 A/B 底0%/信号10%格状斑块）；包3 `268b307` units=层树派生（fromLayerId 三处退役）+拓扑级联替 CASCADE_ORDER（dependsOn 真消费、profiles 零迁移）+递归 regen——**全级联 serialize 哈希新旧逐位相等**；包4 `b01c906` 子元素逐跳（O1）+手动挂靠（D4，打分单源 bestParentAmong）。
-  - **EXPAND 包4 `8ef38d6`**（L0 子层结构点，配置标随 D6 撤销）→ **EXPAND 五包全清**；**还债 5-c `716e03f`** 24 项纯转发下沉+selectElement 入 store+2 死 prop → **步骤 5 全清**。
-  - **海陆案 A `fc8664e`（破坏性，-1171 行）**：产品级删 landsea——builtin/旧档清理（ensureBuiltinLayers 唯一入口）、landSea.ts+heightRegions.ts 整删、rebuild 十处调用链、拆海 manualSplit、**continentId 全链退役**（域外零读者）、piecePatch 队列机制删除；海色=底色+高度区间实测不变（12 区间出件）；旧档载入 14 层/87 实体清零；高度涂改真实路径 commit→undo 精确复原；scratch heightmap 12 区间+序列化回环幂等。
-  - **验证教训**：① 合成笔画的 pointerup 必须派到**画布本体**（Viewport onpointerup → commitStroke），派 window 或走 Esc = endDraw 不提交、笔画悬空——回滚法=`drawCtl.heightStroke` 快照仍驻内存，按 {id,h} 逐格复原+清 paint 态即可精确还原；② 全严格档 tsc 扫 tests 有存量类型漂移（vitest 不做类型检查）——只对自己动过的测试文件认账。
-  - 基线：tsc 0 / svelte-check 0 errors（5 warning 存量）。
-
+- 第三十七~三十九轮（2026-10-03/04：HIERARCHY D1–D8 四包 / EXPAND 包4 / 还债 5-c 收口 / 海陆案 A / 彩虹配色+父子 tintOf / 子层药丸撤销 / 视图居中对准、地图内缩）→ 已剪切归档 `docs/history/HANDOFF_LOG_2026-10-06.md`。
 
 ## 遗留清单（按优先级）
 
@@ -151,6 +133,7 @@
 
 ## 下一轮候选
 
+- **主线（2026-10-06 起）：`docs/MODEL_NORTHSTAR.md` 北极星对齐 A–H——包 A ✓、包 B ✓，下一包=C（占据写入单一入口，含一项待拍板：接口形态）**；随后 D（规则显式化+派生层）→ E（约束概念化）/F/G（支撑）/H（使用侧）。
 - **新议题（2026-10-04，未开工）：元素名称注记与核心符号**——调研+需求细化已落 `docs/LABEL_DESIGN_2026-10-04.md`（现状盘点带 file:line / 外部调研带来源 / R1–R21 / **待拍板 P1–P12** / 分期五包），等用户拍板 P1–P12 再动代码。
 - **拍板债全清（HIERARCHY D1–D8 ✓、海陆案 A ✓、EXPAND 五包 ✓、还债 5 ✓、O1/O2 ✓、手感批+金钮 ✓）**；**下一阶段重心 = 用户使用**——选题与排序见 `docs/OPTIMIZE_REVIEW_2026-10-04.md` §7（第一梯队=搜索/测距/吞并/校验 toast 四个半成品入口），点名即做；并行技术线=存档镜像离线程/死码甲档/存档字段清洗/测试固化（同文档 §3-§5）。路径生成 R7 用户已定先不做；路网 paths=0 待点名。
 - 用户点名才动：功能包（比例尺/指南针/测量/搜索跳转/历史面板）；待复核：海陆案 A（产品级删层）、**全新父子层级系统设计 `docs/HIERARCHY_DESIGN_2026-10-02.md`（2026-10-02 交付，D1–D8 待拍板，吸收生成引擎包）**、专属色数据层清理。

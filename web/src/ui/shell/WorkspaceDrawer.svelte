@@ -9,7 +9,6 @@
   import { editor } from '../../app/store.svelte';
   import { tick } from 'svelte';
   import type { Region, World } from '../../core/types';
-  import { rebuildHeightIntervalElements, heightIntervalRegions } from '../../core/layer/heightElements';
   import { editsHeightAt } from '../../core/layer/flags';
   import { isFreeLayerId } from '../../core/displayCompose';
   import { childLayerIdOf } from '../../core/hierarchy/derive';
@@ -99,16 +98,12 @@ import { isRowOrControlClick } from './shell';
   function canExpand(r: Region): boolean {
     return !!childLayerFor(r);
   }
-  /** 补建触碰计数（2026-10-06 用户「点高度图层后元素面板不直接出现 12 个」）：
-   *  rebuildHeightIntervalElements **原地写 world.regions** 不触发响应链 →
-   *  roots 不重算、列表停在旧值（关开面板=组件重挂才刷新）。effect 补建后 bump。 */
-  let regionsBump = $state(0);
   const roots = $derived.by(() => {
-    void regionsBump;
     if (!world) return [] as Node[];
     // 高度元素恒在（2026-10-06 用户澄清「我要求的所有高度元素一直在」——澄清句
     // 推翻了此前按抱怨句式的空档隐藏）：**所有区间元素（含空档）始终显示**；
-    // 数据层缺档由下方 effect 的 ≠12 补齐兜底。
+    // 数据层缺档由 store.replaceWorld 安装时的 ensureHeightIntervalElements 兜底
+    // （2026-10-06 包 B：懒建收敛，原组件 effect+regionsBump 散补丁退役）。
     const all = world.regions.filter((r) => r.layerId === focusLayer);
     const tops = all.filter((r) => {
       if (!r.parentId) return true;
@@ -203,15 +198,6 @@ import { isRowOrControlClick } from './shell';
   const vSlice = $derived(virtualMode && vwin ? cells.slice(vwin.start, vwin.end) : cells);
 
   let listEl: HTMLElement | undefined = $state();
-
-  $effect(() => {
-    // 高度元素**一直在**（2026-10-06 用户要求）：缺档即补齐（≠12 才重建——重建恒产
-    // 12 个元素，条件随即为假，不会无限触发；仅空档不动 cells）
-    if (world && isHeight && heightIntervalRegions(world).length !== 12) {
-      rebuildHeightIntervalElements(world);
-      regionsBump++;
-    }
-  });
 
   $effect(() => {
     if (virtualMode && listEl) listH = listEl.clientHeight || 360;

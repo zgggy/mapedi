@@ -63,8 +63,8 @@
 | 身份 | 来源 | 派生 |
 |------|------|------|
 | **Cell.polygon** | Voronoi 焊接后 | `sharedEdges`、网格、球面、拾取 |
-| **Region.cells** | 归属真值（区间型 = 精确档） | 标签、拾取、工作区计数 |
-| **DisplayPiece.cellIds** | 显示归属：一般 ⊆ region.cells；**区间型（高度档）= 累积 h ≥ lo（直接 ∪ 更高，2026-09-30 用户定）** | 与 dp.cellIds **同一** cellSet 求环（单源 `displayCellsOfInterval`，件环 Δ 同谓词） |
+| **Region.cells** | 归属真值（**区间型高度档 = 累积 h ≥ lo**，2026-10-06 包 B：规则期产物；精确档现算） | 标签、拾取（精确档现算）、工作区计数（精确档现算） |
+| **DisplayPiece.cellIds** | 显示归属：一般 ⊆ region.cells；**区间型（高度档）cells 即累积 h ≥ lo（直接 ∪ 更高，显示语义 2026-09-30 用户定、2026-10-06 改落成形态）** | 与 dp.cellIds **同一** cellSet 求环（单源谓词 `cellInInterval`，件环 Δ 同谓词；渲染期派生与对账补丁均已退役） |
 
 无 owner；海岸 = 高度 continent/lake 的 cellSet 环（与大陆框同 Entry）。
 

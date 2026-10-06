@@ -4,3 +4,4 @@ web/dev.log
 wasm-core/target/
 .DS_Store
 *.local
+.zcode/

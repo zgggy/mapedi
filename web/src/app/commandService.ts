@@ -70,7 +70,7 @@ export interface CommandCtx {
   touchWorld(): void;
   touchRegions(): void;
   touchLayerView(): void;
-  touchHeight(full?: boolean): void;
+  touchHeight(): void;
   flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]): void;
 }
 
@@ -132,8 +132,8 @@ export class CommandService {
   private touchLayerView(): void {
     this.ctx.touchLayerView();
   }
-  private touchHeight(full = false): void {
-    this.ctx.touchHeight(full);
+  private touchHeight(): void {
+    this.ctx.touchHeight();
   }
   private flushHeightRegions(samples?: { id: number; h0: number; h1: number }[]): void {
     this.ctx.flushHeightRegions(samples);
@@ -175,10 +175,10 @@ export class CommandService {
     if (!samples.length) return;
     if (dir === 'apply') {
       this.flushHeightRegions(samples);
-      this.touchHeight(false);
+      this.touchHeight();
     } else {
       this.flushHeightRegions(samples.map((s) => ({ id: s.id, h0: s.h1, h1: s.h0 })));
-      this.touchHeight(true);
+      this.touchHeight();
     }
   }
 

@@ -3,7 +3,7 @@
   import type { World } from '../core/types';
   import { defaultLayerStyleFor } from '../core/types';
   import { pickCell } from '../core/world';
-  import { patchPieceEntry, invalidatePieceEntries, reconcilePieceMembership } from '../render/borderCache';
+  import { patchPieceEntry, invalidatePieceEntries } from '../render/borderCache';
   import {
     unproject,
     project,
@@ -885,18 +885,11 @@
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
     // 统一接口：选中 ≡ 显示；无图层特殊性
+    // （2026-10-06 包 B：cells 即显示集单真相，原「渲染前成员对账补丁 reconcilePieceMembership」
+    //   退役——高度件环 Δ 经 patchQueues、成员笔画经 queuePieceInvalidation，两条增量路覆盖。）
     const displayPieces = pathEdit
       ? undefined
       : composeShownPieces(world, focusLayer, highlightRegionId, forceLayerId);
-    // 成员对账补丁（手感批 2026-10-04）：本次数据修订内一次——已缓存件与**合成件
-    // cellIds**（唯一显示真相，含区间型累积/父切片）的 Δ 就地补上（替代 touch* 的
-    // 全清，全清=重建长帧闪屏）。必须在 compose 之后：期望集吃 dp.cellIds。
-    reconcilePieceMembership(
-      world,
-      projection,
-      (ll) => project(ll, projection, projParams ?? defaultProjParams()),
-      displayPieces,
-    );
     drawWorld(ctx, world, viewCam, hoverId, dpr, {
       focusLayer,
       focusLayerId: focusLayer,

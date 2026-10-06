@@ -31,8 +31,6 @@ declare global {
   var __gpuMs: number | undefined;
   /** GPU 帧计数 */
   var __gpuRan: number | undefined;
-  /** 渲染前成员对账补丁数（手感批 2026-10-04：替代全清的 Δ 补丁计数） */
-  var __reconcileN: number | undefined;
   /** 金钮看门狗观测（模式胶囊卡死自归位，2026-10-04 手感批二） */
   var __knobV: { n: number; snap: number; last: string; eff?: number } | undefined;
   /** 注记段单帧耗时（ms，含逐副本 pass；帧令牌见 __labelStat.frame） */

@@ -6,19 +6,9 @@
  */
 import type { CellId, LayerDef, Region, World } from './types';
 import { dataRev } from './rev';
-import { displayCellsOfInterval } from './layer/heightElements';
 import { effectiveVisible, layerRootOf, layerStackComparator } from './hierarchy/derive';
 
 export const VIRTUAL_PARENT = '—';
-
-/**
- * 显示归属单源（compose 与件环对账补丁 borderCache.reconcilePieceMembership
- * 同一谓词）：区间型（高度档）= 累积 h ≥ lo（2026-09-30 用户定），其余 = region.cells。
- * 数据仍是精确档——两套真相各司其职，禁止任何一侧私自改用另一侧。
- */
-export function displayCellsOfRegion(world: World, reg: Region): CellId[] {
-  return reg.attributes?.kind === 'interval' ? displayCellsOfInterval(world, reg) : reg.cells;
-}
 
 export interface DisplayPiece {
   key: string;
@@ -320,14 +310,11 @@ function composeShownPiecesUncached(
     const ancestorRegionLists = ancIds.map((pid) => regionsWithCells(world, pid));
 
     for (const reg of regions) {
-      // 区间型元素（高度档）：显示归属 = 累积（直接 ∪ 更高，h ≥ lo，2026-09-30 用户定）。
-      // 数据仍是精确档；单源 = displayCellsOfRegion（件环对账补丁吃合成件 cellIds，同源）。
-      const ownCells = displayCellsOfRegion(world, reg);
+      // 区间型高度档：cells 即**累积**（h ≥ lo，规则期产物）——显示归属 = region.cells 单真相
+      // （2026-10-06 包 B：原 displayCellsOfRegion 渲染期派生退役）。
+      const ownCells = reg.cells;
       if (!ownCells.length) continue;
-      const slices = splitRegionForDisplay(
-        ownCells === reg.cells ? reg : { ...reg, cells: ownCells },
-        ancestorRegionLists,
-      );
+      const slices = splitRegionForDisplay(reg, ancestorRegionLists);
       for (const [sliceIndex, s] of slices.entries()) {
         if (!s.cells.length) continue;
         out.push({

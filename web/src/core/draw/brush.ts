@@ -5,11 +5,14 @@ import { getCellGrid } from '../index/cellGrid';
 import { getRegionIndex, invalidateRegionIndex } from '../index/regionIndex';
 
 /**
- * 工具集（C3 清算 2026-09-30：按「与实际功能相关」裁定）：
+ * 工具集（C3 清算 2026-09-30；2026-10-06 包 A 死物清账）：
  * - `brush` 通用水笔刷（B）；`road` 道路/航线层专用（由 startDraw 按层自动选中）。
  * - `fill` / `center`：**从未接入任何绘制分支**（死值）→ 删；`weight`：用户定
- *   「设置权重的笔刷不再被需要」→ 删。辅助函数（floodFill/adjustWeights）有测试覆盖，
- *   作为几何工具保留；原 setCenter（核心格直写）已随「设中心」收敛到 commandService.setCoreCell（RegionFieldsCommand）删除。
+ *   「设置权重的笔刷不再被需要」→ 删——2026-10-06 把该词汇最后遗物
+ *   adjustWeights/regionWeight/shareCellsWithOthers/removeCellsFromRegion 物理删除
+ *   （src+tests 双向 grep 零引用取证）；floodFillCells/stealFromSiblings/addCellsToRegion 保留
+ *   （drawController 会话链引用）。原 setCenter（核心格直写）已随「设中心」收敛到
+ *   commandService.setCoreCell（RegionFieldsCommand）删除。
  */
 export type DrawTool = 'brush' | 'road';
 
@@ -23,10 +26,6 @@ export interface DrawSession {
   /** 笔刷半径（度，约） */
   radiusDeg: number;
   addMode: boolean;
-  /** 权重笔刷步进 0–1 */
-  weightStep: number;
-  /** 权重方向：+加 −减 */
-  weightDir: 1 | -1;
   /** 正在拖动的道路端点 cell */
   draggingEndpointCell?: CellId | null;
   /** 高度笔刷模式（2026-10-06：涂改=写值 / 平滑=图拉普拉斯抹台阶） */
@@ -44,8 +43,6 @@ export function emptyDrawSession(): DrawSession {
     tool: 'brush',
     radiusDeg: 1.5,
     addMode: true,
-    weightStep: 0.15,
-    weightDir: 1,
     heightMode: 'paint',
     smoothIter: 3,
     smoothCoast: true,
@@ -131,13 +128,6 @@ export function addCellsToRegion(region: Region, cells: CellId[]): number {
   return n;
 }
 
-export function removeCellsFromRegion(region: Region, cells: CellId[]): number {
-  const drop = new Set(cells);
-  const before = region.cells.length;
-  region.cells = region.cells.filter((id) => !drop.has(id));
-  return before - region.cells.length;
-}
-
 /** 同层互斥：把 cell 从同层其它 Region 移除（非重叠层） */
 export function stealFromSiblings(
   world: World,
@@ -215,89 +205,6 @@ export function cellsInPolygon(
     if (pointInPolygon(c.center.lon, c.center.lat, poly)) hits.push(c.id);
   }
   return hits;
-}
-
-/** 重叠层：调整权重；归零从 cells 移除 */
-export function adjustWeights(
-  region: Region,
-  cells: CellId[],
-  delta: number,
-): void {
-  if (!region.weights) region.weights = new Map();
-  const inCells = new Set(region.cells);
-  for (const id of cells) {
-    if (!inCells.has(id) && delta > 0) {
-      region.cells.push(id);
-      inCells.add(id);
-      region.weights.set(id, Math.max(0, Math.min(1, delta)));
-      continue;
-    }
-    if (!inCells.has(id)) continue;
-    const cur = region.weights.get(id) ?? 1;
-    const next = Math.max(0, Math.min(1, cur + delta));
-    if (next <= 0) {
-      region.weights.delete(id);
-      region.cells = region.cells.filter((c) => c !== id);
-    } else {
-      region.weights.set(id, next);
-    }
-  }
-}
-
-export function regionWeight(region: Region, cellId: CellId): number {
-  if (!region.cells.includes(cellId)) return 0;
-  return region.weights?.get(cellId) ?? 1;
-}
-
-/**
- * Ctrl 绘制：与该 cell 上同层所有占有方分摊权重。
- * 目标权重 +step，其它按比例扣；扣到 0 则移出。
- */
-export function shareCellsWithOthers(
-  world: World,
-  region: Region,
-  cells: CellId[],
-  step = 0.15,
-): void {
-  const layer = world.layers.find((l) => l.id === region.layerId);
-  if (!layer?.allowOverlap) {
-    // 非重叠层：退化为抢占
-    stealFromSiblings(world, region, cells);
-    addCellsToRegion(region, cells);
-    return;
-  }
-  const index = getRegionIndex(world);
-  if (!region.weights) region.weights = new Map();
-  const inSet = new Set(region.cells);
-  for (const cid of cells) {
-    if (!inSet.has(cid)) {
-      region.cells.push(cid);
-      inSet.add(cid);
-      region.weights.set(cid, Math.min(1, step));
-    } else {
-      const cur = region.weights.get(cid) ?? 1;
-      region.weights.set(cid, Math.min(1, cur + step));
-    }
-    const owners = index.owners(world, region.layerId, cid);
-    const others = owners.filter((id) => id !== region.id);
-    if (others.length === 0) continue;
-    // 从其它占有方扣 step / n
-    const cut = step / others.length;
-    for (const oid of others) {
-      const o = world.regions.find((r) => r.id === oid);
-      if (!o) continue;
-      if (!o.weights) o.weights = new Map();
-      const ow = o.weights.get(cid) ?? 1;
-      const nw = Math.max(0, ow - cut);
-      if (nw <= 0) {
-        o.weights.delete(cid);
-        o.cells = o.cells.filter((c) => c !== cid);
-      } else {
-        o.weights.set(cid, nw);
-      }
-    }
-  }
-  invalidateRegionIndex();
 }
 
 /** 点在任一 cell 多边形内 → cellId；用于端点命中 */

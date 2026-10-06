@@ -7,7 +7,7 @@ import {
   dragRoadEndpoint,
   roadComponentCount,
 } from '../src/core/draw/roads';
-import { cellsInPolygon, adjustWeights } from '../src/core/draw/brush';
+import { cellsInPolygon } from '../src/core/draw/brush';
 
 function makeWorld() {
   const w = createWorld({ seed: 77, count: 600 });
@@ -82,20 +82,5 @@ describe('lasso + weight', () => {
     ];
     const hits = cellsInPolygon(w, poly);
     expect(hits.length).toBeGreaterThan(0);
-  });
-
-  it('weight to zero removes membership', () => {
-    const w = makeWorld();
-    const land = w.cells.find((c) => c.height > 0)!;
-    const region: Region = {
-      id: 'cul',
-      layerId: 'culture',
-      name: '文',
-      cells: [land.id],
-      color: '#fff',
-      attributes: {},
-    };
-    adjustWeights(region, [land.id], -1);
-    expect(region.cells).not.toContain(land.id);
   });
 });

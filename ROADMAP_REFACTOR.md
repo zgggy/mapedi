@@ -7,6 +7,22 @@
 
 ---
 
+## 〇、北极星对齐（A–H，2026-10-06 立项）——执行手册 = `docs/MODEL_NORTHSTAR.md`
+
+依据：`docs/地图编辑器数据模型思考记录.md`（用户北极星原文）+ `docs/ARCH_REVIEW_2026-10-06.md` §5/§6（数据模型公理与差距）。
+**本节只放状态；做法/必读参考/反例/待拍板全在执行手册，别在这里抄。**
+
+- **✓ 包 A 台账落地 + 死物清账（2026-10-06，零行为变更）**：手册落盘 + 死物删除（src+tests 双向 grep 归零）+ AGENTS §11/本文件指针；tsc/svelte-check 0 errors。
+- ☐ 包 B 高度域平凡化（显示累积实体化、reconcile 退役、懒建四→一、契约改写；**待拍板：精确档去留**）——**✓ 完成（2026-10-06，用户拍板 A 案：精确档退役现算）**
+- ☐ 包 C 占据写入单一入口（`core/occupy.ts` 协议；**待拍板：接口形态**）
+- ☐ 包 D 规则显式化 + 派生层（三套词汇收编、splitPolicy 二选一、用户例「高度>0=陆海层」；**待拍板：规则参数集边界**）
+- ☐ 包 E 约束概念化 + 多归属评估（语义映射表先落；**待拍板：多归属做不做**）
+- ☐ 包 F 失效/重算规范（字段→touch 表、物化窗口、incidentCache 跨世界、I-bridge、endpoint undo、tintOf；**待拍板：adjacent/overlaps 策略**）
+- ☐ 包 G 管线收口 + 验收基建（refine 阶段化、参数真值表；**待拍板：测试启动**）
+- ☐ 包 H 使用侧（搜索/测距/吞并入口/校验 toast + 球面补完）
+
+---
+
 ## 一、还债七步（按序，每步一个可独立验收的整包）
 
 依据：评审 §6。原则 = AGENTS §6 整包交付；**步骤 1 是后续一切（含未来叙事编辑器第 0 包）的地基**。
@@ -99,7 +115,9 @@
 
 | 问题 | 位置 | 状态 |
 |---|---|---|
-| 撤销后**父层物化残留**：父 cells=子并集（materializeParentCells），undo 只 touchWorld 不重新物化 → 子已回滚、父多出的 cells 残留到下一次 touchRegions（5-b4 终证实测 +16 残留；预存类，与 undo 只 touchWorld 的老路径同构） | store.undo/物化管线（第十六轮 A/B 未做，代码同构推定预存） | 观察：修法=undo 后补物化或并入 touchWorld（注意频率成本），随 1-c 深化/历史面板包 |
+| 撤销后**父层物化残留**：父 cells=子并集（materializeParentCells），undo 只 touchWorld 不重新物化 → 子已回滚、父多出的 cells 残留到下一次 touchRegions（5-b4 终证实测 +16 残留；预存类，与 undo 只 touchWorld 的老路径同构） | store.undo/物化管线（第十六轮 A/B 未做，代码同构推定预存） | 观察：修法=undo 后补物化或并入 touchWorld（注意频率成本）——**已并入 `docs/MODEL_NORTHSTAR.md` 包 F（物化窗口靶子）** |
+| `Region.weights` 字段**零写入者**（weight 词汇四函数已于包 A 物理删除；读者=regionIndex 平局取权 / validate 越界检查 / 序列化 / history 克隆） | `core/types.ts:192`、`index/regionIndex.ts:104` | 观察：删字段或并入包 C 占据写入器审计（触及序列化/校验，勿在死物包顺手删） |
+| 绘制会话**死参数链**：`DrawInput.alt`（membershipDraw 只读 pointer/shift）、`paintHeight` 的 shift/ctrl/alt（函数体 void）、`paint` 的 ctrl（仅向 paintHeight 转发）、`store.paintHeight` 门面零调用 | `core/draw/membershipDraw.ts`（DrawInput）、`app/drawController.ts`、`app/store.svelte.ts`、`ui/Viewport.svelte:305`（ctrlKey 实参） | 观察：清理需跨 Viewport→store→controller 签名，归包 C（会话/写入链）或包 F |
 | `generateRoads` 先清空 road 区域再生成，首都不在同一陆块时 `pathBetween` 全 skip → **路网归零且无法可复**（路径层 UI 再生成=禁用待设计） | `core/generate/networks.ts`（步骤 4 验收探针直调实测：1→0；与 ensure 无关——biome 只做正系数代价缩放不碰连通闸） | 观察：归路径层再生成设计包 |
 | 高度笔画撤销后 `continentId` 标签 + region 数组序漂移（分区等价、真值 Region.cells 逐位精确；笔画期间也重排） | heightRegions/landSea 派生管线（第十九轮 A/B 证**预存**，非 1-c 引入） | 观察：派生标签非真相，用户可见性待查（叠放若受影响再修=重建后稳定序） |
 | 缩放重烘焙顿挫 ~100ms | — | 暂接受（归卡顿包 2） |

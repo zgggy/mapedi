@@ -36,8 +36,3 @@ export function geomRev(): number {
 export function heightRev(): number {
   return height;
 }
-export function resetDataRev(): void {
-  geom = 1;
-  height = 1;
-  regions = 1;
-}

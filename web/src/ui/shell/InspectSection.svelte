@@ -13,6 +13,7 @@
   import StateCapsule from './StateCapsule.svelte';
   import { editor } from '../../app/store.svelte';
   import { defaultLayerVisible } from '../../core/displayCompose';
+  import { exactCountOfInterval } from '../../core/layer/heightElements';
   import { childLayerIdOf } from '../../core/hierarchy/derive';
   import { bestParentFor } from '../../core/hierarchy/ops';
   
@@ -100,8 +101,8 @@
       name: r ? r.name : l ? l.name || meta?.name || id || '' : '',
       basicColor: basic,
       basicEditable: r ? !r.parentId : true,
-      cellCount: r
-        ? r.cells.length
+      cellCount: r && world
+        ? exactCountOfInterval(world, r) // 区间型=精确档现算（累积 cells.length 非精确档，2026-10-06 包 B）
         : l && world
           ? world.regions.filter((x) => x.layerId === id).length
           : 0,

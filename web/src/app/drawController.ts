@@ -27,7 +27,7 @@ import {
   type DrawActor,
   type OverwriteMode,
 } from '../core/draw/membershipDraw';
-import { defaultLayerConfig, placementAllows } from '../core/layer/config';
+import { defaultLayerConfig } from '../core/layer/config';
 import { HEIGHT_INTERVALS, intervalById } from '../core/layer/heightIntervals';
 import { setHeightStroke, smoothHeightBrush } from '../core/draw/heightDraw';
 import { buildRoadSegments, dragRoadEndpoint } from '../core/draw/roads';
@@ -281,8 +281,6 @@ export class DrawController {
       shift,
       alt,
     });
-    void placementAllows;
-    void ctrl;
     return { hits, changed: [...changed] };
   }
 

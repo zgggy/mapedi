@@ -7,9 +7,7 @@ import {
   cellsInBrush,
   emptyDrawSession,
   floodFillCells,
-  removeCellsFromRegion,
   resolveDrawTarget,
-  setCenter,
   stealFromSiblings,
 } from '../src/core/draw/brush';
 
@@ -21,7 +19,7 @@ function makeWorld() {
 }
 
 describe('draw brush', () => {
-  it('adds and removes cells', () => {
+  it('adds cells', () => {
     const w = makeWorld();
     const c = w.regions.find((r) => r.layerId === 'country')!;
     const land = w.cells.find((x) => x.height > 0)!;
@@ -32,8 +30,6 @@ describe('draw brush', () => {
     const n = addCellsToRegion(c, hits);
     expect(n).toBeGreaterThan(0);
     expect(c.cells.length).toBe(n);
-    removeCellsFromRegion(c, hits.slice(0, 1));
-    expect(c.cells.length).toBe(n - 1);
   });
 
   it('country draw resolves to province child', () => {
@@ -65,13 +61,5 @@ describe('draw brush', () => {
     stealFromSiblings(w, a, [cell]);
     expect(b.cells).not.toContain(cell);
     expect(a.cells).toContain(cell);
-  });
-
-  it('set center', () => {
-    const w = makeWorld();
-    const c = w.regions.find((r) => r.layerId === 'country')!;
-    const land = w.cells.find((x) => x.height > 0)!;
-    setCenter(c, land.id);
-    expect(c.centerCellId).toBe(land.id);
   });
 });
