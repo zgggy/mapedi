@@ -35,10 +35,12 @@ export interface RefineOpts {
 const SMOOTH_ITERS = 40;
 
 /**
- * 海岸碎渣清理（2026-10-06 用户「海岸边上还有一些零碎的海岸，消除一下」）：
- * 细化新产生的**碎块**（护岸关一层翻转 + 整数取整的边缘抖动）——对最终整数高度场
- * 做连通域过滤：**不含任何手绘原格**的孤立小块（陆 <K 格 → 归海 −1；海 <K 格 →
- * 归陆 +1）。含手绘格的域一律保留（用户故意画的小岛/湖泊不误伤）。确定性。
+ * 海岸碎渣清理（2026-10-06 用户「海岸边上还有一些零碎的海岸，消除一下」；
+ * v2 同日「还是碎」修正）：对最终整数高度场做连通域过滤——**不含「手绘未翻格」**
+ * 的小块（陆 <K → 归海 −1；海 <K → 归陆 +1）。
+ * v2 修的两个逃逸：① K=4 时恰好 4 格的碎块逃逸 → K=30；② 来源判据 = **手绘原侧
+ * == 当前侧**（护岸微调的翻转格本身是手绘原格，v1 把它当手绘 → 含翻转格的碎渣
+ * 全部逃过；v2 只认「手绘且未翻」= 真手绘小岛/湖泊，含之才保留）。
  */
 function cleanCoastFragments(
   cells: World['cells'],
@@ -49,7 +51,28 @@ function cleanCoastFragments(
   const land = new Uint8Array(n);
   for (const c of cells) land[c.id] = c.height >= 1 ? 1 : 0;
   let fixed = 0;
+  const isHandKept = (i: number, want: number) => handLand[i] === want; // 手绘原侧==当前侧 = 真手绘
+  // 先毛刺翻转（≥5 异侧邻居孤刺，手绘未翻格豁免）——它会造出新碎块，
+  // 所以连通域清理必须放**其后**（顺序颠倒会残留碎块 = 2026-10-06「还是碎」的原因之一）
+  {
+    const seenM = new Uint8Array(n);
+    void seenM;
+    for (const c of cells) land[c.id] = c.height >= 1 ? 1 : 0;
+    const flipM = new Int8Array(n);
+    for (const c of cells) {
+      const i = c.id;
+      if (isHandKept(i, land[i])) continue;
+      let opp = 0;
+      for (const j of c.neighbors) if (land[j] !== land[i]) opp++;
+      if (opp >= 5) flipM[i] = land[i] ? -1 : 1;
+    }
+    for (const c of cells) {
+      if (flipM[c.id] === -1) { cells[c.id].height = -1; cells[c.id].isOcean = true; fixed++; }
+      else if (flipM[c.id] === 1) { cells[c.id].height = 1; cells[c.id].isOcean = false; fixed++; }
+    }
+  }
   // 陆侧：非手绘来源的小陆块 → 海
+  for (const c of cells) land[c.id] = c.height >= 1 ? 1 : 0;
   const seen = new Uint8Array(n);
   for (const c of cells) {
     if (!land[c.id] || seen[c.id]) continue;
@@ -60,7 +83,7 @@ function cleanCoastFragments(
     while (stack.length) {
       const i = stack.pop()!;
       comp.push(i);
-      if (handLand[i]) hasHand = true;
+      if (isHandKept(i, 1)) hasHand = true;
       for (const j of cells[i].neighbors) {
         if (land[j] && !seen[j]) { seen[j] = 1; stack.push(j); }
       }
@@ -69,7 +92,7 @@ function cleanCoastFragments(
       for (const i of comp) { cells[i].height = -1; cells[i].isOcean = true; fixed++; }
     }
   }
-  // 海侧：非手绘来源的小水洼 → 陆（视觉=陆地中的空洞碎渣）
+  // 海侧：非手绘来源的小水洼 → 陆
   for (const c of cells) land[c.id] = c.height >= 1 ? 1 : 0;
   const seen2 = new Uint8Array(n);
   for (const c of cells) {
@@ -81,7 +104,7 @@ function cleanCoastFragments(
     while (stack.length) {
       const i = stack.pop()!;
       comp.push(i);
-      if (!handLand[i]) hasHand = true; // 手绘海格
+      if (isHandKept(i, 0)) hasHand = true;
       for (const j of cells[i].neighbors) {
         if (!land[j] && !seen2[j]) { seen2[j] = 1; stack.push(j); }
       }
@@ -119,10 +142,32 @@ export function refineHeight(world: World, opts: RefineOpts): number {
   // ③ 护岸关（默认）：岸线按形态场在 ±1 格内微调——逐岸格与**最近异侧岸格**比 f：
   //    陆格低于对岸（对岸地形更高）→ 让给海；海格高于对岸 → 并给陆。
   //    用旧 land 快照并行判定（只翻一层、不传播；面积近似保持 =「大致」）。
+  //    **手绘小域（<30 格）整体豁免**（2026-10-06「还是碎」修：翻转圈会吞掉手绘
+  //    小岛并连成大块逃过清理——小岛/小湖锁定，大陆边缘照常微调）。
   if (!opts.protectCoast) {
+    const domSize = new Int32Array(n).fill(0);
+    {
+      const seenD = new Uint8Array(n);
+      for (const c of cells) {
+        if (seenD[c.id]) continue;
+        const comp: number[] = [];
+        const stack = [c.id];
+        seenD[c.id] = 1;
+        while (stack.length) {
+          const i = stack.pop()!;
+          comp.push(i);
+          for (const j of cells[i].neighbors) {
+            if (land[j] === land[i] && !seenD[j]) { seenD[j] = 1; stack.push(j); }
+          }
+        }
+        const sz = comp.length;
+        for (const i of comp) domSize[i] = sz;
+      }
+    }
     const flip = new Int8Array(n); // 1 = 变陆, -1 = 变海
     for (const c of cells) {
       const i = c.id;
+      if (domSize[i] < 30) continue; // 手绘小岛/小湖不参与微调
       let oppMax = -Infinity;
       let hasOpp = false;
       for (const j of c.neighbors) {
@@ -226,7 +271,7 @@ export function refineHeight(world: World, opts: RefineOpts): number {
   // ⑥ 海岸碎渣清理（不含手绘原格的 <4 格连通碎块归并）
   const handLand = new Uint8Array(n);
   for (const c of cells) handLand[c.id] = h0[c.id] >= 1 ? 1 : 0;
-  changed += cleanCoastFragments(cells, handLand, 4);
+  changed += cleanCoastFragments(cells, handLand, 30);
 
   return changed;
 }
